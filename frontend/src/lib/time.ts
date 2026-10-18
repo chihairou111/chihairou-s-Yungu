@@ -23,6 +23,12 @@ export function chinaDateLabel(ms: number): string {
   return `${WEEKDAYS[d.getUTCDay()]} ${d.getUTCDate()}`;
 }
 
+/** "Oct 16, 22:00" in China time. */
+export function chinaDueLabel(ms: number): string {
+  const d = chinaFields(ms);
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${chinaClock(ms)}`;
+}
+
 /** Monday 00:00 China time of the week containing `ms`. */
 export function weekStartOf(ms: number): number {
   const shifted = ms + OFFSET;

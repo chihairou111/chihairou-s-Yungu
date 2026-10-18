@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   chinaClock,
   chinaDateLabel,
+  chinaDueLabel,
   dayIndex,
   formatWeekParam,
   parseWeekParam,
@@ -16,6 +17,11 @@ const oct12 = Date.UTC(2026, 9, 11, 16, 0); // Mon Oct 12 00:00 China
 describe('china time', () => {
   it('chinaClock', () => {
     expect(chinaClock(Date.UTC(2026, 9, 12, 0, 0))).toBe('08:00');
+  });
+  it('chinaDueLabel', () => {
+    expect(chinaDueLabel(Date.UTC(2026, 9, 16, 14, 0))).toBe('Oct 16, 22:00');
+    // 17:30 UTC on Oct 16 is already Oct 17 in China.
+    expect(chinaDueLabel(Date.UTC(2026, 9, 16, 17, 30))).toBe('Oct 17, 01:30');
   });
   it('chinaDateLabel', () => {
     expect(chinaDateLabel(Date.UTC(2026, 9, 12, 0, 0))).toBe('Mon 12');
