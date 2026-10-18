@@ -3,19 +3,7 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import type { Assignment } from '@/lib/types';
 import AssignmentCard from './AssignmentCard';
-
-/** Screen-reader-only text (MUI's sizing would read a bare 1 as 100%). */
-const VISUALLY_HIDDEN = {
-  position: 'absolute',
-  width: '1px',
-  height: '1px',
-  m: '-1px',
-  p: 0,
-  overflow: 'hidden',
-  clip: 'rect(0 0 0 0)',
-  whiteSpace: 'nowrap',
-  border: 0,
-} as const;
+import { VISUALLY_HIDDEN } from './visually-hidden';
 
 interface SubmittedListProps {
   items: Assignment[];

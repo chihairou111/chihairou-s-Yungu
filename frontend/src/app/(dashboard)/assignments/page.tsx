@@ -12,11 +12,16 @@ async function loadAssignments() {
   await io();
   const now = Date.now();
   const weekStart = weekStartOf(now);
-  const [todo, submitted, week] = await Promise.all([data.getTodo(), data.getSubmitted(), data.getWeek(weekStart)]);
-  return { now, todo, submitted, todayClasses: todaysClasses(week, now) };
+  const [todo, submitted, courses, week] = await Promise.all([
+    data.getTodo(),
+    data.getSubmitted(),
+    data.getCourses(),
+    data.getWeek(weekStart),
+  ]);
+  return { now, todo, submitted, courses, todayClasses: todaysClasses(week, now) };
 }
 
 export default async function AssignmentsPage() {
-  const { now, todo, submitted, todayClasses } = await loadAssignments();
-  return <AssignmentsView todo={todo} submitted={submitted} todayClasses={todayClasses} now={now} />;
+  const { now, todo, submitted, courses, todayClasses } = await loadAssignments();
+  return <AssignmentsView todo={todo} submitted={submitted} courses={courses} todayClasses={todayClasses} now={now} />;
 }
