@@ -1,4 +1,5 @@
 import 'server-only';
+import { dayIndex, weekStartOf } from '../time';
 import type { Assignment } from '../types';
 
 const MIN = 60_000;
@@ -96,14 +97,29 @@ export const TIMETABLE: TimetableSlot[] = [
   cls(4, '14:55', '15:35', 'Self Study（System）', 'D413'),
 ];
 
-/** Assignments are defined relative to `now` so every priority column is populated. */
+/** 22:00 China time, `days` China calendar days after the day containing `now` (negative = before). */
+function at22(now: number, days: number): number {
+  const weekStart = weekStartOf(now);
+  return weekStart + (dayIndex(now, weekStart) + days) * DAY + 22 * HOUR;
+}
+
+/** The next 22:00 China time after `now`: always in the future and at most 24 hours away. */
+function next22(now: number): number {
+  const today = at22(now, 0);
+  return today > now ? today : at22(now, 1);
+}
+
+/**
+ * Assignments are defined relative to `now` so every priority column is populated, with due times
+ * snapped to 22:00 China time like real deadlines.
+ */
 export function buildTodo(now: number): Assignment[] {
   return [
     {
       id: 101,
       title: '我的产品，为谁解决什么问题？',
       course: 'EL-AI Create the Future',
-      dueAt: now - 2 * DAY,
+      dueAt: at22(now, -2),
       assignedAt: now - 9 * DAY,
       status: 'To submit',
       estimatedMinutes: 45,
@@ -113,7 +129,7 @@ export function buildTodo(now: number): Assignment[] {
       id: 102,
       title: 'Task 3：开始第一次观察',
       course: 'Product Design I',
-      dueAt: now + 5 * HOUR,
+      dueAt: next22(now),
       assignedAt: now - 3 * DAY,
       status: 'To submit',
       estimatedMinutes: 40,
@@ -123,7 +139,7 @@ export function buildTodo(now: number): Assignment[] {
       id: 103,
       title: '课后任务：做出你的第一版 MVP',
       course: 'EL-AI Create the Future',
-      dueAt: now + 5 * DAY,
+      dueAt: at22(now, 5),
       assignedAt: now - 1 * DAY,
       status: 'To submit',
       estimatedMinutes: 60,
@@ -133,7 +149,7 @@ export function buildTodo(now: number): Assignment[] {
       id: 104,
       title: 'Unit 4 Problem Set',
       course: 'H Algebra 2 I',
-      dueAt: now + 3 * DAY,
+      dueAt: at22(now, 3),
       assignedAt: now - 2 * DAY,
       status: 'To submit',
       estimatedMinutes: 30,
@@ -151,7 +167,7 @@ export function buildSubmitted(now: number): Assignment[] {
     submittedOffsetHours: number,
     estimatedMinutes: number | null,
   ): Assignment => {
-    const dueAt = now - dueDaysAgo * DAY;
+    const dueAt = at22(now, -dueDaysAgo);
     return {
       id,
       title,
