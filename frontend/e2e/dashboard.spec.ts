@@ -28,10 +28,30 @@ test('sign in, browse assignments and calendar, sign out', async ({ page }) => {
   for (const column of ['Overdue', 'Nearly overdue', 'Upcoming']) {
     await expect(page.getByRole('heading', { name: column, exact: true })).toBeVisible();
   }
-  // The real clock decides whether today has classes; the panel shows either its items or its empty state.
-  const today = page.getByRole('region', { name: "Today's classes" });
-  await expect(today.getByRole('heading', { name: "Today's classes" })).toBeVisible();
-  await expect(today.getByText('No classes today').or(today.getByRole('listitem').first())).toBeVisible();
+  // Today's classes is no longer a column: a button on the right edge appears on hover and opens a drawer.
+  await expect(page.getByRole('region', { name: "Today's classes" })).toHaveCount(0);
+  const todayButton = page.getByRole('button', { name: "Today's classes" });
+  await expect(todayButton).toHaveCSS('opacity', '0');
+  const viewport = page.viewportSize()!;
+  await page.mouse.move(viewport.width - 20, viewport.height / 2);
+  await expect(todayButton).toHaveCSS('opacity', '1');
+  await todayButton.click();
+  const drawer = page.getByRole('dialog', { name: "Today's classes" });
+  // The real clock decides whether today has classes; the drawer shows either its items or its empty state.
+  await expect(drawer.getByText('No classes today').or(drawer.getByRole('listitem').first())).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(drawer).toBeHidden();
+
+  // By course: Classroom-style course cards, with idle courses below "No work due".
+  await page.getByRole('button', { name: 'By course' }).click();
+  await expect(page).toHaveURL(/\?view=course$/);
+  await expect(page.getByRole('article', { name: 'Product Design I' })).toBeVisible();
+  const idle = page.getByRole('region', { name: 'No work due' });
+  await expect(idle.getByRole('article', { name: 'Chinese I' })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'By course' })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'By priority' }).click();
+  await expect(page).toHaveURL(/\/assignments$/);
 
   // The session cookie survives a reload.
   await page.reload();
@@ -42,7 +62,7 @@ test('sign in, browse assignments and calendar, sign out', async ({ page }) => {
   await expect(page).toHaveURL(/\?tab=submitted$/);
   await expect(page.getByText('Submitted late').first()).toBeVisible();
 
-  // Hovering the pill reveals its labels; the link goes to the calendar.
+  // Hovering the rail reveals its labels; the link goes to the calendar.
   const nav = page.getByRole('navigation', { name: 'Main' });
   await nav.hover();
   const calendarLink = nav.getByRole('link', { name: 'Calendar' });
@@ -72,11 +92,16 @@ test('sign in, browse assignments and calendar, sign out', async ({ page }) => {
 });
 
 test.describe('phone width', () => {
-  test.use({ viewport: { width: 390, height: 844 } });
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
   test('no horizontal page scroll on assignments or calendar', async ({ page }) => {
     await signIn(page);
     await expect(page.getByRole('heading', { name: 'Overdue', exact: true })).toBeVisible();
+    await expectNoHorizontalScroll(page);
+    // No hover on a phone, so the Today's classes button is always shown.
+    await expect(page.getByRole('button', { name: "Today's classes" })).toHaveCSS('opacity', '1');
+    await page.goto('/assignments?view=course');
+    await expect(page.getByRole('article', { name: 'Chinese I' })).toBeVisible();
     await expectNoHorizontalScroll(page);
     await page.goto('/assignments?tab=submitted');
     await expect(page.getByText('Submitted late').first()).toBeVisible();

@@ -65,6 +65,7 @@ export default function AssignmentsView({ todo, submitted, courses, todayClasses
             <ToggleButtonGroup
               exclusive
               size="small"
+              color="primary"
               value={view}
               onChange={(_, next: ViewKey | null) => next && go(tab, next)}
               aria-label="Group to-do work"
