@@ -29,6 +29,17 @@ export function chinaDueLabel(ms: number): string {
   return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${chinaClock(ms)}`;
 }
 
+/** "Fri, Oct 23" in China time. */
+export function chinaShortDate(ms: number): string {
+  const d = chinaFields(ms);
+  return `${WEEKDAYS[d.getUTCDay()]}, ${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
+}
+
+/** China calendar day number (days since the epoch on the China wall clock); differences count date changes. */
+export function chinaDayNumber(ms: number): number {
+  return Math.floor((ms + OFFSET) / DAY);
+}
+
 /** Monday 00:00 China time of the week containing `ms`. */
 export function weekStartOf(ms: number): number {
   const shifted = ms + OFFSET;

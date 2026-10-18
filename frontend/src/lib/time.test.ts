@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   chinaClock,
   chinaDateLabel,
+  chinaDayNumber,
   chinaDueLabel,
+  chinaShortDate,
   dayIndex,
   formatWeekParam,
   parseWeekParam,
@@ -54,5 +56,16 @@ describe('china time', () => {
   });
   it('dayIndex Friday -> 4', () => {
     expect(dayIndex(Date.UTC(2026, 9, 16, 1, 0), oct12)).toBe(4);
+  });
+  it('chinaShortDate', () => {
+    expect(chinaShortDate(Date.UTC(2026, 9, 23, 14, 0))).toBe('Fri, Oct 23');
+    // 17:30 UTC on Oct 16 is already Sat Oct 17 in China.
+    expect(chinaShortDate(Date.UTC(2026, 9, 16, 17, 30))).toBe('Sat, Oct 17');
+  });
+  it('chinaDayNumber counts China calendar days, not host ones', () => {
+    const sun2330 = Date.UTC(2026, 9, 18, 15, 30); // Sun Oct 18 23:30 China
+    const mon0030 = Date.UTC(2026, 9, 18, 16, 30); // Mon Oct 19 00:30 China, same LA date
+    expect(chinaDayNumber(mon0030) - chinaDayNumber(sun2330)).toBe(1);
+    expect(chinaDayNumber(oct12) - chinaDayNumber(oct12 + 23 * 3600_000)).toBe(0);
   });
 });
