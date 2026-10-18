@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { COURSE_COLORS, contrastRatio, readableTextOn } from './colors';
+import { COURSE_COLORS, contrastRatio, courseColorHex, readableTextOn } from './colors';
 
 const DARK = 'rgba(0,0,0,0.87)';
 
@@ -53,5 +53,18 @@ describe('readableTextOn', () => {
     expect(readableTextOn('#fff')).toBe(DARK);
     expect(readableTextOn('#000')).toBe('#fff');
     expect(readableTextOn('#3f51b5')).toBe('#fff');
+  });
+});
+
+describe('courseColorHex', () => {
+  it('maps a palette name to its hex', () => {
+    expect(courseColorHex('Banana')).toBe('#F6BF26');
+  });
+
+  it('falls back to Graphite for a name outside the palette, so text color never fails', () => {
+    for (const bad of ['Chartreuse', 'toString', '', '__proto__']) {
+      expect(courseColorHex(bad), bad).toBe('#616161');
+      expect(() => readableTextOn(courseColorHex(bad))).not.toThrow();
+    }
   });
 });

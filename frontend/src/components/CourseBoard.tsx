@@ -4,7 +4,7 @@ import Card from '@mui/material/Card';
 import Divider from '@mui/material/Divider';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import { COURSE_COLORS, readableTextOn } from '@/lib/colors';
+import { courseColorHex, readableTextOn } from '@/lib/colors';
 import { dueStatus, groupByCourse, type DueTone } from '@/lib/courses';
 import { chinaClock } from '@/lib/time';
 import type { Assignment, Course } from '@/lib/types';
@@ -91,7 +91,7 @@ export default function CourseBoard({ courses, items, now }: CourseBoardProps) {
 
 /** MD2 card: a header band in the course color with the course name, then a body. */
 function CourseCard({ course, children }: { course: Course; children: ReactNode }) {
-  const bg = COURSE_COLORS[course.color];
+  const bg = courseColorHex(course.color);
   const headingId = `course-${course.id}`;
   return (
     <Card component="article" elevation={1} aria-labelledby={headingId} sx={{ display: 'flex', flexDirection: 'column' }}>

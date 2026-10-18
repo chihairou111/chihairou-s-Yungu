@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { ClassEvent } from '@/lib/types';
 import TodayDrawer, { shouldRevealEdgeButton } from './TodayDrawer';
 
@@ -69,6 +69,16 @@ describe('shouldRevealEdgeButton', () => {
 });
 
 describe('TodayDrawer edge reveal', () => {
+  afterEach(() => {
+    // Drop the per-test stub so jsdom's own clientWidth getter applies again.
+    delete (document.documentElement as { clientWidth?: number }).clientWidth;
+  });
+
+  /** A classic scrollbar: the layout viewport is narrower than window.innerWidth. */
+  function stubClientWidth(width: number) {
+    Object.defineProperty(document.documentElement, 'clientWidth', { value: width, configurable: true });
+  }
+
   const nextFrame = () => act(() => new Promise((r) => requestAnimationFrame(() => r(undefined))));
   const button = () => screen.getByRole('button', { name: "Today's classes" });
 
@@ -82,6 +92,7 @@ describe('TodayDrawer edge reveal', () => {
     render(<TodayDrawer events={classes} />);
     expect(button()).toHaveAttribute('data-revealed', 'false');
 
+    stubClientWidth(window.innerWidth);
     fireEvent.pointerMove(window, { clientX: window.innerWidth - 20, clientY: 400 });
     await nextFrame();
     expect(button()).toHaveAttribute('data-revealed', 'true');
@@ -96,7 +107,34 @@ describe('TodayDrawer edge reveal', () => {
     expect(button()).toHaveAttribute('data-revealed', 'false');
   });
 
+  it('measures the zone from the layout viewport, not past a classic scrollbar', async () => {
+    stubClientWidth(window.innerWidth - 17);
+    render(<TodayDrawer events={classes} />);
+    // 50px from the content edge, 67px from the window edge: inside the zone only if the scrollbar is excluded.
+    fireEvent.pointerMove(window, { clientX: window.innerWidth - 17 - 50, clientY: 400 });
+    await nextFrame();
+    expect(button()).toHaveAttribute('data-revealed', 'true');
+  });
+
+  it('stays revealed while the pointer is over the button itself', async () => {
+    stubClientWidth(window.innerWidth);
+    render(<TodayDrawer events={classes} />);
+    fireEvent.pointerMove(button(), { clientX: 0, clientY: 400 });
+    await nextFrame();
+    expect(button()).toHaveAttribute('data-revealed', 'true');
+  });
+
+  it('stays revealed while it has focus, e.g. after the drawer closes by mouse', async () => {
+    render(<TodayDrawer events={classes} />);
+    expect(button()).toHaveAttribute('data-focused', 'false');
+    act(() => button().focus());
+    expect(button()).toHaveAttribute('data-focused', 'true');
+    act(() => button().blur());
+    expect(button()).toHaveAttribute('data-focused', 'false');
+  });
+
   it('does not reveal over the app bar', async () => {
+    stubClientWidth(window.innerWidth);
     render(<TodayDrawer events={classes} />);
     fireEvent.pointerMove(window, { clientX: window.innerWidth - 20, clientY: 10 });
     await nextFrame();

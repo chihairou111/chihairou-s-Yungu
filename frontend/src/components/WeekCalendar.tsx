@@ -9,7 +9,7 @@ import Typography from '@mui/material/Typography';
 import ChevronLeft from '@mui/icons-material/ChevronLeft';
 import ChevronRight from '@mui/icons-material/ChevronRight';
 import { chinaClock, chinaDateLabel, dayIndex, formatWeekParam, shiftWeek, weekRangeLabel } from '@/lib/time';
-import { COURSE_COLORS, readableTextOn } from '@/lib/colors';
+import { COURSE_COLORS, courseColorHex, readableTextOn } from '@/lib/colors';
 import type { ClassEvent, Course } from '@/lib/types';
 
 const MIN = 60_000;
@@ -93,7 +93,10 @@ export default function WeekCalendar({ weekStart, events, courses, now }: WeekCa
   const lastHour = Math.ceil(Math.max(...classes.map((e) => minuteOfDay(e.end, weekStart))) / 60);
   const hours = classes.length > 0 ? Array.from({ length: lastHour - firstHour }, (_, i) => firstHour + i) : [];
   const bodyPx = hours.length * HOUR_PX;
-  const colorOf = (e: ClassEvent) => COURSE_COLORS[courses.find((c) => c.id === e.courseId)?.color ?? DEFAULT_COLOR];
+  const colorOf = (e: ClassEvent) => {
+    const course = courses.find((c) => c.id === e.courseId);
+    return course ? courseColorHex(course.color) : COURSE_COLORS[DEFAULT_COLOR];
+  };
 
   return (
     <>

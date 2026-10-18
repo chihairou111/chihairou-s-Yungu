@@ -55,6 +55,13 @@ describe('CourseBoard', () => {
     expect(blueberry.style.getPropertyValue('--course-fg')).toBe('#fff');
   });
 
+  it('uses Graphite for a course color the palette does not know', () => {
+    const odd = { id: 7, name: 'Robotics', color: 'Chartreuse' } as unknown as Course;
+    render(<CourseBoard courses={[odd]} items={[]} now={NOW} />);
+    const band = within(screen.getByRole('article', { name: 'Robotics' })).getByRole('heading').parentElement!;
+    expect(band.style.getPropertyValue('--course-bg')).toBe('#616161');
+  });
+
   it('omits the "No work due" section when every course has work', () => {
     render(<CourseBoard courses={COURSES.slice(1, 3)} items={items.slice(1, 3)} now={NOW} />);
     expect(screen.queryByRole('region', { name: 'No work due' })).not.toBeInTheDocument();

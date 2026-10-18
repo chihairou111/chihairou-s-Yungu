@@ -15,6 +15,11 @@ export const COURSE_COLORS: Record<CourseColor, string> = {
   Graphite: '#616161',
 };
 
+/** Hex for a course color name; Graphite for anything outside the palette (e.g. a new service value). */
+export function courseColorHex(color: string): string {
+  return Object.hasOwn(COURSE_COLORS, color) ? COURSE_COLORS[color as CourseColor] : COURSE_COLORS.Graphite;
+}
+
 const WHITE = '#fff';
 /** Material "high-emphasis" text on light surfaces. */
 const DARK = 'rgba(0,0,0,0.87)';

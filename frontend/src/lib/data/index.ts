@@ -14,6 +14,9 @@ export type SignInResult = { ok: true; displayName: string; token: string } | { 
  * token argument on purpose: the later HTTP implementation runs only on the server and reads the
  * session token itself via `cookies()` from `next/headers` (decoding it with `decodeSession`), then
  * sends it to the service, so pages and components never handle credentials or tokens.
+ *
+ * The service must send `courseId` on every assignment and class (null only for routine items) and
+ * a Google Calendar palette name (`CourseColor`) on every course; unknown names render as Graphite.
  */
 export interface YunguData {
   getTodo(): Promise<Assignment[]>;

@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import Divider from '@mui/material/Divider';
 import Drawer from '@mui/material/Drawer';
 import Fab from '@mui/material/Fab';
@@ -28,16 +28,20 @@ export function shouldRevealEdgeButton(x: number, y: number, viewportWidth: numb
 
 /**
  * Watches the pointer passively (a window listener, throttled to one check per frame), so no
- * element covers the page. True while the pointer is near the right edge.
+ * element covers the page. True while the pointer is near the right edge of the layout viewport
+ * (`clientWidth` excludes a classic scrollbar, unlike `innerWidth`) or over the button itself.
  */
-function useEdgeReveal(): boolean {
+function useEdgeReveal(buttonRef: RefObject<HTMLElement | null>): boolean {
   const [near, setNear] = useState(false);
   useEffect(() => {
     let frame = 0;
     let last: PointerEvent | null = null;
     const check = () => {
       frame = 0;
-      if (last) setNear(shouldRevealEdgeButton(last.clientX, last.clientY, window.innerWidth, APP_BAR_PX));
+      if (!last) return;
+      const overButton = last.target instanceof Node && !!buttonRef.current?.contains(last.target);
+      const width = document.documentElement.clientWidth;
+      setNear(overButton || shouldRevealEdgeButton(last.clientX, last.clientY, width, APP_BAR_PX));
     };
     const onMove = (e: PointerEvent) => {
       last = e;
@@ -57,7 +61,7 @@ function useEdgeReveal(): boolean {
       root.removeEventListener('pointerleave', hide);
       window.removeEventListener('blur', hide);
     };
-  }, []);
+  }, [buttonRef]);
   return near;
 }
 
@@ -68,12 +72,15 @@ interface TodayDrawerProps {
 
 /**
  * A round button that opens a temporary right drawer listing today's classes. On wide pointer
- * screens it sits mid-right and appears when the pointer nears the right edge, on keyboard focus,
+ * screens it sits mid-right and appears when the pointer nears the right edge, while it has focus,
  * or while the drawer is open; on touch screens and narrow windows it is always shown bottom-right.
  */
 export default function TodayDrawer({ events }: TodayDrawerProps) {
   const [open, setOpen] = useState(false);
-  const near = useEdgeReveal();
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const near = useEdgeReveal(buttonRef);
+  // Any focus keeps it shown, including the focus MUI restores after a mouse close of the drawer.
+  const [focused, setFocused] = useState(false);
 
   return (
     <>
@@ -83,7 +90,11 @@ export default function TodayDrawer({ events }: TodayDrawerProps) {
         aria-label="Today's classes"
         aria-expanded={open}
         aria-controls={open ? DRAWER_ID : undefined}
+        ref={buttonRef}
         data-revealed={near}
+        data-focused={focused}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         onClick={() => setOpen(true)}
         sx={(theme) => ({
           position: 'fixed',
@@ -94,7 +105,7 @@ export default function TodayDrawer({ events }: TodayDrawerProps) {
           opacity: 0,
           pointerEvents: 'none',
           transition: `opacity 160ms ${EASE}`,
-          '&[data-revealed="true"], &.Mui-focusVisible, &[aria-expanded="true"]': { opacity: 1, pointerEvents: 'auto' },
+          '&[data-revealed="true"], &[data-focused="true"], &[aria-expanded="true"]': { opacity: 1, pointerEvents: 'auto' },
           // Material's standard FAB spot, always visible, clear of the safe area.
           [BOTTOM_FAB_MEDIA]: {
             top: 'auto',

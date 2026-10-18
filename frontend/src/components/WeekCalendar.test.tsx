@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { COURSE_COLORS } from '@/lib/colors';
 import { data } from '@/lib/data';
 import { parseWeekParam } from '@/lib/time';
-import type { ClassEvent } from '@/lib/types';
+import type { ClassEvent, Course } from '@/lib/types';
 import WeekCalendar, { layoutDay } from './WeekCalendar';
 import { DAY, HOUR, NOW } from './test-fixtures';
 
@@ -128,6 +128,12 @@ describe('WeekCalendar course colors', () => {
     const business = courses.find((c) => c.name.startsWith('CL Business'))!;
     await renderFixtureWeek();
     expect(blockFor('Mon 12', 'CL Business I').style.getPropertyValue('--course-bg')).toBe(COURSE_COLORS[business.color]);
+  });
+
+  it('uses Graphite for a course color the palette does not know', () => {
+    const odd = { id: 1, name: 'Assembly', color: 'Chartreuse' } as unknown as Course;
+    render(<WeekCalendar weekStart={WEEK} courses={[odd]} events={[cls('Assembly', 0, 480, 540)]} now={NOW} />);
+    expect(screen.getByRole('listitem').style.getPropertyValue('--course-bg')).toBe('#616161');
   });
 
   it('falls back to Peacock for a class with no known course', () => {
