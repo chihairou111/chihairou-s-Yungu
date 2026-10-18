@@ -13,7 +13,7 @@ const MIN = 60_000;
 /** A class at China wall-clock `hh:mm` on weekday `d` (0 = Monday) of WEEK. */
 function cls(name: string, d: number, startMin: number, endMin: number, room: string | null = 'D419'): ClassEvent {
   const day = WEEK + d * DAY;
-  return { name, room, start: day + startMin * MIN, end: day + endMin * MIN, isClass: true };
+  return { name, room, start: day + startMin * MIN, end: day + endMin * MIN, isClass: true, courseId: 1 };
 }
 
 async function renderFixtureWeek(now = NOW) {

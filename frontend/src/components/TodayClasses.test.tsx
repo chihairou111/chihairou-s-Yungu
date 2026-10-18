@@ -8,9 +8,9 @@ const MIN = 60_000;
 const MONDAY = Date.UTC(2026, 9, 18, 16, 0); // Mon Oct 19 00:00 China
 
 const classes: ClassEvent[] = [
-  { name: 'Chinese I', room: 'D419', start: MONDAY + 8 * HOUR, end: MONDAY + 8 * HOUR + 40 * MIN, isClass: true },
-  { name: 'CL Business I', room: 'D405', start: MONDAY + 8.75 * HOUR, end: MONDAY + 9.25 * HOUR + 10 * MIN, isClass: true },
-  { name: 'Self Study', room: null, start: MONDAY + 14 * HOUR + 55 * MIN, end: MONDAY + 15.5 * HOUR + 5 * MIN, isClass: true },
+  { name: 'Chinese I', room: 'D419', start: MONDAY + 8 * HOUR, end: MONDAY + 8 * HOUR + 40 * MIN, isClass: true, courseId: 1 },
+  { name: 'CL Business I', room: 'D405', start: MONDAY + 8.75 * HOUR, end: MONDAY + 9.25 * HOUR + 10 * MIN, isClass: true, courseId: 2 },
+  { name: 'Self Study', room: null, start: MONDAY + 14 * HOUR + 55 * MIN, end: MONDAY + 15.5 * HOUR + 5 * MIN, isClass: true, courseId: 8 },
 ];
 
 describe('TodayClasses', () => {

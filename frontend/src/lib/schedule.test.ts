@@ -14,6 +14,7 @@ const ev = (name: string, startMs: number, isClass = true, room: string | null =
   start: startMs,
   end: startMs + 40 * MIN,
   isClass,
+  courseId: isClass ? 1 : null,
 });
 
 describe('todaysClasses', () => {

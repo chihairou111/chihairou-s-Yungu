@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { COURSE_COLORS } from '../colors';
 import { groupTodo, isSubmittedLate } from '../priority';
 import { dayIndex, weekStartOf } from '../time';
 import { BLANK_CREDENTIALS_ERROR, data } from './index';
@@ -63,6 +64,41 @@ describe('mock data', () => {
     expect(chinese?.start).toBe(ws + 8 * 3600_000);
     expect(chinese?.end).toBe(ws + 8 * 3600_000 + 40 * 60_000);
     expect(chinese?.room).toBe('D419');
+  });
+
+  it('getCourses lists each course once with a distinct Google Calendar color', async () => {
+    const courses = await data.getCourses();
+    expect(courses.length).toBeGreaterThan(0);
+    expect(new Set(courses.map((c) => c.id)).size).toBe(courses.length);
+    expect(new Set(courses.map((c) => c.name)).size).toBe(courses.length);
+    expect(new Set(courses.map((c) => c.color)).size).toBe(courses.length);
+    for (const c of courses) expect(Object.keys(COURSE_COLORS)).toContain(c.color);
+  });
+
+  it('every assignment and class resolves to a course, and every course is referenced', async () => {
+    const courses = await data.getCourses();
+    const ids = new Set(courses.map((c) => c.id));
+    const ws = weekStartOf(Date.now());
+    const work = [...(await data.getTodo()), ...(await data.getSubmitted())];
+    const classes = (await data.getWeek(ws)).filter((e) => e.isClass);
+    for (const a of work) expect(ids.has(a.courseId), a.title).toBe(true);
+    for (const e of classes) expect(e.courseId !== null && ids.has(e.courseId), e.name).toBe(true);
+    const used = new Set([...work.map((a) => a.courseId), ...classes.map((e) => e.courseId)]);
+    expect([...ids].filter((id) => !used.has(id))).toEqual([]);
+  });
+
+  it('maps the timetable and assignment names of CL Business to one course', async () => {
+    const courses = await data.getCourses();
+    const ws = weekStartOf(Date.now());
+    const business = (await data.getWeek(ws)).find((e) => e.name === 'CL Business I')!;
+    const caseStudy = (await data.getSubmitted()).find((a) => a.course === 'CL Business with Personal Finance I')!;
+    expect(business.courseId).toBe(caseStudy.courseId);
+    expect(courses.filter((c) => c.name.startsWith('CL Business'))).toHaveLength(1);
+  });
+
+  it('gives routine items no course', async () => {
+    const routines = (await data.getWeek(weekStartOf(Date.now()))).filter((e) => !e.isClass);
+    expect(routines.every((e) => e.courseId === null)).toBe(true);
   });
 
   it('signIn rejects blank credentials', async () => {

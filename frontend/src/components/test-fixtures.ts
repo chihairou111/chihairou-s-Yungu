@@ -12,6 +12,7 @@ export function todo(title: string, offsetMs: number, extra: Partial<Assignment>
     id: nextId++,
     title,
     course: 'Product Design I',
+    courseId: 10,
     dueAt: NOW + offsetMs,
     assignedAt: NOW - 7 * DAY,
     status: 'To submit',

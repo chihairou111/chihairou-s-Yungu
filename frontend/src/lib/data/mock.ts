@@ -2,7 +2,7 @@ import 'server-only';
 import { weekStartOf } from '../time';
 import type { ClassEvent } from '../types';
 import type { YunguData } from './index';
-import { TIMETABLE, buildSubmitted, buildTodo } from './fixtures';
+import { TIMETABLE, buildCourses, buildSubmitted, buildTodo } from './fixtures';
 import { BLANK_CREDENTIALS_ERROR } from './messages';
 
 const MIN = 60_000;
@@ -24,6 +24,9 @@ export const mockData: YunguData = {
   async getSubmitted() {
     return buildSubmitted(Date.now());
   },
+  async getCourses() {
+    return buildCourses();
+  },
   async getWeek(weekStart) {
     const monday = weekStartOf(weekStart);
     const events: ClassEvent[] = TIMETABLE.map((slot) => ({
@@ -32,6 +35,7 @@ export const mockData: YunguData = {
       start: monday + slot.weekday * DAY + clockToMs(slot.start),
       end: monday + slot.weekday * DAY + clockToMs(slot.end),
       isClass: slot.isClass,
+      courseId: slot.courseId,
     }));
     return events.sort((a, b) => a.start - b.start);
   },

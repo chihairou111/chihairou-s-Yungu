@@ -1,5 +1,5 @@
 import 'server-only';
-import type { Assignment, ClassEvent } from '../types';
+import type { Assignment, ClassEvent, Course } from '../types';
 import { mockData } from './mock';
 
 export { BLANK_CREDENTIALS_ERROR } from './messages';
@@ -19,6 +19,8 @@ export interface YunguData {
   getTodo(): Promise<Assignment[]>;
   getSubmitted(): Promise<Assignment[]>;
   getWeek(weekStart: number): Promise<ClassEvent[]>;
+  /** Every course the student takes, each with its display color. */
+  getCourses(): Promise<Course[]>;
   signIn(loginId: string, password: string): Promise<SignInResult>;
   signOut(token: string): Promise<void>;
 }

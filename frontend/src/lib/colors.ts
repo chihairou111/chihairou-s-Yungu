@@ -1,0 +1,56 @@
+import type { CourseColor } from './types';
+
+/** Google Calendar event colors; every course gets one, shared by the calendar and course cards. */
+export const COURSE_COLORS: Record<CourseColor, string> = {
+  Tomato: '#D50000',
+  Flamingo: '#E67C73',
+  Tangerine: '#F4511E',
+  Banana: '#F6BF26',
+  Sage: '#33B679',
+  Basil: '#0B8043',
+  Peacock: '#039BE5',
+  Blueberry: '#3F51B5',
+  Lavender: '#7986CB',
+  Grape: '#8E24AA',
+  Graphite: '#616161',
+};
+
+const WHITE = '#fff';
+/** Material "high-emphasis" text on light surfaces. */
+const DARK = 'rgba(0,0,0,0.87)';
+const DARK_ALPHA = 0.87;
+
+type Rgb = [number, number, number];
+
+function parseHex(hex: string): Rgb {
+  let h = hex.replace('#', '');
+  if (h.length === 3) h = [...h].map((c) => c + c).join('');
+  return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)) as Rgb;
+}
+
+/** WCAG relative luminance of an sRGB color. */
+function luminance([r, g, b]: Rgb): number {
+  const lin = (c: number) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+
+function ratio(a: Rgb, b: Rgb): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/** WCAG contrast ratio between two hex colors (1–21). */
+export function contrastRatio(a: string, b: string): number {
+  return ratio(parseHex(a), parseHex(b));
+}
+
+/** White or Material near-black, whichever reads better on `hex` (WCAG contrast). */
+export function readableTextOn(hex: string): string {
+  const bg = parseHex(hex);
+  // 87% black composited over the background.
+  const dark = bg.map((c) => Math.round(c * (1 - DARK_ALPHA))) as Rgb;
+  return ratio([255, 255, 255], bg) >= ratio(dark, bg) ? WHITE : DARK;
+}

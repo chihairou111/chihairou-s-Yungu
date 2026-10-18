@@ -12,6 +12,7 @@ function make(over: Partial<Assignment> = {}): Assignment {
     id: 1,
     title: 'T',
     course: 'C',
+    courseId: 1,
     dueAt: now + 3 * D,
     assignedAt: now - D,
     status: 'To submit',
