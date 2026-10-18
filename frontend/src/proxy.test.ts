@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { encodeSession } from '@/lib/session-cookie';
 import { routeFor } from './proxy';
 
-const valid = encodeSession('Bruce Zheng');
+const valid = encodeSession('Bruce Zheng', 'tok');
 
 describe('routeFor', () => {
   it('sends signed-out visitors of protected pages to /login', () => {

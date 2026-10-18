@@ -1,3 +1,4 @@
+import 'server-only';
 import type { Assignment } from '../types';
 
 const MIN = 60_000;

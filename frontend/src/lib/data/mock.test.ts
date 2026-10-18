@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { groupTodo, isSubmittedLate } from '../priority';
 import { dayIndex, weekStartOf } from '../time';
-import { data } from './index';
+import { BLANK_CREDENTIALS_ERROR, data } from './index';
 
 const DAY = 24 * 3600_000;
 
@@ -68,10 +68,19 @@ describe('mock data', () => {
   it('signIn rejects blank credentials', async () => {
     expect((await data.signIn('', 'x')).ok).toBe(false);
     expect((await data.signIn('  ', '  ')).ok).toBe(false);
-    expect(await data.signIn('x', '')).toEqual({ ok: false, error: 'Enter your student ID and password.' });
+    expect(await data.signIn('x', '')).toEqual({ ok: false, error: BLANK_CREDENTIALS_ERROR });
   });
 
-  it('signIn accepts any non-empty credentials', async () => {
-    expect(await data.signIn('s123', 'pw')).toEqual({ ok: true, displayName: 'Bruce Zheng' });
+  it('signIn accepts any non-empty credentials and mints a fresh session token', async () => {
+    const first = await data.signIn('s123', 'pw');
+    const second = await data.signIn('s123', 'pw');
+    expect(first).toEqual({ ok: true, displayName: 'Bruce Zheng', token: expect.any(String) });
+    if (!first.ok || !second.ok) throw new Error('expected sign-in to succeed');
+    expect(first.token.length).toBeGreaterThan(0);
+    expect(second.token).not.toBe(first.token);
+  });
+
+  it('signOut resolves for any token', async () => {
+    await expect(data.signOut('any-token')).resolves.toBeUndefined();
   });
 });
