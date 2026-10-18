@@ -2,7 +2,8 @@ import type { Metadata } from 'next';
 import { io } from 'next/cache';
 import AssignmentsView from '@/components/AssignmentsView';
 import { data } from '@/lib/data';
-import { dayIndex, weekStartOf } from '@/lib/time';
+import { todaysClasses } from '@/lib/schedule';
+import { weekStartOf } from '@/lib/time';
 
 export const metadata: Metadata = { title: 'Assignments' };
 
@@ -12,9 +13,7 @@ async function loadAssignments() {
   const now = Date.now();
   const weekStart = weekStartOf(now);
   const [todo, submitted, week] = await Promise.all([data.getTodo(), data.getSubmitted(), data.getWeek(weekStart)]);
-  const today = dayIndex(now, weekStart);
-  const todayClasses = week.filter((e) => e.isClass && dayIndex(e.start, weekStart) === today);
-  return { now, todo, submitted, todayClasses };
+  return { now, todo, submitted, todayClasses: todaysClasses(week, now) };
 }
 
 export default async function AssignmentsPage() {

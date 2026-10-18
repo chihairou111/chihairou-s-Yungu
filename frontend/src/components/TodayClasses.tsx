@@ -8,10 +8,8 @@ interface TodayClassesProps {
   events: ClassEvent[];
 }
 
-/** Today's classes in time order: name, time range, room. */
-export default function TodayClasses({ events }: TodayClassesProps) {
-  const classes = events.filter((e) => e.isClass).sort((a, b) => a.start - b.start);
-
+/** Renders today's classes as given (select and order them with `todaysClasses`): name, time range, room. */
+export default function TodayClasses({ events: classes }: TodayClassesProps) {
   return (
     <Box component="section" aria-labelledby="today-classes">
       <Typography id="today-classes" variant="h3" component="h2" sx={{ mb: 1.5, minHeight: 28, display: 'flex', alignItems: 'center' }}>
