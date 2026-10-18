@@ -1,5 +1,6 @@
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { COURSE_COLORS } from '@/lib/colors';
 import { data } from '@/lib/data';
 import { parseWeekParam } from '@/lib/time';
 import type { ClassEvent } from '@/lib/types';
@@ -17,8 +18,16 @@ function cls(name: string, d: number, startMin: number, endMin: number, room: st
 }
 
 async function renderFixtureWeek(now = NOW) {
-  const events = await data.getWeek(WEEK);
-  render(<WeekCalendar weekStart={WEEK} events={events} now={now} />);
+  const [events, courses] = await Promise.all([data.getWeek(WEEK), data.getCourses()]);
+  render(<WeekCalendar weekStart={WEEK} events={events} courses={courses} now={now} />);
+}
+
+function blockFor(day: string, name: string): HTMLElement {
+  const block = within(screen.getByRole('region', { name: day }))
+    .getAllByRole('listitem')
+    .find((li) => li.textContent?.startsWith(name));
+  if (!block) throw new Error(`no ${name} on ${day}`);
+  return block;
 }
 
 describe('WeekCalendar', () => {
@@ -52,25 +61,25 @@ describe('WeekCalendar', () => {
   });
 
   it('shows a weekend day that has a class', () => {
-    render(<WeekCalendar weekStart={WEEK} events={[cls('Make-up Lab', 5, 9 * 60, 10 * 60)]} now={NOW} />);
+    render(<WeekCalendar weekStart={WEEK} courses={[]} events={[cls('Make-up Lab', 5, 9 * 60, 10 * 60)]} now={NOW} />);
     expect(screen.getByRole('region', { name: 'Sat 17' })).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Sun 18' })).not.toBeInTheDocument();
   });
 
   it('omits the room when it is missing', () => {
-    render(<WeekCalendar weekStart={WEEK} events={[cls('Assembly', 0, 8 * 60, 9 * 60, null)]} now={NOW} />);
+    render(<WeekCalendar weekStart={WEEK} courses={[]} events={[cls('Assembly', 0, 8 * 60, 9 * 60, null)]} now={NOW} />);
     expect(screen.getByRole('listitem').textContent).toBe('Assembly08:00–09:00');
   });
 
   it('links to the previous, next and current week', () => {
-    render(<WeekCalendar weekStart={WEEK} events={[]} now={NOW} />);
+    render(<WeekCalendar weekStart={WEEK} courses={[]} events={[]} now={NOW} />);
     expect(screen.getByRole('link', { name: 'Next week' })).toHaveAttribute('href', '/calendar?week=2026-10-19');
     expect(screen.getByRole('link', { name: 'Previous week' })).toHaveAttribute('href', '/calendar?week=2026-10-05');
     expect(screen.getByRole('link', { name: 'Today' })).toHaveAttribute('href', '/calendar');
   });
 
   it('shows the visible range', () => {
-    render(<WeekCalendar weekStart={WEEK} events={[]} now={NOW} />);
+    render(<WeekCalendar weekStart={WEEK} courses={[]} events={[]} now={NOW} />);
     expect(screen.getByRole('heading', { name: 'Oct 12 – 18, 2026' })).toBeInTheDocument();
   });
 
@@ -90,16 +99,40 @@ describe('WeekCalendar', () => {
 
   it('keeps same-named classes at the same time apart', () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
-    render(<WeekCalendar weekStart={WEEK} events={[cls('Study hall', 0, 480, 520, 'D101'), cls('Study hall', 0, 480, 520, 'D102')]} now={NOW} />);
+    render(<WeekCalendar weekStart={WEEK} courses={[]} events={[cls('Study hall', 0, 480, 520, 'D101'), cls('Study hall', 0, 480, 520, 'D102')]} now={NOW} />);
     expect(screen.getAllByRole('listitem')).toHaveLength(2);
     expect(errors).not.toHaveBeenCalled();
     errors.mockRestore();
   });
 
   it('says so when the week has no classes', () => {
-    render(<WeekCalendar weekStart={WEEK} events={[]} now={NOW} />);
+    render(<WeekCalendar weekStart={WEEK} courses={[]} events={[]} now={NOW} />);
     expect(screen.getByText('No classes this week')).toBeInTheDocument();
     expect(screen.queryByRole('listitem')).not.toBeInTheDocument();
+  });
+});
+
+describe('WeekCalendar course colors', () => {
+  it('fills each class with its course color and readable text', async () => {
+    await renderFixtureWeek();
+    const chinese = blockFor('Mon 12', 'Chinese I'); // Tomato
+    expect(chinese.style.getPropertyValue('--course-bg')).toBe('#D50000');
+    expect(chinese.style.getPropertyValue('--course-fg')).toBe('#fff');
+    const design = blockFor('Wed 14', 'Product Design I'); // Banana
+    expect(design.style.getPropertyValue('--course-bg')).toBe('#F6BF26');
+    expect(design.style.getPropertyValue('--course-fg')).toBe('rgba(0,0,0,0.87)');
+  });
+
+  it('colors the timetable\'s "CL Business I" like its course', async () => {
+    const courses = await data.getCourses();
+    const business = courses.find((c) => c.name.startsWith('CL Business'))!;
+    await renderFixtureWeek();
+    expect(blockFor('Mon 12', 'CL Business I').style.getPropertyValue('--course-bg')).toBe(COURSE_COLORS[business.color]);
+  });
+
+  it('falls back to Peacock for a class with no known course', () => {
+    render(<WeekCalendar weekStart={WEEK} courses={[]} events={[cls('Assembly', 0, 480, 540)]} now={NOW} />);
+    expect(screen.getByRole('listitem').style.getPropertyValue('--course-bg')).toBe('#039BE5');
   });
 });
 

@@ -11,12 +11,12 @@ async function loadWeek(weekParam: string | undefined) {
   await io();
   const now = Date.now();
   const weekStart = parseWeekParam(weekParam, now);
-  const events = await data.getWeek(weekStart);
-  return { now, weekStart, events };
+  const [events, courses] = await Promise.all([data.getWeek(weekStart), data.getCourses()]);
+  return { now, weekStart, events, courses };
 }
 
 export default async function CalendarPage({ searchParams }: { searchParams: Promise<{ week?: string | string[] }> }) {
   const { week } = await searchParams;
-  const { now, weekStart, events } = await loadWeek(typeof week === 'string' ? week : undefined);
-  return <WeekCalendar weekStart={weekStart} events={events} now={now} />;
+  const { now, weekStart, events, courses } = await loadWeek(typeof week === 'string' ? week : undefined);
+  return <WeekCalendar weekStart={weekStart} events={events} courses={courses} now={now} />;
 }

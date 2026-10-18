@@ -9,7 +9,8 @@ import Typography from '@mui/material/Typography';
 import ChevronLeft from '@mui/icons-material/ChevronLeft';
 import ChevronRight from '@mui/icons-material/ChevronRight';
 import { chinaClock, chinaDateLabel, dayIndex, formatWeekParam, shiftWeek, weekRangeLabel } from '@/lib/time';
-import type { ClassEvent } from '@/lib/types';
+import { COURSE_COLORS, readableTextOn } from '@/lib/colors';
+import type { ClassEvent, Course } from '@/lib/types';
 
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
@@ -22,6 +23,8 @@ const TOP_PAD = 8;
 /** The grid needs the `md` breakpoint (900px); below it the same markup reads as a per-day list. */
 const MD_UP = '@media (min-width: 900px)';
 const MD_DOWN = '@media (max-width: 899.95px)';
+/** Google Calendar's default event color, for a class whose course is unknown. */
+const DEFAULT_COLOR = 'Peacock';
 
 export interface PlacedEvent {
   event: ClassEvent;
@@ -68,6 +71,8 @@ interface WeekCalendarProps {
   /** Monday 00:00 China time of the week shown. */
   weekStart: number;
   events: ClassEvent[];
+  /** Courses, for each class's color. */
+  courses: Course[];
   /** Server time; decides which column is today. */
   now: number;
 }
@@ -77,7 +82,7 @@ interface WeekCalendarProps {
  * Sat/Sun only when they have classes. Below 900px the same markup reflows into a
  * per-day list.
  */
-export default function WeekCalendar({ weekStart, events, now }: WeekCalendarProps) {
+export default function WeekCalendar({ weekStart, events, courses, now }: WeekCalendarProps) {
   const classes = events.filter((e) => e.isClass && dayIndex(e.start, weekStart) >= 0 && dayIndex(e.start, weekStart) < 7);
   const days = [0, 1, 2, 3, 4, 5, 6]
     .map((d) => ({ d, placed: layoutDay(classes.filter((e) => dayIndex(e.start, weekStart) === d)) }))
@@ -88,6 +93,7 @@ export default function WeekCalendar({ weekStart, events, now }: WeekCalendarPro
   const lastHour = Math.ceil(Math.max(...classes.map((e) => minuteOfDay(e.end, weekStart))) / 60);
   const hours = classes.length > 0 ? Array.from({ length: lastHour - firstHour }, (_, i) => firstHour + i) : [];
   const bodyPx = hours.length * HOUR_PX;
+  const colorOf = (e: ClassEvent) => COURSE_COLORS[courses.find((c) => c.id === e.courseId)?.color ?? DEFAULT_COLOR];
 
   return (
     <>
@@ -193,7 +199,7 @@ export default function WeekCalendar({ weekStart, events, now }: WeekCalendarPro
                       minWidth: 30,
                       height: 30,
                       px: 0.5,
-                      borderRadius: 15,
+                      borderRadius: 1,
                       display: 'inline-flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -231,18 +237,18 @@ export default function WeekCalendar({ weekStart, events, now }: WeekCalendarPro
                         m: 0,
                         p: 0,
                         listStyle: 'none',
-                        [MD_DOWN]: {
-                          bgcolor: 'background.paper',
-                          border: 1,
-                          borderColor: 'divider',
-                          borderRadius: 1,
-                          '& > li:not(:first-of-type)': { borderTop: 1, borderColor: 'divider' },
-                        },
+                        [MD_DOWN]: { display: 'flex', flexDirection: 'column', gap: 0.5 },
                       }}
                     >
                       {placed.map((p, i) => (
                         // Same name and start can repeat (e.g. split study halls), so the index disambiguates.
-                        <ClassBlock key={`${p.event.start}-${p.event.name}-${i}`} placed={p} weekStart={weekStart} firstHour={firstHour} />
+                        <ClassBlock
+                          key={`${p.event.start}-${p.event.name}-${i}`}
+                          placed={p}
+                          color={colorOf(p.event)}
+                          weekStart={weekStart}
+                          firstHour={firstHour}
+                        />
                       ))}
                     </Box>
                   )}
@@ -258,17 +264,24 @@ export default function WeekCalendar({ weekStart, events, now }: WeekCalendarPro
 
 interface ClassBlockProps {
   placed: PlacedEvent;
+  /** Course color (hex) filling the block. */
+  color: string;
   weekStart: number;
   firstHour: number;
 }
 
-/** A class: name, then "08:00–08:40 · D419". Positioned by time in the grid; a plain row in the list. */
-function ClassBlock({ placed: { event, lane, lanes }, weekStart, firstHour }: ClassBlockProps) {
+/**
+ * A class filled with its course color: name, then "08:00–08:40 · D419". Positioned by time in the
+ * grid; a full-width row in the list.
+ */
+function ClassBlock({ placed: { event, lane, lanes }, color, weekStart, firstHour }: ClassBlockProps) {
   const top = ((minuteOfDay(event.start, weekStart) - firstHour * 60) / 60) * HOUR_PX;
   const height = ((event.end - event.start) / MIN / 60) * HOUR_PX;
   const meta = [`${chinaClock(event.start)}–${chinaClock(event.end)}`, event.room].filter(Boolean).join(' · ');
   // Grid geometry travels as custom properties so one shared style rule serves every block.
   const geometry = {
+    '--course-bg': color,
+    '--course-fg': readableTextOn(color),
     '--top': `${top}px`,
     '--height': `${height}px`,
     '--left': `${(lane / lanes) * 100}%`,
@@ -281,7 +294,10 @@ function ClassBlock({ placed: { event, lane, lanes }, weekStart, firstHour }: Cl
       title={`${event.name}\n${meta}`}
       style={geometry}
       sx={{
-        [MD_DOWN]: { px: 2, py: 1.5 },
+        bgcolor: 'var(--course-bg)',
+        color: 'var(--course-fg)',
+        borderRadius: 1,
+        [MD_DOWN]: { px: 2, py: 1.25 },
         [MD_UP]: {
           position: 'absolute',
           top: 'calc(var(--top) + 1px)',
@@ -291,10 +307,6 @@ function ClassBlock({ placed: { event, lane, lanes }, weekStart, firstHour }: Cl
           px: 1,
           py: 0.5,
           overflow: 'hidden',
-          borderRadius: 1,
-          border: 1,
-          borderColor: 'color-mix(in srgb, var(--mui-palette-primary-main) 22%, transparent)',
-          bgcolor: 'primary.light',
           '& > *': { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
         },
       }}
@@ -304,17 +316,16 @@ function ClassBlock({ placed: { event, lane, lanes }, weekStart, firstHour }: Cl
         sx={{
           fontWeight: 600,
           overflowWrap: 'anywhere',
-          [MD_UP]: { fontSize: '0.8125rem', lineHeight: 1.4, color: 'primary.dark' },
+          [MD_UP]: { fontSize: '0.8125rem', lineHeight: 1.4 },
         }}
       >
         {event.name}
       </Typography>
       <Typography
         variant="body2"
-        color="text.secondary"
         sx={{
           overflowWrap: 'anywhere',
-          [MD_UP]: { fontSize: '0.75rem', lineHeight: 1.4, color: 'primary.main' },
+          [MD_UP]: { fontSize: '0.75rem', lineHeight: 1.4 },
         }}
       >
         {meta}
