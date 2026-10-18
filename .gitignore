@@ -1,0 +1,7 @@
+node_modules/
+.next/
+__pycache__/
+.superpowers/
+test-results/
+playwright-report/
+*.tsbuildinfo
