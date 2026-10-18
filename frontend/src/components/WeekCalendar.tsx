@@ -91,7 +91,7 @@ export default function WeekCalendar({ weekStart, events, now }: WeekCalendarPro
 
   return (
     <>
-      <Stack direction="row" sx={{ alignItems: 'center', flexWrap: 'wrap', columnGap: 2, rowGap: 1, mt: -1, mb: 2.5 }}>
+      <Stack direction="row" sx={{ alignItems: 'center', flexWrap: 'wrap', columnGap: 2, rowGap: 1, mb: 2.5 }}>
         <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
           <Button component={Link} href="/calendar" variant="outlined" color="inherit" size="small" sx={{ mr: 1, borderColor: 'divider' }}>
             Today
@@ -170,7 +170,6 @@ export default function WeekCalendar({ weekStart, events, now }: WeekCalendarPro
                 <Typography
                   id={headingId}
                   variant="h3"
-                  component="h2"
                   aria-current={isToday ? 'date' : undefined}
                   sx={{
                     display: 'flex',
@@ -232,11 +231,18 @@ export default function WeekCalendar({ weekStart, events, now }: WeekCalendarPro
                         m: 0,
                         p: 0,
                         listStyle: 'none',
-                        [MD_DOWN]: { bgcolor: 'background.paper', border: 1, borderColor: 'divider', borderRadius: 1 },
+                        [MD_DOWN]: {
+                          bgcolor: 'background.paper',
+                          border: 1,
+                          borderColor: 'divider',
+                          borderRadius: 1,
+                          '& > li:not(:first-of-type)': { borderTop: 1, borderColor: 'divider' },
+                        },
                       }}
                     >
-                      {placed.map((p) => (
-                        <ClassBlock key={`${p.event.start}-${p.event.name}`} placed={p} weekStart={weekStart} firstHour={firstHour} />
+                      {placed.map((p, i) => (
+                        // Same name and start can repeat (e.g. split study halls), so the index disambiguates.
+                        <ClassBlock key={`${p.event.start}-${p.event.name}-${i}`} placed={p} weekStart={weekStart} firstHour={firstHour} />
                       ))}
                     </Box>
                   )}
@@ -275,11 +281,7 @@ function ClassBlock({ placed: { event, lane, lanes }, weekStart, firstHour }: Cl
       title={`${event.name}\n${meta}`}
       style={geometry}
       sx={{
-        [MD_DOWN]: {
-          px: 2,
-          py: 1.5,
-          '& + &': { borderTop: 1, borderColor: 'divider' },
-        },
+        [MD_DOWN]: { px: 2, py: 1.5 },
         [MD_UP]: {
           position: 'absolute',
           top: 'calc(var(--top) + 1px)',

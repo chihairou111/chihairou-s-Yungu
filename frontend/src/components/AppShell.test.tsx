@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import AppShell, { initials } from './AppShell';
@@ -48,5 +48,17 @@ describe('AppShell', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/api/session', { method: 'DELETE' });
     expect(nav.replace).toHaveBeenCalledWith('/login');
+  });
+
+  it('keeps the account name outside the menu and links the button to it', async () => {
+    render(<AppShell userName="Bruce Zheng">content</AppShell>);
+    const button = screen.getByRole('button', { name: 'Account: Bruce Zheng' });
+    await userEvent.click(button);
+
+    const menu = screen.getByRole('menu');
+    expect(button).toHaveAttribute('aria-controls', menu.id);
+    expect(screen.getByText('Signed in as')).toBeVisible();
+    expect(within(menu).queryByText('Signed in as')).not.toBeInTheDocument();
+    expect(within(menu).getAllByRole('menuitem')).toHaveLength(1);
   });
 });

@@ -1,5 +1,5 @@
 import { render, screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { data } from '@/lib/data';
 import { parseWeekParam } from '@/lib/time';
 import type { ClassEvent } from '@/lib/types';
@@ -80,6 +80,20 @@ describe('WeekCalendar', () => {
     expect(within(wednesday).getByRole('heading', { name: 'Wed 14' })).toHaveAttribute('aria-current', 'date');
     const monday = screen.getByRole('region', { name: 'Mon 12' });
     expect(within(monday).getByRole('heading', { name: 'Mon 12' })).not.toHaveAttribute('aria-current');
+  });
+
+  it('nests day headings under the range heading', async () => {
+    await renderFixtureWeek();
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('Oct 12 – 18, 2026');
+    expect(screen.getByRole('heading', { level: 3, name: 'Mon 12' })).toBeInTheDocument();
+  });
+
+  it('keeps same-named classes at the same time apart', () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<WeekCalendar weekStart={WEEK} events={[cls('Study hall', 0, 480, 520, 'D101'), cls('Study hall', 0, 480, 520, 'D102')]} now={NOW} />);
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
+    expect(errors).not.toHaveBeenCalled();
+    errors.mockRestore();
   });
 
   it('says so when the week has no classes', () => {

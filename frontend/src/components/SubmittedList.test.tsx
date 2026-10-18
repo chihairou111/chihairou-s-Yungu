@@ -11,6 +11,11 @@ describe('SubmittedList', () => {
     expect(titles).toEqual(['Newest', 'Middle', 'Oldest']);
   });
 
+  it('heads the list so card titles sit under a section heading', () => {
+    render(<SubmittedList items={[submitted('Essay', -DAY)]} now={NOW} />);
+    expect(screen.getByRole('heading', { level: 2, name: 'Submitted work' })).toBeInTheDocument();
+  });
+
   it('says so when nothing has been submitted', () => {
     render(<SubmittedList items={[]} now={NOW} />);
     expect(screen.getByText('Nothing submitted yet')).toBeInTheDocument();

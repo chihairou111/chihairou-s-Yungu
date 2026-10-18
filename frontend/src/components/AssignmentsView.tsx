@@ -34,10 +34,16 @@ export default function AssignmentsView({ todo, submitted, todayClasses, now }: 
         value={tab}
         onChange={(_, next: TabKey) => selectTab(next)}
         aria-label="Assignment lists"
-        sx={{ mt: -1, mb: 3, borderBottom: 1, borderColor: 'divider' }}
+        sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
       >
-        <Tab value="todo" label="To-do" id="tab-todo" aria-controls="panel-todo" />
-        <Tab value="submitted" label="Submitted" id="tab-submitted" aria-controls="panel-submitted" />
+        {/* Only the open tab's panel is mounted, so only that tab may point at it. */}
+        <Tab value="todo" label="To-do" id="tab-todo" aria-controls={tab === 'todo' ? 'panel-todo' : undefined} />
+        <Tab
+          value="submitted"
+          label="Submitted"
+          id="tab-submitted"
+          aria-controls={tab === 'submitted' ? 'panel-submitted' : undefined}
+        />
       </Tabs>
       <Box role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
         {tab === 'todo' ? (
