@@ -43,11 +43,11 @@ export default function PillNav() {
         border: `1px solid ${theme.palette.divider}`,
         boxShadow: '0 2px 6px rgba(16, 24, 40, 0.06), 0 8px 24px rgba(16, 24, 40, 0.08)',
         transition: `width 240ms ${EASE}, box-shadow 240ms ${EASE}`,
-        '&:hover, &:focus-within': {
+        '&:hover, &:has(:focus-visible)': {
           width: EXPANDED_WIDTH,
           boxShadow: '0 4px 10px rgba(16, 24, 40, 0.08), 0 16px 40px rgba(16, 24, 40, 0.14)',
         },
-        '&:hover .pill-label, &:focus-within .pill-label': { opacity: 1 },
+        '&:hover .pill-label, &:has(:focus-visible) .pill-label': { opacity: 1 },
         '@media (prefers-reduced-motion: reduce)': {
           transition: 'none',
           '& .pill-label': { transition: 'none' },
