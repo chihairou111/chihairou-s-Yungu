@@ -17,8 +17,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Next.js + MUI",
-  description: "Next.js app with Material UI",
+  title: { default: "Yungu", template: "%s · Yungu" },
+  description: "Assignments and timetable from task.yungu.org.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
