@@ -1,6 +1,5 @@
 'use client';
-import { useState } from 'react';
-import Box from '@mui/material/Box';
+import { useEffect, useState } from 'react';
 import Divider from '@mui/material/Divider';
 import Drawer from '@mui/material/Drawer';
 import Fab from '@mui/material/Fab';
@@ -14,10 +13,53 @@ import TodayClasses from './TodayClasses';
 
 const DRAWER_ID = 'today-drawer';
 const TITLE_ID = 'today-drawer-title';
-/** Width of the right-edge strip whose hover reveals the button. */
-const HOT_ZONE_PX = 56;
-/** Keeps the hot zone below the app bar so it never covers the account button. */
+/** Distance from the right edge within which the pointer reveals the button. */
+export const EDGE_ZONE_PX = 56;
+/** Below the app bar, so the edge never competes with the account button. */
 const APP_BAR_PX = 64;
+/** Where the button parks at the bottom right instead: touch screens and narrow windows. */
+export const BOTTOM_FAB_MEDIA = '@media (hover: none), (max-width: 899.95px)';
+const EASE = 'cubic-bezier(0.05, 0.7, 0.1, 1)';
+
+/** True when a pointer at (x, y) is in the right-edge zone below the app bar. */
+export function shouldRevealEdgeButton(x: number, y: number, viewportWidth: number, appBarHeight: number): boolean {
+  return x >= viewportWidth - EDGE_ZONE_PX && y >= appBarHeight;
+}
+
+/**
+ * Watches the pointer passively (a window listener, throttled to one check per frame), so no
+ * element covers the page. True while the pointer is near the right edge.
+ */
+function useEdgeReveal(): boolean {
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    let frame = 0;
+    let last: PointerEvent | null = null;
+    const check = () => {
+      frame = 0;
+      if (last) setNear(shouldRevealEdgeButton(last.clientX, last.clientY, window.innerWidth, APP_BAR_PX));
+    };
+    const onMove = (e: PointerEvent) => {
+      last = e;
+      if (!frame) frame = requestAnimationFrame(check);
+    };
+    const hide = () => {
+      last = null;
+      setNear(false);
+    };
+    const root = document.documentElement;
+    window.addEventListener('pointermove', onMove, { passive: true });
+    root.addEventListener('pointerleave', hide);
+    window.addEventListener('blur', hide);
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      window.removeEventListener('pointermove', onMove);
+      root.removeEventListener('pointerleave', hide);
+      window.removeEventListener('blur', hide);
+    };
+  }, []);
+  return near;
+}
 
 interface TodayDrawerProps {
   /** Today's classes, already selected and ordered by `todaysClasses`. */
@@ -25,56 +67,48 @@ interface TodayDrawerProps {
 }
 
 /**
- * A round button on the right edge (revealed by hovering the edge, by keyboard focus, or always on
- * touch screens) that opens a temporary right drawer listing today's classes.
+ * A round button that opens a temporary right drawer listing today's classes. On wide pointer
+ * screens it sits mid-right and appears when the pointer nears the right edge, on keyboard focus,
+ * or while the drawer is open; on touch screens and narrow windows it is always shown bottom-right.
  */
 export default function TodayDrawer({ events }: TodayDrawerProps) {
   const [open, setOpen] = useState(false);
+  const near = useEdgeReveal();
 
   return (
     <>
-      <Box
-        className={open ? 'is-open' : undefined}
+      <Fab
+        size="small"
+        color="primary"
+        aria-label="Today's classes"
+        aria-expanded={open}
+        aria-controls={open ? DRAWER_ID : undefined}
+        data-revealed={near}
+        onClick={() => setOpen(true)}
         sx={(theme) => ({
           position: 'fixed',
           zIndex: theme.zIndex.speedDial,
-          top: APP_BAR_PX,
-          bottom: 0,
-          right: 0,
-          width: HOT_ZONE_PX,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          // Hidden until the pointer reaches the edge; focus or an open drawer also shows it.
-          '& .today-fab': {
-            opacity: 0,
-            pointerEvents: 'none',
-            transition: 'opacity 160ms cubic-bezier(0.05, 0.7, 0.1, 1)',
-          },
-          '&:hover .today-fab, & .today-fab.Mui-focusVisible, &.is-open .today-fab': {
+          right: 8,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          opacity: 0,
+          pointerEvents: 'none',
+          transition: `opacity 160ms ${EASE}`,
+          '&[data-revealed="true"], &.Mui-focusVisible, &[aria-expanded="true"]': { opacity: 1, pointerEvents: 'auto' },
+          // Material's standard FAB spot, always visible, clear of the safe area.
+          [BOTTOM_FAB_MEDIA]: {
+            top: 'auto',
+            transform: 'none',
+            right: 16,
+            bottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
             opacity: 1,
             pointerEvents: 'auto',
           },
-          // No hover on touch screens: keep the button visible and let the strip pass touches through.
-          '@media (hover: none)': {
-            pointerEvents: 'none',
-            '& .today-fab': { opacity: 1, pointerEvents: 'auto' },
-          },
-          '@media (prefers-reduced-motion: reduce)': { '& .today-fab': { transition: 'none' } },
+          '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
         })}
       >
-        <Fab
-          className="today-fab"
-          size="small"
-          color="primary"
-          aria-label="Today's classes"
-          aria-expanded={open}
-          aria-controls={open ? DRAWER_ID : undefined}
-          onClick={() => setOpen(true)}
-        >
-          <EventNote />
-        </Fab>
-      </Box>
+        <EventNote />
+      </Fab>
 
       <Drawer
         anchor="right"

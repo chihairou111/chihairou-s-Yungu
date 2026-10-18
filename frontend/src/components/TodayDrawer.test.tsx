@@ -1,8 +1,8 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import type { ClassEvent } from '@/lib/types';
-import TodayDrawer from './TodayDrawer';
+import TodayDrawer, { shouldRevealEdgeButton } from './TodayDrawer';
 
 const HOUR = 3600_000;
 const MIN = 60_000;
@@ -56,5 +56,50 @@ describe('TodayDrawer', () => {
     render(<TodayDrawer events={[]} />);
     await openWithKeyboard();
     expect(within(screen.getByRole('dialog')).getByText('No classes today')).toBeInTheDocument();
+  });
+});
+
+describe('shouldRevealEdgeButton', () => {
+  it('reveals only within 56px of the right edge and below the app bar', () => {
+    expect(shouldRevealEdgeButton(1440 - 56, 400, 1440, 64)).toBe(true);
+    expect(shouldRevealEdgeButton(1439, 64, 1440, 64)).toBe(true);
+    expect(shouldRevealEdgeButton(1440 - 57, 400, 1440, 64)).toBe(false);
+    expect(shouldRevealEdgeButton(1430, 63, 1440, 64)).toBe(false); // over the app bar (account button)
+  });
+});
+
+describe('TodayDrawer edge reveal', () => {
+  const nextFrame = () => act(() => new Promise((r) => requestAnimationFrame(() => r(undefined))));
+  const button = () => screen.getByRole('button', { name: "Today's classes" });
+
+  it('renders no element other than the button (nothing overlays the page)', () => {
+    const { container } = render(<TodayDrawer events={classes} />);
+    expect(container.childElementCount).toBe(1);
+    expect(container.firstElementChild).toBe(button());
+  });
+
+  it('reveals the button when the pointer nears the right edge and hides it when it moves away or leaves', async () => {
+    render(<TodayDrawer events={classes} />);
+    expect(button()).toHaveAttribute('data-revealed', 'false');
+
+    fireEvent.pointerMove(window, { clientX: window.innerWidth - 20, clientY: 400 });
+    await nextFrame();
+    expect(button()).toHaveAttribute('data-revealed', 'true');
+
+    fireEvent.pointerMove(window, { clientX: 100, clientY: 400 });
+    await nextFrame();
+    expect(button()).toHaveAttribute('data-revealed', 'false');
+
+    fireEvent.pointerMove(window, { clientX: window.innerWidth - 20, clientY: 400 });
+    await nextFrame();
+    fireEvent.pointerLeave(document.documentElement);
+    expect(button()).toHaveAttribute('data-revealed', 'false');
+  });
+
+  it('does not reveal over the app bar', async () => {
+    render(<TodayDrawer events={classes} />);
+    fireEvent.pointerMove(window, { clientX: window.innerWidth - 20, clientY: 10 });
+    await nextFrame();
+    expect(button()).toHaveAttribute('data-revealed', 'false');
   });
 });

@@ -9,7 +9,7 @@ import type { Assignment, ClassEvent, Course } from '@/lib/types';
 import CourseBoard from './CourseBoard';
 import PriorityBoard from './PriorityBoard';
 import SubmittedList from './SubmittedList';
-import TodayDrawer from './TodayDrawer';
+import TodayDrawer, { BOTTOM_FAB_MEDIA } from './TodayDrawer';
 
 type TabKey = 'todo' | 'submitted';
 type ViewKey = 'priority' | 'course';
@@ -59,7 +59,8 @@ export default function AssignmentsView({ todo, submitted, courses, todayClasses
           aria-controls={tab === 'submitted' ? 'panel-submitted' : undefined}
         />
       </Tabs>
-      <Box role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
+      {/* Room below the last card for the bottom-right button (40px + 16px inset + margin). */}
+      <Box role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} sx={{ [BOTTOM_FAB_MEDIA]: { pb: 9 } }}>
         {tab === 'todo' ? (
           <>
             <ToggleButtonGroup

@@ -33,6 +33,12 @@ test('sign in, browse assignments and calendar, sign out', async ({ page }) => {
   const todayButton = page.getByRole('button', { name: "Today's classes" });
   await expect(todayButton).toHaveCSS('opacity', '0');
   const viewport = page.viewportSize()!;
+  // Nothing overlays the page at the right edge: the hit target there is the page itself.
+  const hitsMain = await page.evaluate(
+    ([x, y]) => document.elementFromPoint(x, y)?.closest('main') !== null,
+    [viewport.width - 20, 150],
+  );
+  expect(hitsMain).toBe(true);
   await page.mouse.move(viewport.width - 20, viewport.height / 2);
   await expect(todayButton).toHaveCSS('opacity', '1');
   await todayButton.click();
@@ -99,7 +105,12 @@ test.describe('phone width', () => {
     await expect(page.getByRole('heading', { name: 'Overdue', exact: true })).toBeVisible();
     await expectNoHorizontalScroll(page);
     // No hover on a phone, so the Today's classes button is always shown.
-    await expect(page.getByRole('button', { name: "Today's classes" })).toHaveCSS('opacity', '1');
+    const fab = page.getByRole('button', { name: "Today's classes" });
+    await expect(fab).toHaveCSS('opacity', '1');
+    // Material's bottom-right FAB spot (16px insets), not over the content's right edge.
+    const box = (await fab.boundingBox())!;
+    expect(Math.round(390 - (box.x + box.width))).toBe(16);
+    expect(Math.round(844 - (box.y + box.height))).toBe(16);
     await page.goto('/assignments?view=course');
     await expect(page.getByRole('article', { name: 'Chinese I' })).toBeVisible();
     await expectNoHorizontalScroll(page);
