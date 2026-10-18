@@ -16,7 +16,8 @@ const theme = createTheme({
     text: { primary: '#1b2330', secondary: '#5f6b7a' },
     divider: '#e3e8ef',
   },
-  shape: { borderRadius: 10 },
+  // MD2 small corners everywhere (cards, buttons, chips, menus, inputs); avatars and FABs stay round.
+  shape: { borderRadius: 4 },
   typography: {
     fontFamily: 'var(--font-geist-sans), system-ui, sans-serif',
     h1: { fontSize: '1.375rem', fontWeight: 600, letterSpacing: '-0.01em', lineHeight: 1.3 },
@@ -43,6 +44,12 @@ const theme = createTheme({
           },
         }),
       },
+    },
+    MuiChip: {
+      styleOverrides: { root: ({ theme }) => ({ borderRadius: theme.shape.borderRadius }) },
+    },
+    MuiIconButton: {
+      styleOverrides: { root: ({ theme }) => ({ borderRadius: theme.shape.borderRadius }) },
     },
     MuiCssBaseline: {
       styleOverrides: (theme) => ({

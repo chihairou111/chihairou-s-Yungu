@@ -1,13 +1,13 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import PillNav from './PillNav';
+import NavRail from './NavRail';
 
 const pathname = vi.hoisted(() => ({ current: '/calendar' }));
 vi.mock('next/navigation', () => ({ usePathname: () => pathname.current }));
 
-describe('PillNav', () => {
+describe('NavRail', () => {
   it('lists Assignments then Calendar with correct hrefs', () => {
-    render(<PillNav />);
+    render(<NavRail />);
     const links = screen.getAllByRole('link');
     expect(links.map((l) => l.textContent)).toEqual(['Assignments', 'Calendar']);
     expect(screen.getByRole('link', { name: 'Assignments' })).toHaveAttribute('href', '/assignments');
@@ -16,19 +16,19 @@ describe('PillNav', () => {
 
   it('marks only the active route with aria-current="page"', () => {
     pathname.current = '/calendar';
-    render(<PillNav />);
+    render(<NavRail />);
     expect(screen.getByRole('link', { name: 'Calendar' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('link', { name: 'Assignments' })).not.toHaveAttribute('aria-current');
   });
 
   it('treats nested paths as part of their section', () => {
     pathname.current = '/assignments/submitted';
-    render(<PillNav />);
+    render(<NavRail />);
     expect(screen.getByRole('link', { name: 'Assignments' })).toHaveAttribute('aria-current', 'page');
   });
 
   it('is a labelled navigation landmark', () => {
-    render(<PillNav />);
+    render(<NavRail />);
     expect(screen.getByRole('navigation', { name: 'Main' })).toBeInTheDocument();
   });
 });

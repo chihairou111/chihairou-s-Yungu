@@ -12,7 +12,7 @@ export interface NavItem {
   ActiveIcon: typeof SvgIcon;
 }
 
-/** Dashboard sections, top to bottom in the pill nav. */
+/** Dashboard sections, top to bottom in the nav rail. */
 export const NAV_ITEMS: readonly NavItem[] = [
   { href: '/assignments', label: 'Assignments', Icon: AssignmentTurnedInOutlined, ActiveIcon: AssignmentTurnedIn },
   { href: '/calendar', label: 'Calendar', Icon: CalendarMonthOutlined, ActiveIcon: CalendarMonth },

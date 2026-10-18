@@ -14,10 +14,10 @@ import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
 import Logout from '@mui/icons-material/Logout';
 import { sectionFor } from './nav-items';
-import { PILL_GAP, PILL_WIDTH } from './PillNav';
+import { RAIL_GAP, RAIL_WIDTH } from './NavRail';
 
-/** Left inset that keeps content and the title clear of the collapsed pill nav. */
-const CONTENT_INSET = { xs: `${8 + PILL_WIDTH + 12}px`, sm: `${PILL_GAP + PILL_WIDTH + 24}px` };
+/** Left inset that keeps content and the title clear of the collapsed nav rail. */
+const CONTENT_INSET = { xs: `${8 + RAIL_WIDTH + 12}px`, sm: `${RAIL_GAP + RAIL_WIDTH + 24}px` };
 
 /** "Bruce Zheng" -> "BZ"; "郑博" -> "郑"; blank -> "?". */
 export function initials(name: string): string {
@@ -70,7 +70,7 @@ export default function AppShell({ userName, children }: AppShellProps) {
             aria-controls={menuAnchor ? 'account-menu' : undefined}
             aria-expanded={menuAnchor ? 'true' : undefined}
             onClick={(e) => setMenuAnchor(e.currentTarget)}
-            sx={{ p: 0.5 }}
+            sx={{ p: 0.5, borderRadius: '50%' }}
           >
             <Avatar sx={{ width: 36, height: 36, fontSize: '0.875rem', fontWeight: 600, bgcolor: 'primary.main' }}>
               {initials(userName)}

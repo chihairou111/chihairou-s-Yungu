@@ -51,7 +51,7 @@ export default function PriorityBoard({ items, now }: PriorityBoardProps) {
                   minWidth: 24,
                   height: 22,
                   px: 0.75,
-                  borderRadius: 11,
+                  borderRadius: 1,
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
