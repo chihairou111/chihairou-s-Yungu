@@ -17,6 +17,7 @@ import PlayArrowRounded from '@mui/icons-material/PlayArrowRounded';
 import SlideshowOutlined from '@mui/icons-material/SlideshowOutlined';
 import TableChartOutlined from '@mui/icons-material/TableChartOutlined';
 import type { FileRef } from '@/lib/types';
+import { EASE_OUT, FADE_MS } from './motion';
 import { isAbort, renderFirstPage } from './pdfThumb';
 
 const UNITS = ['KB', 'MB', 'GB'];
@@ -335,6 +336,8 @@ const tileSx = (theme: Theme) => ({
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'stretch',
+  // ButtonBase centres its content; a tile with a one-line name would drop its preview below its neighbours'.
+  justifyContent: 'flex-start',
   textAlign: 'left',
   overflow: 'hidden',
   borderRadius: `${theme.yungu.shape.medium}px`,
@@ -342,7 +345,10 @@ const tileSx = (theme: Theme) => ({
   bgcolor: theme.yungu.color.surfaceContainerLowest,
   transition: theme.transitions.create(['border-color', 'box-shadow'], { duration: theme.transitions.duration.shorter }),
   '& .thumb-media': {
-    transition: theme.transitions.create('transform', { duration: theme.transitions.duration.standard, easing: 'cubic-bezier(0.2, 0, 0, 1)' }),
+    transition: [
+      theme.transitions.create('transform', { duration: theme.transitions.duration.standard, easing: 'cubic-bezier(0.2, 0, 0, 1)' }),
+      `opacity ${FADE_MS}ms ${EASE_OUT}`,
+    ].join(', '),
   },
   '@media (hover: hover)': {
     '&:hover': {
@@ -354,7 +360,8 @@ const tileSx = (theme: Theme) => ({
   '&.Mui-focusVisible': { outline: `2px solid ${theme.palette.primary.main}`, outlineOffset: '2px' },
   '@media (prefers-reduced-motion: reduce)': {
     transition: 'none',
-    '& .thumb-media': { transition: 'none' },
+    // The preview still fades in (no movement), just without the hover zoom.
+    '& .thumb-media': { transition: `opacity ${FADE_MS}ms ${EASE_OUT}` },
     '&:hover .thumb-media': { transform: 'none' },
   },
 });
@@ -388,7 +395,12 @@ export default function FileThumb({ file, onOpen }: { file: FileRef; onOpen: () 
           borderColor: (theme) => theme.yungu.color.outlineVariant,
         }}
       >
-        <Box component="span" className="thumb-media" sx={{ position: 'absolute', inset: 0, display: 'block' }}>
+        {/* Transparent until the preview has painted, then faded in over the placeholder. */}
+        <Box
+          component="span"
+          className="thumb-media"
+          sx={{ position: 'absolute', inset: 0, display: 'block', opacity: load === 'loading' && hasRenderedPreview(file) ? 0 : 1 }}
+        >
           <Preview file={file} load={load} onLoad={onLoad} />
         </Box>
         {load === 'loading' && hasRenderedPreview(file) && (

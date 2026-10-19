@@ -61,6 +61,22 @@ describe('FileThumb', () => {
     expect(screen.queryByText('.PDF')).not.toBeInTheDocument();
   });
 
+  it('fades the preview in once it has painted, instead of popping it over the skeleton', async () => {
+    const page = deferred();
+    vi.mocked(renderFirstPage).mockReturnValue(page.promise);
+    const { container } = render(<FileThumb file={PDF} onOpen={() => {}} />);
+    const media = container.querySelector('.thumb-media')!;
+    expect(media).toHaveStyle({ opacity: '0' });
+    await act(async () => page.resolve());
+    expect(media).toHaveStyle({ opacity: '1' });
+  });
+
+  it('keeps the preview at the top of the tile whatever the length of the name', () => {
+    vi.mocked(renderFirstPage).mockReturnValue(new Promise(() => {}));
+    render(<FileThumb file={PDF} onOpen={() => {}} />);
+    expect(screen.getByRole('button')).toHaveStyle({ justifyContent: 'flex-start' });
+  });
+
   it('falls back to the type icon when the PDF cannot be rendered', async () => {
     vi.mocked(renderFirstPage).mockRejectedValue(new Error('Invalid PDF structure'));
     render(<FileThumb file={PDF} onOpen={() => {}} />);

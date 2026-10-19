@@ -23,6 +23,7 @@ import CommentsSection from './CommentsSection';
 import { DetailContext, type DetailActions } from './DetailContext';
 import DetailHeader from './DetailHeader';
 import Instructions from './Instructions';
+import { EASE_OUT, FADE_MS, popIn } from './motion';
 import { useTaskParam } from './useTaskParam';
 import { WorkProvider } from './WorkContext';
 import WriteView from './WriteView';
@@ -128,6 +129,7 @@ export default function AssignmentDialog({ now }: { now: number }) {
       maxWidth={false}
       aria-labelledby={titleId}
       slotProps={{
+        transition: popIn(reduceMotion),
         paper: {
           'aria-busy': loaded === null ? true : undefined,
           sx: (theme) => ({
@@ -157,77 +159,83 @@ export default function AssignmentDialog({ now }: { now: number }) {
         },
       }}
     >
-      {loaded === null ? (
-        <LoadingView titleId={titleId} onClose={close} />
-      ) : loaded.kind === 'ready' ? (
-        <DetailContext.Provider value={actions}>
-          {/* Above the view switch, so the work (and anything still uploading) outlives a trip to the writer. */}
-          <WorkProvider key={loaded.detail.id} detail={loaded.detail}>
-            {view.writing ? (
-              <WriteView
-                detail={loaded.detail}
-                titleId={titleId}
-                onBack={closeWriter}
-                onDone={(file) => {
-                  setNotice(`Added ${file.name} to Your work`);
-                  setWorkFocus({ kind: 'file', id: file.id });
-                  closeWriter();
-                }}
-              />
-            ) : (
-              <DetailView
-                detail={loaded.detail}
-                now={now}
-                titleId={titleId}
-                onClose={close}
-                onWrite={() => {
-                  setWorkFocus(null);
-                  openWriter();
-                }}
-                workFocus={workFocus}
-              />
-            )}
-          </WorkProvider>
-        </DetailContext.Provider>
-      ) : loaded.kind === 'not-found' ? (
-        <StatusView
-          titleId={titleId}
-          icon={<SearchOffOutlined />}
-          title="Assignment not found"
-          text="It may have been removed, or the link is incomplete."
-          actions={<Button variant="contained" onClick={close}>Close</Button>}
-        />
-      ) : loaded.kind === 'session-ended' ? (
-        <StatusView
-          titleId={titleId}
-          icon={<LockClockOutlined />}
-          title="Signed out"
-          text="Your session ended — sign in again."
-          actions={
-            <>
-              <Button onClick={close}>Close</Button>
-              <Button variant="contained" component={Link} href="/login">
-                Sign in
-              </Button>
-            </>
-          }
-        />
-      ) : (
-        <StatusView
-          titleId={titleId}
-          icon={<CloudOffOutlined />}
-          title="Couldn’t load this assignment"
-          text={loaded.message}
-          actions={
-            <>
-              <Button onClick={close}>Close</Button>
-              <Button variant="contained" onClick={() => setGeneration((n) => n + 1)}>
-                Try again
-              </Button>
-            </>
-          }
-        />
-      )}
+      {/* Each view (loading, the assignment, a message) fades in as it replaces the last. */}
+      <ViewFade key={loaded === null ? 'loading' : loaded.kind}>
+        {loaded === null ? (
+          <LoadingView titleId={titleId} onClose={close} />
+        ) : loaded.kind === 'ready' ? (
+          <DetailContext.Provider value={actions}>
+            {/* Above the view switch, so the work (and anything still uploading) outlives a trip to the writer. */}
+            <WorkProvider key={loaded.detail.id} detail={loaded.detail}>
+              {/* The writer and the assignment fade into each other, the work staying put above them. */}
+              <ViewFade key={view.writing ? 'write' : 'detail'}>
+                {view.writing ? (
+                  <WriteView
+                    detail={loaded.detail}
+                    titleId={titleId}
+                    onBack={closeWriter}
+                    onDone={(file) => {
+                      setNotice(`Added ${file.name} to Your work`);
+                      setWorkFocus({ kind: 'file', id: file.id });
+                      closeWriter();
+                    }}
+                  />
+                ) : (
+                  <DetailView
+                    detail={loaded.detail}
+                    now={now}
+                    titleId={titleId}
+                    onClose={close}
+                    onWrite={() => {
+                      setWorkFocus(null);
+                      openWriter();
+                    }}
+                    workFocus={workFocus}
+                  />
+                )}
+              </ViewFade>
+            </WorkProvider>
+          </DetailContext.Provider>
+        ) : loaded.kind === 'not-found' ? (
+          <StatusView
+            titleId={titleId}
+            icon={<SearchOffOutlined />}
+            title="Assignment not found"
+            text="It may have been removed, or the link is incomplete."
+            actions={<Button variant="contained" onClick={close}>Close</Button>}
+          />
+        ) : loaded.kind === 'session-ended' ? (
+          <StatusView
+            titleId={titleId}
+            icon={<LockClockOutlined />}
+            title="Signed out"
+            text="Your session ended — sign in again."
+            actions={
+              <>
+                <Button onClick={close}>Close</Button>
+                <Button variant="contained" component={Link} href="/login">
+                  Sign in
+                </Button>
+              </>
+            }
+          />
+        ) : (
+          <StatusView
+            titleId={titleId}
+            icon={<CloudOffOutlined />}
+            title="Couldn’t load this assignment"
+            text={loaded.message}
+            actions={
+              <>
+                <Button onClick={close}>Close</Button>
+                <Button variant="contained" onClick={() => setGeneration((n) => n + 1)}>
+                  Try again
+                </Button>
+              </>
+            }
+          />
+        )}
+      </ViewFade>
       <Snackbar
         open={notice !== null}
         message={notice}
@@ -237,6 +245,27 @@ export default function AssignmentDialog({ now }: { now: number }) {
         slotProps={{ transition: reduceMotion ? { timeout: 0 } : undefined }}
       />
     </Dialog>
+  );
+}
+
+/**
+ * Fills the paper like the view it holds and fades that view in: opacity only, so it reads the same with
+ * reduced motion, and nothing waits for it (focus and typing work from the first frame).
+ */
+function ViewFade({ children }: { children: ReactNode }) {
+  return (
+    <Box
+      sx={{
+        flex: 1,
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        animation: `yl-view-in ${FADE_MS}ms ${EASE_OUT}`,
+        '@keyframes yl-view-in': { from: { opacity: 0 } },
+      }}
+    >
+      {children}
+    </Box>
   );
 }
 

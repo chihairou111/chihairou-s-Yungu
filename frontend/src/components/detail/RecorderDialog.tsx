@@ -68,16 +68,16 @@ export default function RecorderDialog({ open, onClose, onAdd }: RecorderDialogP
     recordButton.current?.focus();
   }, [stream]);
 
-  // Closing (or losing the stream) throws away a recording in progress.
+  // Closing (or losing the stream) throws away a recording in progress, and a take still being handed
+  // over after Stop: its data must not turn up as a finished take the next time the dialog opens.
   useEffect(() => {
     return () => {
       const current = recorder.current;
       recorder.current = null;
-      if (current && current.state !== 'inactive') {
-        current.ondataavailable = null;
-        current.onstop = null;
-        current.stop();
-      }
+      if (!current) return;
+      current.ondataavailable = null;
+      current.onstop = null;
+      if (current.state !== 'inactive') current.stop();
     };
   }, [stream]);
 
@@ -126,6 +126,7 @@ export default function RecorderDialog({ open, onClose, onAdd }: RecorderDialogP
         if (e.data.size > 0) chunks.push(e.data);
       };
       next.onstop = () => {
+        recorder.current = null;
         // The clock was frozen at Stop; the data arrives only now.
         setElapsed(clock.current.before);
         if (chunks.length === 0) {
@@ -171,8 +172,8 @@ export default function RecorderDialog({ open, onClose, onAdd }: RecorderDialogP
     if (phase === 'recording') clock.current.before += Date.now() - clock.current.since;
     setElapsed(clock.current.before);
     setPhase('stopping');
+    // Kept until its data arrives (onstop), so closing meanwhile can still disown it.
     recorder.current?.stop();
-    recorder.current = null;
   };
 
   const reset = () => {

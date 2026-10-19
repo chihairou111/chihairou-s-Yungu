@@ -1,11 +1,12 @@
 import { render, screen, waitFor, within } from '../test-render';
 import userEvent from '@testing-library/user-event';
+import { Editor } from '@tiptap/react';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AssignmentDetail, FileRef } from '@/lib/types';
 import { HOUR, NOW, todo } from '../test-fixtures';
 import { ApiError } from './api';
 import { shortcutLabel } from './EditorToolbar';
-import WriteView from './WriteView';
+import WriteView, { WRITER_EXTENSIONS } from './WriteView';
 
 const api = vi.hoisted(() => ({ renderPdf: vi.fn() }));
 vi.mock('./api', async (importOriginal) => ({
@@ -228,5 +229,13 @@ describe('WriteView', () => {
     await userEvent.clear(address);
     await userEvent.type(address, 'example.com{Enter}');
     await waitFor(() => expect(doc.innerHTML).toContain('<a href="https://example.com">https://example.com</a>'));
+  });
+});
+
+describe('editor schema', () => {
+  it('makes links non-inclusive, so typing at a link’s end never extends it', () => {
+    const e = new Editor({ extensions: WRITER_EXTENSIONS });
+    expect(e.schema.marks.link.spec.inclusive).toBe(false);
+    e.destroy();
   });
 });

@@ -194,6 +194,27 @@ describe('RecorderDialog', () => {
     expect(screen.getByRole('button', { name: 'Add recording' })).toBeEnabled();
   });
 
+  it('drops a take whose data arrives after the dialog closed mid-Stop', async () => {
+    const user = userEvent.setup();
+    installMedia(() => Promise.resolve(fakeStream('audio').stream));
+    FakeMediaRecorder.holdStop = true;
+    const view = renderRecorder();
+    await user.click(await ready());
+    await user.click(screen.getByRole('button', { name: 'Stop' }));
+    expect(screen.getByText('Finishing…')).toBeInTheDocument();
+    view.close();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    // The recorder hands over its data only now, with nobody waiting for it.
+    await act(async () => FakeMediaRecorder.instances[0].finishStop?.());
+
+    view.rerender(<RecorderDialog open onClose={view.onClose} onAdd={view.onAdd} />);
+    await ready();
+    expect(screen.getByText('Ready')).toBeInTheDocument();
+    expect(screen.getByText('00:00')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add recording' })).toBeDisabled();
+    expect(document.querySelector('audio')).toBeNull();
+  });
+
   it('keyboard: focus starts on Record and follows Record → Pause → Resume → Stop → Add, and Record again', async () => {
     const user = userEvent.setup();
     installMedia(() => Promise.resolve(fakeStream('audio').stream));

@@ -37,7 +37,7 @@ const COLUMN_PX = 760;
  * italic, underline, two heading levels, both lists and links. Pasted code, quotes, rules, strike-through
  * or images fall back to plain text instead of producing markup the PDF would drop.
  */
-const EXTENSIONS = [
+export const WRITER_EXTENSIONS = [
   StarterKit.configure({
     heading: { levels: [1, 2] },
     blockquote: false,
@@ -141,7 +141,7 @@ export default function WriteView({ detail, titleId, onBack, onDone }: WriteView
   useEffect(() => () => abort.current?.abort(), []);
 
   const editor = useEditor({
-    extensions: EXTENSIONS,
+    extensions: WRITER_EXTENSIONS,
     content: draft.html,
     immediatelyRender: false,
     autofocus,
@@ -274,7 +274,12 @@ export default function WriteView({ detail, titleId, onBack, onDone }: WriteView
                   </Button>
                 ) : undefined
               }
-              sx={{ mb: 3, cursor: 'auto' }}
+              sx={{
+                mb: 3,
+                cursor: 'auto',
+                // The same red as the pop-up's other errors (the default derives a greyish one from error.light).
+                ...(failure.tone === 'error' && { bgcolor: 'error.light', color: 'error.dark', '& .MuiAlert-icon': { color: 'error.main' } }),
+              }}
             >
               {failure.message}
             </Alert>

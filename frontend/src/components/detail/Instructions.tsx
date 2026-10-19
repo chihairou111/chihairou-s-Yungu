@@ -10,11 +10,15 @@ import ExpandMore from '@mui/icons-material/ExpandMore';
 export const COLLAPSED_PX = 240;
 
 /**
- * Shifts the teacher's headings (h1–h4) below the section heading (h3), so they nest in the dialog's
- * outline instead of competing with its title: h1 → h4, h2 → h5, h3 and h4 → h6.
+ * Shifts the teacher's headings below the section heading (h3), so they nest in the dialog's outline
+ * instead of competing with its title: their top level becomes h4 and the rest keep their steps below
+ * it (capped at h6), so the outline never skips a level. `<h2>…<h3>` → `<h4>…<h5>`.
  */
 export function nestHeadings(html: string): string {
-  return html.replace(/<(\/?)h([1-4])\b/gi, (_, slash: string, level: string) => `<${slash}h${Math.min(Number(level) + 3, 6)}`);
+  const levels = Array.from(html.matchAll(/<h([1-6])\b/gi), (m) => Number(m[1]));
+  if (levels.length === 0) return html;
+  const shift = 4 - Math.min(...levels);
+  return html.replace(/<(\/?)h([1-6])\b/gi, (_, slash: string, level: string) => `<${slash}h${Math.min(Number(level) + shift, 6)}`);
 }
 
 /**

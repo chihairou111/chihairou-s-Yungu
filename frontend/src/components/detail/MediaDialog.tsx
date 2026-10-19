@@ -10,6 +10,7 @@ import useMediaQuery from '@mui/material/useMediaQuery';
 import type { Theme } from '@mui/material/styles';
 import Close from '@mui/icons-material/Close';
 import { MEDIA_UNAVAILABLE, type MediaAccess } from './media';
+import { popIn } from './motion';
 
 interface MediaDialogProps {
   open: boolean;
@@ -39,6 +40,7 @@ export default function MediaDialog(props: MediaDialogProps) {
   const { open, title, closeLabel, unavailableIcon, access, discardPrompt, onClose, onExited, children, actions } = props;
   const titleId = useId();
   const fullScreen = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
+  const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   const [confirming, setConfirming] = useState(false);
   if (confirming && discardPrompt === null) setConfirming(false);
 
@@ -71,6 +73,7 @@ export default function MediaDialog(props: MediaDialogProps) {
       onClose={(_, reason) => (confirming && reason === 'escapeKeyDown' ? keep() : requestClose())}
       slotProps={{
         transition: {
+          ...popIn(reduceMotion),
           onExited: () => {
             setConfirming(false);
             onExited();

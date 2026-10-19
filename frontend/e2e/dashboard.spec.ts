@@ -544,7 +544,15 @@ test('write: format text, keep the draft across a reload, Done adds a PDF to You
   await dialog.getByRole('button', { name: 'Done' }).click();
   await expect(page.getByText('Added Field notes.pdf to Your work')).toBeVisible();
   await expect(page).not.toHaveURL(/write=1/);
-  await expect(dialog.getByRole('region', { name: 'Your work' }).getByRole('button', { name: /^Field notes\.pdf/ })).toBeVisible();
+  const pdfRow = dialog.getByRole('region', { name: 'Your work' }).getByRole('button', { name: /^Field notes\.pdf/ });
+  await expect(pdfRow).toBeVisible();
+
+  // The new PDF opens in the viewer like any file.
+  await pdfRow.click();
+  const viewer = page.getByRole('dialog', { name: 'Field notes.pdf' });
+  await expect(viewer.locator('iframe')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(viewer).toBeHidden();
 
   // The draft was used up: the writer opens empty again.
   await dialog.getByRole('region', { name: 'Your work' }).getByRole('button', { name: 'Write' }).click();

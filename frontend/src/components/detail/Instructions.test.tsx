@@ -46,8 +46,11 @@ describe('Instructions', () => {
     expect(nestHeadings('<h1>A</h1><H2 class="x">B</H2><h3>C</h3><h4>D</h4><p>h1</p>')).toBe(
       '<h4>A</h4><h5 class="x">B</h5><h6>C</h6><h6>D</h6><p>h1</p>',
     );
+    // The teacher's top level becomes h4 whatever it was, so the outline never skips a level.
+    expect(nestHeadings('<h2>A</h2><p>x</p><h3>B</h3>')).toBe('<h4>A</h4><p>x</p><h5>B</h5>');
+    expect(nestHeadings('<h3>A</h3><h5>B</h5>')).toBe('<h4>A</h4><h6>B</h6>');
     render(<Instructions html="<h2>Task 3</h2><p>Go.</p>" />);
-    expect(screen.getByRole('heading', { level: 5, name: 'Task 3' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 4, name: 'Task 3' })).toBeInTheDocument();
   });
 
   it('expands when keyboard focus reaches a link below the cut', () => {

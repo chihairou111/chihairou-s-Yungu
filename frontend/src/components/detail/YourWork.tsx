@@ -152,7 +152,12 @@ export default function YourWork({ onWrite, focusOnMount = null }: YourWorkProps
             border: `1px dashed ${theme.yungu.color.outlineVariant}`,
           })}
         >
-          Nothing added yet. Record, take photos, write, or upload files — or drop them here.
+          Nothing added yet. Record, take photos, write, or upload files
+          {/* A phone has nowhere to drag files from. */}
+          <Box component="span" sx={{ '@media (max-width: 599.95px) and (pointer: coarse)': { display: 'none' } }}>
+            {' '}— or drop them here
+          </Box>
+          .
         </Typography>
       ) : (
         <Stack component="ul" ref={list} aria-label="Your files" sx={{ listStyle: 'none', m: 0, p: 0, mt: 2, gap: 0.5 }}>
@@ -275,7 +280,14 @@ function StatusChip({ status }: { status: WorkStatus }) {
       size="small"
       label={label}
       icon={icon}
-      sx={(theme) => ({ fontWeight: 600, '& .MuiChip-icon': { color: 'inherit', fontSize: 16 }, ...sx(theme) })}
+      sx={(theme) => ({
+        fontWeight: 600,
+        '& .MuiChip-icon': { color: 'inherit', fontSize: 16 },
+        // Not submitted → Submitted eases from grey to green instead of flipping.
+        transition: theme.transitions.create(['background-color', 'color'], { duration: theme.transitions.duration.shorter }),
+        '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+        ...sx(theme),
+      })}
     />
   );
 }
