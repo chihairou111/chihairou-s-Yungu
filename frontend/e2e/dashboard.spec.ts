@@ -472,3 +472,31 @@ test('attachments: rendered previews, and a full-screen viewer that steps throug
   await expect(detail.getByRole('button', { name: /Field notes example\.png/ })).toBeFocused();
   await expect(page).toHaveURL(/task=102/);
 });
+
+test('your work: upload files, submit, and the task moves to Submitted', async ({ page }) => {
+  await signIn(page);
+  await page.goto('/assignments?task=104');
+  const work = page.getByRole('dialog').getByRole('region', { name: 'Your work' });
+  await expect(work.getByText('Not submitted')).toBeVisible();
+  await expect(work.getByRole('button', { name: 'Submit' })).toBeDisabled();
+
+  await work.locator('input[type="file"]').setInputFiles([
+    { name: 'answers.txt', mimeType: 'text/plain', buffer: Buffer.from('1. 42') },
+    { name: 'blank.txt', mimeType: 'text/plain', buffer: Buffer.alloc(0) },
+  ]);
+  await expect(work.getByRole('button', { name: /^answers\.txt/ })).toBeVisible();
+  await expect(work.getByRole('alert')).toHaveText(/That file is empty\./);
+
+  await work.getByRole('button', { name: 'Submit' }).click();
+  await expect(work.getByRole('button', { name: 'Update' })).toBeVisible();
+  await expect(work.getByText('Submitted', { exact: true })).toBeVisible();
+
+  // The draft and the hand-in live on the server: a reload shows the same.
+  await page.reload();
+  await expect(work.getByRole('button', { name: /^answers\.txt/ })).toBeVisible();
+  await expect(work.getByRole('button', { name: 'Update' })).toBeVisible();
+
+  await page.keyboard.press('Escape');
+  await page.getByRole('tab', { name: 'Submitted' }).click();
+  await expect(page.getByText('Unit 4 Problem Set')).toBeVisible();
+});
