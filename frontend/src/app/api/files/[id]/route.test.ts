@@ -197,6 +197,65 @@ describe('GET /api/files/[id]', () => {
         }
       });
 
+      it('asks OSS for unencoded bytes, refuses redirects, and passes the browser abort on', async () => {
+        const fetchMock = upstream('%PDF', { status: 200, headers: { 'content-length': '4' } });
+        vi.stubGlobal('fetch', fetchMock);
+        const spy = vi.spyOn(data, 'getFile').mockResolvedValueOnce({ redirect: SIGNED });
+        const browser = new AbortController();
+        try {
+          const res = await GET(new Request('http://localhost/x?view=pdf', { signal: browser.signal }), ctx({ id: ref.id }));
+          expect(res.status).toBe(200);
+          const init = fetchMock.mock.calls[0][1] as RequestInit;
+          // A redirect could lead anywhere (plain http included); and content-length / content-range are
+          // only right for the bytes as stored, so OSS must not compress them on the way.
+          expect(init.redirect).toBe('error');
+          expect(new Headers(init.headers).get('accept-encoding')).toBe('identity');
+          expect(init.signal?.aborted).toBe(false);
+          browser.abort();
+          expect(init.signal?.aborted).toBe(true);
+        } finally {
+          spy.mockRestore();
+        }
+      });
+
+      it('502s when OSS answers with a redirect (fetch refuses to follow it)', async () => {
+        const fetchMock = vi.fn<typeof fetch>(async (_url, init) => {
+          if (init?.redirect === 'error') throw new TypeError('fetch failed: unexpected redirect');
+          return new Response('%PDF', { status: 200 });
+        });
+        vi.stubGlobal('fetch', fetchMock);
+        const spy = vi.spyOn(data, 'getFile').mockResolvedValueOnce({ redirect: SIGNED });
+        try {
+          const res = await GET(new Request('http://localhost/x?view=pdf'), ctx({ id: ref.id }));
+          expect(res.status).toBe(502);
+          expect(await res.json()).toEqual({ error: "Can't reach Yungu right now. Try again." });
+        } finally {
+          spy.mockRestore();
+        }
+      });
+
+      it('502s after 45 s when OSS sends no answer', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        const fetchMock = vi.fn<typeof fetch>(
+          (_url, init) => new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal!.reason))),
+        );
+        vi.stubGlobal('fetch', fetchMock);
+        const spy = vi.spyOn(data, 'getFile').mockResolvedValueOnce({ redirect: SIGNED });
+        try {
+          let settled = false;
+          const pending = GET(new Request('http://localhost/x?view=pdf'), ctx({ id: ref.id })).finally(() => (settled = true));
+          await vi.advanceTimersByTimeAsync(44_999);
+          expect(settled).toBe(false);
+          await vi.advanceTimersByTimeAsync(1);
+          const res = await pending;
+          expect(res.status).toBe(502);
+          expect(await res.json()).toEqual({ error: "Can't reach Yungu right now. Try again." });
+        } finally {
+          spy.mockRestore();
+          vi.useRealTimers();
+        }
+      });
+
       it('leaves a download alone: ?download=1 still redirects', async () => {
         const fetchMock = upstream('x', { status: 200 });
         vi.stubGlobal('fetch', fetchMock);

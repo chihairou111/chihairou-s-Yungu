@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireSession, withServiceErrors } from '@/lib/api-auth';
 import { data } from '@/lib/data';
 import { YUNGU_UNAVAILABLE } from '@/lib/data/errors';
+import { READ_TIMEOUT_MS } from '@/lib/data/service';
 
 const ACTIVE_TYPES = new Set([
   'text/html',
@@ -22,7 +23,7 @@ export const GET = withServiceErrors(async (request: Request, { params }: { para
   if ('redirect' in file) {
     const url = new URL(request.url);
     if (url.searchParams.get('view') === 'pdf' && url.searchParams.get('download') !== '1') {
-      return pdfThrough(file.redirect, request.headers.get('range'));
+      return pdfThrough(file.redirect, request.headers.get('range'), request.signal);
     }
     // The real service hands back a short-lived signed OSS link; the browser fetches (and ranges) from there.
     return new Response(null, {
@@ -63,15 +64,29 @@ export const GET = withServiceErrors(async (request: Request, { params }: { para
  * pointed at the link makes Chrome download the file instead of showing it. The viewer's byte ranges
  * pass through; the bytes are never buffered here. Typing them as a PDF is safe whatever they hold:
  * Chrome's viewer runs no page script, and a non-PDF just fails to open.
+ *
+ * OSS gets the read budget (`READ_TIMEOUT_MS`) to start answering; the body then streams for as long as
+ * the browser keeps reading, and the browser closing the frame (`browserGone`) cancels the upstream
+ * fetch. Redirects are refused, so a link cannot bounce the fetch past the https check, and the bytes
+ * are asked for unencoded, so the content-length / content-range passed on describe the body sent.
  */
-async function pdfThrough(link: string, range: string | null): Promise<Response> {
+async function pdfThrough(link: string, range: string | null, browserGone: AbortSignal): Promise<Response> {
   const unavailable = () => NextResponse.json({ error: YUNGU_UNAVAILABLE }, { status: 502 });
   if (!link.startsWith('https://')) return unavailable();
+  const slow = new AbortController();
+  const timer = setTimeout(() => slow.abort(), READ_TIMEOUT_MS);
   let upstream: Response;
   try {
-    upstream = await fetch(link, { headers: range ? { range } : {}, cache: 'no-store' });
+    upstream = await fetch(link, {
+      headers: { 'accept-encoding': 'identity', ...(range ? { range } : {}) },
+      cache: 'no-store',
+      redirect: 'error',
+      signal: AbortSignal.any([browserGone, slow.signal]),
+    });
   } catch {
     return unavailable();
+  } finally {
+    clearTimeout(timer);
   }
   if (upstream.status !== 200 && upstream.status !== 206 && upstream.status !== 416) {
     await upstream.body?.cancel();
