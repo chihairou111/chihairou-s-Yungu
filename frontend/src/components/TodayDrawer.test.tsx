@@ -1,12 +1,18 @@
 import { act, fireEvent, render, screen, waitFor, within } from './test-render';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ClassEvent } from '@/lib/types';
+import type { ClassEvent, Course } from '@/lib/types';
 import TodayDrawer, { shouldRevealEdgeButton } from './TodayDrawer';
 
 const HOUR = 3600_000;
 const MIN = 60_000;
 const MONDAY = Date.UTC(2026, 9, 18, 16, 0); // Mon Oct 19 00:00 China
+
+const NOW = MONDAY + 10 * HOUR; // Mon Oct 19 10:00 China
+const COURSES: Course[] = [
+  { id: 1, name: 'Chinese I', color: 'Tomato' },
+  { id: 4, name: 'H Physics I', color: 'Peacock' },
+];
 
 const classes: ClassEvent[] = [
   { name: 'Chinese I', room: 'D419', start: MONDAY + 8 * HOUR, end: MONDAY + 8 * HOUR + 40 * MIN, isClass: true, courseId: 1 },
@@ -22,23 +28,29 @@ async function openWithKeyboard() {
 
 describe('TodayDrawer', () => {
   it('starts closed behind a "Today\'s classes" button', () => {
-    render(<TodayDrawer events={classes} />);
+    render(<TodayDrawer events={classes} now={NOW} courses={COURSES} />);
     const button = screen.getByRole('button', { name: "Today's classes" });
     expect(button).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it("opens a titled drawer listing today's classes", async () => {
-    render(<TodayDrawer events={classes} />);
+    render(<TodayDrawer events={classes} now={NOW} courses={COURSES} />);
     await openWithKeyboard();
     const drawer = screen.getByRole('dialog', { name: "Today's classes" });
     expect(within(drawer).getByRole('heading', { name: "Today's classes" })).toBeInTheDocument();
     const items = within(drawer).getAllByRole('listitem');
-    expect(items.map((li) => li.textContent)).toEqual(['Chinese I08:00–08:40 · D419', 'H Physics I12:30–13:10 · D508']);
+    expect(items.map((li) => li.textContent)).toEqual(['Chinese I08:00–08:40 · D419', 'NextH Physics I12:30–13:10 · D508']);
+  });
+
+  it("dates the drawer under its title", async () => {
+    render(<TodayDrawer events={classes} now={NOW} courses={COURSES} />);
+    await openWithKeyboard();
+    expect(within(screen.getByRole('dialog')).getByText('Mon, Oct 19')).toBeInTheDocument();
   });
 
   it('closes with its close button and with Escape', async () => {
-    render(<TodayDrawer events={classes} />);
+    render(<TodayDrawer events={classes} now={NOW} courses={COURSES} />);
     const button = screen.getByRole('button', { name: "Today's classes" });
     await openWithKeyboard();
     expect(button).toHaveAttribute('aria-expanded', 'true');
@@ -53,7 +65,7 @@ describe('TodayDrawer', () => {
   });
 
   it('shows the empty state inside the drawer', async () => {
-    render(<TodayDrawer events={[]} />);
+    render(<TodayDrawer events={[]} now={NOW} courses={COURSES} />);
     await openWithKeyboard();
     expect(within(screen.getByRole('dialog')).getByText('No classes today')).toBeInTheDocument();
   });
@@ -83,13 +95,13 @@ describe('TodayDrawer edge reveal', () => {
   const button = () => screen.getByRole('button', { name: "Today's classes" });
 
   it('renders no element other than the button (nothing overlays the page)', () => {
-    const { container } = render(<TodayDrawer events={classes} />);
+    const { container } = render(<TodayDrawer events={classes} now={NOW} courses={COURSES} />);
     expect(container.childElementCount).toBe(1);
     expect(container.firstElementChild).toBe(button());
   });
 
   it('reveals the button when the pointer nears the right edge and hides it when it moves away or leaves', async () => {
-    render(<TodayDrawer events={classes} />);
+    render(<TodayDrawer events={classes} now={NOW} courses={COURSES} />);
     expect(button()).toHaveAttribute('data-revealed', 'false');
 
     stubClientWidth(window.innerWidth);
@@ -109,7 +121,7 @@ describe('TodayDrawer edge reveal', () => {
 
   it('measures the zone from the layout viewport, not past a classic scrollbar', async () => {
     stubClientWidth(window.innerWidth - 17);
-    render(<TodayDrawer events={classes} />);
+    render(<TodayDrawer events={classes} now={NOW} courses={COURSES} />);
     // 50px from the content edge, 67px from the window edge: inside the zone only if the scrollbar is excluded.
     fireEvent.pointerMove(window, { clientX: window.innerWidth - 17 - 50, clientY: 400 });
     await nextFrame();
@@ -118,14 +130,14 @@ describe('TodayDrawer edge reveal', () => {
 
   it('stays revealed while the pointer is over the button itself', async () => {
     stubClientWidth(window.innerWidth);
-    render(<TodayDrawer events={classes} />);
+    render(<TodayDrawer events={classes} now={NOW} courses={COURSES} />);
     fireEvent.pointerMove(button(), { clientX: 0, clientY: 400 });
     await nextFrame();
     expect(button()).toHaveAttribute('data-revealed', 'true');
   });
 
   it('stays revealed while it has focus, e.g. after the drawer closes by mouse', async () => {
-    render(<TodayDrawer events={classes} />);
+    render(<TodayDrawer events={classes} now={NOW} courses={COURSES} />);
     expect(button()).toHaveAttribute('data-focused', 'false');
     act(() => button().focus());
     expect(button()).toHaveAttribute('data-focused', 'true');
@@ -135,7 +147,7 @@ describe('TodayDrawer edge reveal', () => {
 
   it('does not reveal over the app bar', async () => {
     stubClientWidth(window.innerWidth);
-    render(<TodayDrawer events={classes} />);
+    render(<TodayDrawer events={classes} now={NOW} courses={COURSES} />);
     fireEvent.pointerMove(window, { clientX: window.innerWidth - 20, clientY: 10 });
     await nextFrame();
     expect(button()).toHaveAttribute('data-revealed', 'false');

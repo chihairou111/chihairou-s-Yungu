@@ -1,7 +1,7 @@
 import { render, screen, within } from './test-render';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import TodayClasses from './TodayClasses';
-import type { ClassEvent } from '@/lib/types';
+import type { ClassEvent, Course } from '@/lib/types';
 
 const HOUR = 3600_000;
 const MIN = 60_000;
@@ -13,19 +13,29 @@ const classes: ClassEvent[] = [
   { name: 'Self Study', room: null, start: MONDAY + 14 * HOUR + 55 * MIN, end: MONDAY + 15.5 * HOUR + 5 * MIN, isClass: true, courseId: 8 },
 ];
 
+const COURSES: Course[] = [
+  { id: 1, name: 'Chinese I', color: 'Tomato' },
+  { id: 2, name: 'CL Business with Personal Finance I', color: 'Tangerine' },
+];
+const EARLY = MONDAY + 7 * HOUR;
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe('TodayClasses', () => {
   it('lists each class in order with its China-time range and room', () => {
-    render(<TodayClasses events={classes} />);
+    render(<TodayClasses events={classes} now={EARLY} courses={COURSES} />);
     const items = within(screen.getByRole('list')).getAllByRole('listitem');
     expect(items).toHaveLength(3);
-    expect(items.map((li) => li.querySelector('p')?.textContent)).toEqual(['Chinese I', 'CL Business I', 'Self Study']);
+    expect(items.map((li) => within(li).getByRole('heading').textContent)).toEqual(['Chinese I', 'CL Business I', 'Self Study']);
     expect(within(items[0]).getByText('Chinese I')).toBeInTheDocument();
     expect(within(items[0]).getByText('08:00–08:40 · D419')).toBeInTheDocument();
     expect(within(items[1]).getByText('08:45–09:25 · D405')).toBeInTheDocument();
   });
 
   it('omits the separator when a class has no room', () => {
-    render(<TodayClasses events={classes} />);
+    render(<TodayClasses events={classes} now={EARLY} courses={COURSES} />);
     const items = within(screen.getByRole('list')).getAllByRole('listitem');
     const line = within(items[2]).getByText(/^14:55–15:35/);
     expect(line.textContent).toBe('14:55–15:35');
@@ -33,7 +43,35 @@ describe('TodayClasses', () => {
   });
 
   it('shows an empty state when there are no classes', () => {
-    render(<TodayClasses events={[]} />);
+    render(<TodayClasses events={[]} now={EARLY} courses={COURSES} />);
     expect(screen.getByText('No classes today')).toBeInTheDocument();
+  });
+});
+
+describe('TodayClasses timing', () => {
+  it('labels the class in progress Now and the following one Next, and marks ended classes', () => {
+    // 08:50: Chinese ended, Business runs 08:45–09:35, Self Study is next.
+    render(<TodayClasses events={classes} now={MONDAY + 8 * HOUR + 50 * MIN} courses={COURSES} />);
+    const items = within(screen.getByRole('list')).getAllByRole('listitem');
+    expect(items.map((li) => li.dataset.timing)).toEqual(['ended', 'now', 'next']);
+    expect(within(items[1]).getByText('Now')).toBeInTheDocument();
+    expect(within(items[2]).getByText('Next')).toBeInTheDocument();
+    expect(within(items[0]).queryByText(/^(Now|Next)$/)).not.toBeInTheDocument();
+  });
+
+  it('dots each class with its course color (Peacock when the course is unknown)', () => {
+    render(<TodayClasses events={classes} now={EARLY} courses={COURSES} />);
+    const items = within(screen.getByRole('list')).getAllByRole('listitem');
+    expect(items[0].style.getPropertyValue('--course')).toBe('#D50000');
+    expect(items[1].style.getPropertyValue('--course')).toBe('#F4511E');
+    expect(items[2].style.getPropertyValue('--course')).toBe('#039BE5');
+  });
+
+  it('scrolls the class in progress (or else the next one) into view', () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    render(<TodayClasses events={classes} now={MONDAY + 8 * HOUR + 50 * MIN} courses={COURSES} />);
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scroll.mock.contexts[0]).toHaveTextContent('CL Business I');
   });
 });

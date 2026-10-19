@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState, type RefObject } from 'react';
+import Box from '@mui/material/Box';
 import Divider from '@mui/material/Divider';
 import Drawer from '@mui/material/Drawer';
 import Fab from '@mui/material/Fab';
@@ -8,8 +9,10 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Close from '@mui/icons-material/Close';
 import EventNote from '@mui/icons-material/EventNote';
-import type { ClassEvent } from '@/lib/types';
+import { chinaShortDate } from '@/lib/time';
+import type { ClassEvent, Course } from '@/lib/types';
 import TodayClasses from './TodayClasses';
+import { useNow } from './useNow';
 
 const DRAWER_ID = 'today-drawer';
 const TITLE_ID = 'today-drawer-title';
@@ -68,6 +71,10 @@ function useEdgeReveal(buttonRef: RefObject<HTMLElement | null>): boolean {
 interface TodayDrawerProps {
   /** Today's classes, already selected and ordered by `todaysClasses`. */
   events: ClassEvent[];
+  /** Server time; the drawer then follows the device clock (Now / Next, the date). */
+  now: number;
+  /** For each class's course-color dot. */
+  courses: Course[];
 }
 
 /**
@@ -75,7 +82,8 @@ interface TodayDrawerProps {
  * screens it sits mid-right and appears when the pointer nears the right edge, while it has focus,
  * or while the drawer is open; on touch screens and narrow windows it is always shown bottom-right.
  */
-export default function TodayDrawer({ events }: TodayDrawerProps) {
+export default function TodayDrawer({ events, now: serverNow, courses }: TodayDrawerProps) {
+  const now = useNow(serverNow);
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const near = useEdgeReveal(buttonRef);
@@ -115,6 +123,8 @@ export default function TodayDrawer({ events }: TodayDrawerProps) {
             opacity: 1,
             pointerEvents: 'auto',
           },
+          // On phones, centred on the bottom nav pill (16 + 56/2 - 40/2 = 24 from the bottom).
+          [theme.breakpoints.down('sm')]: { bottom: 'calc(24px + env(safe-area-inset-bottom, 0px))' },
           '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
         })}
       >
@@ -131,20 +141,25 @@ export default function TodayDrawer({ events }: TodayDrawerProps) {
             role: 'dialog',
             'aria-modal': true,
             'aria-labelledby': TITLE_ID,
-            sx: { width: 320, maxWidth: '100%' },
+            sx: { width: 360, maxWidth: '100%' },
           },
         }}
       >
-        <Stack direction="row" sx={{ alignItems: 'center', gap: 1, pl: 2, pr: 1, minHeight: 64 }}>
-          <Typography id={TITLE_ID} variant="h2" sx={{ flexGrow: 1 }}>
-            Today&apos;s classes
-          </Typography>
+        <Stack direction="row" sx={{ alignItems: 'center', gap: 1, pl: 2, pr: 1, py: 1, minHeight: 64 }}>
+          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+            <Typography id={TITLE_ID} variant="h2" sx={{ fontSize: '1.375rem', lineHeight: '28px' }}>
+              Today&apos;s classes
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {chinaShortDate(now)}
+            </Typography>
+          </Box>
           <IconButton aria-label="Close" onClick={() => setOpen(false)}>
             <Close />
           </IconButton>
         </Stack>
         <Divider />
-        <TodayClasses events={events} />
+        <TodayClasses events={events} now={now} courses={courses} />
       </Drawer>
     </>
   );

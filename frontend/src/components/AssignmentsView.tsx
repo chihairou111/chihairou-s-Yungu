@@ -96,7 +96,7 @@ export default function AssignmentsView({ todo, submitted, courses, todayClasses
           <SubmittedList items={submitted} now={now} />
         )}
       </Box>
-      <TodayDrawer events={todayClasses} />
+      <TodayDrawer events={todayClasses} now={now} courses={courses} />
     </>
   );
 }
