@@ -46,6 +46,12 @@ class YunguError(Exception):
         self.resp = resp
 
 
+def session_expired(resp_json) -> bool:
+    """True if a task.yungu.org JSON body says the login session is gone:
+    `ifLogin: false` or `code: 1000` (observed when the SESSION cookie expires)."""
+    return isinstance(resp_json, dict) and (resp_json.get("ifLogin") is False or resp_json.get("code") == 1000)
+
+
 @dataclass
 class UploadedFile:
     file_id: int
@@ -61,6 +67,8 @@ class YunguTask:
         self.s = requests.Session()
         self.s.headers.update({"User-Agent": UA})
         self.user: Optional[dict] = None
+
+    session_expired = staticmethod(session_expired)
 
     # ------------------------------------------------------------------ http
     def _api(self, method: str, path: str, *, params=None, json_body=None, base=BASE,
@@ -177,14 +185,18 @@ class YunguTask:
             "teamId": team_id, "taskPublishId": str(publish_id)})
         return j["content"]["fileModelList"] or []
 
-    def file_url(self, file_id: int, download: bool = False) -> str:
-        """Signed OSS URL (valid ~2h) via the 302 from preview_file / new_download_file."""
-        path = "/api/new_download_file" if download else "/api/preview_file"
+    def file_redirect(self, file_id: int, preview: bool) -> str:
+        """Signed OSS URL (valid ~2h) from the 302 of preview_file (preview=True) or
+        new_download_file (preview=False)."""
+        path = "/api/preview_file" if preview else "/api/new_download_file"
         r = self.s.get(BASE + path, params={"id": file_id}, allow_redirects=False,
                        timeout=self.timeout, headers={"Referer": BASE + "/umiTask"})
         if r.status_code != 302:
             raise YunguError(f"{path}?id={file_id} -> HTTP {r.status_code}", r)
         return r.headers["Location"]
+
+    def file_url(self, file_id: int, download: bool = False) -> str:
+        return self.file_redirect(file_id, preview=not download)
 
     def download_file(self, file_id: int, dest: str) -> str:
         url = self.file_url(file_id, download=True)
@@ -200,15 +212,19 @@ class YunguTask:
         return self._api("GET", "/api/sts/token", params={"type": 1})["content"]
 
     def upload_file(self, path: str, name: Optional[str] = None) -> UploadedFile:
-        """1) STS token 2) PUT to OSS 3) register with /api/upload_file/new -> fileId.
-        Note: does NOT attach the file to a task; use save_draft()/submit() for that."""
+        """Upload a local file; see upload_bytes. Does NOT attach it to a task."""
         name = name or os.path.basename(path)
         with open(path, "rb") as f:
             data = f.read()
+        return self.upload_bytes(name, mimetypes.guess_type(name)[0] or "application/octet-stream", data)
+
+    def upload_bytes(self, name: str, mime: str, data: bytes) -> UploadedFile:
+        """1) STS token 2) PUT to OSS 3) register with /api/upload_file/new -> fileId.
+        Note: does NOT attach the file to a task; use save_draft()/submit() for that."""
+        ctype = mime or "application/octet-stream"
         sts = self._sts()
         ts = int(time.time() * 1000)
         key = f"{sts['ossPath']}{ts}_{name}"
-        ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"
         self._oss_put(sts, key, data, ctype)
         j = self._api("GET", "/api/upload_file/new", params={
             "fileName": name, "bucketName": sts["bucketName"], "fileSize": len(data),
@@ -265,6 +281,27 @@ class YunguTask:
 
     def my_file_ids(self, publish_id: int, team_id=None) -> List[int]:
         return [f["fileId"] for f in (self.achievement(publish_id, team_id)["fileModelList"] or [])]
+
+    # -------------------------------------------------------------- comments
+    # The comment thread belongs to the student's own work on a task (api/NOTES.md section 7).
+    def comments(self, publish_id: int, team_id=None) -> List[dict]:
+        """Comments on my work for this task, newest first: feedbackId, parentId, userId, userName,
+        eName, descript, feedbackTime ('YYYY-MM-DD HH:MM:SS', China time), deletePermission (unreliable)."""
+        j = self._api("POST", "/api/student/getAchievementDetail/comment", json_body={
+            "distributionType": 1, "ifPc": True, "studentId": self.user_id,
+            "teamId": team_id, "taskPublishId": str(publish_id)})
+        return j["content"] or []
+
+    def add_comment(self, publish_id: int, text: str) -> None:
+        """Post a comment. taskId is the task's id (not taskPublishId); both it and
+        taskUserRelationId come from getAchievementDetail. `distributioType` is spelt that way."""
+        a = self.achievement(publish_id)
+        self._api("POST", "/api/saveCommentary", json_body={
+            "commentaryUserId": self.user_id, "taskUserRelationIds": [a["taskUserRelationId"]],
+            "distributioType": 1, "taskId": a["taskId"], "content": text, "status": "1"})
+
+    def delete_comment(self, feedback_id: int) -> None:
+        self._api("GET", "/api/deletedCommentary", params={"feedbackId": feedback_id})
 
     # -------------------------------------------------------------- calendar
     @staticmethod

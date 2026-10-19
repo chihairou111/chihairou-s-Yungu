@@ -6,3 +6,4 @@ test-results/
 playwright-report/
 *.tsbuildinfo
 frontend/.impeccable/hook.cache.json
+api/.venv/
