@@ -79,9 +79,10 @@ describe('CommentsSection', () => {
     vi.mocked(addComment).mockRejectedValue(new ApiError(400, 'Write a comment first.'));
     render(<CommentsSection taskId={7} comments={TWO} />);
     await user.type(screen.getByPlaceholderText('Add a comment'), 'Hi');
-    await user.click(screen.getByRole('button', { name: 'Post' }));
+    await user.keyboard('{Control>}{Enter}{/Control}');
     expect(await screen.findByText('Write a comment first.')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Add a comment')).toHaveValue('Hi');
+    expect(screen.getByPlaceholderText('Add a comment')).toHaveFocus();
   });
 
   it('points to sign-in when the session ended', async () => {
@@ -136,6 +137,15 @@ describe('CommentsSection', () => {
     render(<CommentsSection taskId={7} comments={[mine('a'), mine('b')]} />);
     await user.click(screen.getAllByRole('button', { name: 'Delete comment' })[0]);
     await user.click(screen.getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Delete comment' })).toHaveFocus());
+  });
+
+  it('Escape cancels the delete question and returns focus to its trigger', async () => {
+    const user = userEvent.setup();
+    render(<CommentsSection taskId={7} comments={TWO} />);
+    await user.click(screen.getByRole('button', { name: 'Delete comment' }));
+    await user.keyboard('{Escape}');
+    expect(deleteComment).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByRole('button', { name: 'Delete comment' })).toHaveFocus());
   });
 

@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import Link from 'next/link';
 import Alert from '@mui/material/Alert';
 import Avatar from '@mui/material/Avatar';
@@ -15,6 +15,7 @@ import ExpandMore from '@mui/icons-material/ExpandMore';
 import { alpha } from '@mui/material/styles';
 import type { Comment } from '@/lib/types';
 import { chinaRelativeTime } from '@/lib/time';
+import { VISUALLY_HIDDEN } from '../visually-hidden';
 import { addComment, ApiError, deleteComment, isSessionEnded } from './api';
 import { useDetailActions } from './DetailContext';
 
@@ -42,6 +43,16 @@ function failure(error: unknown): Failure {
   return { message: 'Something went wrong. Try again.', sessionEnded: false };
 }
 
+const noSubscribe = () => () => {};
+/** The modifier named in the shortcut hint: ⌘ on Apple devices, Ctrl elsewhere (Ctrl always works too). */
+function useModifierName(): string {
+  return useSyncExternalStore(
+    noSubscribe,
+    () => (/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl'),
+    () => 'Ctrl',
+  );
+}
+
 type Focus = { kind: 'composer' } | { kind: 'delete'; id: string };
 
 /**
@@ -51,8 +62,8 @@ type Focus = { kind: 'composer' } | { kind: 'delete'; id: string };
  */
 export default function CommentsSection({ taskId, comments: incoming }: { taskId: number; comments: Comment[] }) {
   const headingId = useId();
-  const listId = useId();
   const { refresh } = useDetailActions();
+  const modifier = useModifierName();
 
   // A fresh list from the server (after a refresh) replaces the local one.
   const [seen, setSeen] = useState(incoming);
@@ -117,6 +128,7 @@ export default function CommentsSection({ taskId, comments: incoming }: { taskId
   }
 
   async function remove(id: string) {
+    if (deleting !== null) return;
     setDeleting(id);
     setError(null);
     const index = comments.findIndex((c) => c.id === id);
@@ -161,7 +173,6 @@ export default function CommentsSection({ taskId, comments: incoming }: { taskId
               setPendingFocus({ kind: 'composer' });
             }}
             aria-expanded={false}
-            aria-controls={listId}
             endIcon={<ExpandMore />}
             sx={{ font: 'inherit', color: 'inherit', ml: -1, px: 1 }}
           >
@@ -171,7 +182,7 @@ export default function CommentsSection({ taskId, comments: incoming }: { taskId
       )}
 
       {open && (
-        <Box id={listId}>
+        <Box>
           {comments.length > 0 && (
             <Stack component="ul" sx={{ listStyle: 'none', m: 0, p: 0, gap: 2.5, mb: 3 }}>
               {comments.map((c) => (
@@ -200,7 +211,17 @@ export default function CommentsSection({ taskId, comments: incoming }: { taskId
                       {c.mine && (
                         <Box sx={{ ml: 'auto' }}>
                           {confirming === c.id ? (
-                            <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
+                            <Stack
+                              direction="row"
+                              sx={{ alignItems: 'center', gap: 0.5 }}
+                              onKeyDown={(event) => {
+                                if (event.key !== 'Escape' || deleting === c.id) return;
+                                // Cancels the question, not the pop-up.
+                                event.stopPropagation();
+                                setConfirming(null);
+                                setPendingFocus({ kind: 'delete', id: c.id });
+                              }}
+                            >
                               <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
                                 Delete comment?
                               </Typography>
@@ -208,10 +229,10 @@ export default function CommentsSection({ taskId, comments: incoming }: { taskId
                                 ref={cancelRef}
                                 size="small"
                                 onClick={() => {
+                                  if (deleting === c.id) return;
                                   setConfirming(null);
                                   setPendingFocus({ kind: 'delete', id: c.id });
                                 }}
-                                disabled={deleting === c.id}
                               >
                                 Cancel
                               </Button>
@@ -219,7 +240,7 @@ export default function CommentsSection({ taskId, comments: incoming }: { taskId
                                 size="small"
                                 color="error"
                                 onClick={() => void remove(c.id)}
-                                disabled={deleting === c.id}
+                                aria-busy={deleting === c.id || undefined}
                                 startIcon={deleting === c.id ? <CircularProgress size={14} color="inherit" /> : undefined}
                               >
                                 Delete
@@ -276,35 +297,39 @@ export default function CommentsSection({ taskId, comments: incoming }: { taskId
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKeyDown}
-            disabled={posting}
+            aria-busy={posting || undefined}
             inputRef={composerRef}
-            slotProps={{ htmlInput: { 'aria-label': 'Add a comment', maxLength: MAX_COMMENT } }}
+            slotProps={{ htmlInput: { 'aria-label': 'Add a comment', maxLength: MAX_COMMENT, readOnly: posting } }}
           />
           <Stack direction="row" sx={{ mt: 1, gap: 2, alignItems: 'center', justifyContent: 'flex-end' }}>
             {text.length >= COUNTER_FROM && (
               <Typography
                 variant="caption"
                 color={text.length >= MAX_COMMENT ? 'error' : 'text.secondary'}
-                role="status"
                 sx={{ fontVariantNumeric: 'tabular-nums' }}
               >
                 {text.length} / {MAX_COMMENT}
               </Typography>
             )}
+            <Box component="span" role="status" sx={VISUALLY_HIDDEN}>
+              {text.length >= MAX_COMMENT ? 'Character limit reached' : ''}
+            </Box>
             <Typography
               variant="caption"
               color="text.secondary"
-              sx={{ '@media (pointer: coarse)': { display: 'none' }, display: { xs: 'none', sm: 'block' } }}
+              sx={{ display: { xs: 'none', sm: 'block' }, '@media (pointer: coarse)': { display: 'none' } }}
             >
-              Ctrl+Enter to post
+              {modifier}+Enter to post
             </Typography>
             <Button
               variant="contained"
               onClick={() => void post()}
-              disabled={blank || posting}
+              disabled={blank}
+              aria-busy={posting || undefined}
               startIcon={posting ? <CircularProgress size={16} color="inherit" /> : undefined}
+              sx={{ minWidth: 104 }}
             >
-              {posting ? 'Posting' : 'Post'}
+              Post
             </Button>
           </Stack>
         </Box>
