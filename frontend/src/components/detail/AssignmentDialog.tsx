@@ -22,6 +22,7 @@ import { DetailContext, type DetailActions } from './DetailContext';
 import DetailHeader from './DetailHeader';
 import Instructions from './Instructions';
 import { useTaskParam } from './useTaskParam';
+import { WorkProvider } from './WorkContext';
 import WriteView from './WriteView';
 import YourWork from './YourWork';
 
@@ -144,15 +145,16 @@ export default function AssignmentDialog({ now }: { now: number }) {
       {loaded === null ? (
         <LoadingView titleId={titleId} onClose={close} />
       ) : loaded.kind === 'ready' ? (
-        view.writing ? (
-          <DetailContext.Provider value={actions}>
-            <WriteView detail={loaded.detail} onBack={closeWriter} />
-          </DetailContext.Provider>
-        ) : (
-          <DetailContext.Provider value={actions}>
-            <DetailView detail={loaded.detail} now={now} titleId={titleId} onClose={close} onWrite={openWriter} />
-          </DetailContext.Provider>
-        )
+        <DetailContext.Provider value={actions}>
+          {/* Above the view switch, so the work (and anything still uploading) outlives a trip to the writer. */}
+          <WorkProvider key={loaded.detail.id} detail={loaded.detail}>
+            {view.writing ? (
+              <WriteView detail={loaded.detail} onBack={closeWriter} />
+            ) : (
+              <DetailView detail={loaded.detail} now={now} titleId={titleId} onClose={close} onWrite={openWriter} />
+            )}
+          </WorkProvider>
+        </DetailContext.Provider>
       ) : loaded.kind === 'not-found' ? (
         <StatusView
           titleId={titleId}
@@ -280,7 +282,7 @@ function DetailView({ detail, now, titleId, onClose, onWrite }: DetailViewProps)
             <AttachmentsSection files={detail.attachments} />
           </>
         }
-        work={<YourWork detail={detail} onWrite={onWrite} />}
+        work={<YourWork onWrite={onWrite} />}
         comments={<CommentsSection comments={detail.comments} />}
       />
     </>

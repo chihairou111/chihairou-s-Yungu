@@ -485,7 +485,12 @@ test('your work: upload files, submit, and the task moves to Submitted', async (
     { name: 'blank.txt', mimeType: 'text/plain', buffer: Buffer.alloc(0) },
   ]);
   await expect(work.getByRole('button', { name: /^answers\.txt/ })).toBeVisible();
-  await expect(work.getByRole('alert')).toHaveText(/That file is empty\./);
+  await expect(work.getByRole('alert')).toHaveText(/blank\.txt is empty\./);
+
+  // A trip to the writer and back keeps the list (and what the server has as the draft).
+  await work.getByRole('button', { name: 'Write' }).click();
+  await page.getByRole('button', { name: 'Back to the assignment' }).click();
+  await expect(work.getByRole('button', { name: /^answers\.txt/ })).toBeVisible();
 
   await work.getByRole('button', { name: 'Submit' }).click();
   await expect(work.getByRole('button', { name: 'Update' })).toBeVisible();

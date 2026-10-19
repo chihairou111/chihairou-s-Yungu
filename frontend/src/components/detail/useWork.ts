@@ -7,8 +7,8 @@ import { useDetailActions } from './DetailContext';
 
 /** The server's own limits, checked first so an obviously bad file is never sent. */
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
-export const EMPTY_FILE = 'That file is empty.';
-export const TOO_LARGE = 'Files up to 50 MB.';
+/** The server's own wording, for the checks it shares with the browser. */
+const SERVER_EMPTY = 'That file is empty.';
 export const SESSION_ENDED = 'Your session ended — sign in again.';
 
 export type WorkStatus = 'not-submitted' | 'submitted' | 'late';
@@ -29,11 +29,16 @@ export interface Work {
   /** Anything on its way to the server: an upload, a draft save, or the submit itself. */
   busy: boolean;
   submitting: boolean;
+  /** Every failure since the last action started (one per file in a multi-file upload). */
+  errors: string[];
+  /** The first of `errors`, or null. */
   error: string | null;
   /** The last failure was a 401: the error says so and the panel offers a way to sign in. */
   sessionEnded: boolean;
   add(file: FileRef): Promise<void>;
   addLocal(file: File): Promise<void>;
+  /** Uploads several local files at once; failures are collected, each naming its file. */
+  addFiles(files: File[]): Promise<void>;
   remove(id: string): Promise<void>;
   submit(): Promise<void>;
   dismissError(): void;
@@ -43,6 +48,14 @@ function messageOf(error: unknown): string {
   if (isSessionEnded(error)) return SESSION_ENDED;
   if (error instanceof ApiError) return error.message;
   return 'Something went wrong. Try again.';
+}
+
+/** "blank.txt is empty.", "huge.mov: files up to 50 MB.", "notes.pdf: No connection. Try again." */
+function uploadMessage(name: string, error: unknown): string {
+  if (isSessionEnded(error)) return SESSION_ENDED;
+  if (error instanceof ApiError && error.status === 413) return `${name}: files up to 50 MB.`;
+  if (error instanceof ApiError && error.message === SERVER_EMPTY) return `${name} is empty.`;
+  return `${name}: ${messageOf(error)}`;
 }
 
 let uploadSeq = 0;
@@ -59,19 +72,21 @@ export function useWork(detail: AssignmentDetail): Work {
   const { refresh } = useDetailActions();
   const id = detail.id;
 
+  const [uploads, setUploads] = useState<PendingUpload[]>([]);
+  const [saving, setSaving] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
+  const [failure, setFailure] = useState<{ messages: string[]; session: boolean } | null>(null);
+
   const [source, setSource] = useState(detail);
   const [files, setFiles] = useState(detail.myFiles);
   const [handedIn, setHandedIn] = useState<number | undefined>(undefined);
   if (source !== detail) {
     setSource(detail);
-    setFiles(detail.myFiles);
+    // While anything is on its way the local list is ahead of the server's; it wins (the queued save
+    // writes it), so a refetch that started earlier never drops a file.
+    if (saving === 0 && uploads.length === 0 && !submitting) setFiles(detail.myFiles);
     if (source.id !== detail.id) setHandedIn(undefined);
   }
-
-  const [uploads, setUploads] = useState<PendingUpload[]>([]);
-  const [saving, setSaving] = useState(0);
-  const [submitting, setSubmitting] = useState(false);
-  const [failure, setFailure] = useState<{ message: string; session: boolean } | null>(null);
 
   // The list as the actions last left it: parallel uploads each append to the latest, not to a stale render.
   const filesRef = useRef(files);
@@ -81,8 +96,12 @@ export function useWork(detail: AssignmentDetail): Work {
   // Draft saves go out one at a time, in order, so the last one the server sees is the latest list.
   const saves = useRef<Promise<unknown>>(Promise.resolve());
 
-  const fail = useCallback((error: unknown) => {
-    setFailure({ message: messageOf(error), session: isSessionEnded(error) });
+  /** Adds a failure to those shown (a repeat, such as several 401s in one batch, shows once). */
+  const fail = useCallback((error: unknown, message = messageOf(error)) => {
+    setFailure((current) => ({
+      messages: current?.messages.includes(message) ? current.messages : [...(current?.messages ?? []), message],
+      session: (current?.session ?? false) || isSessionEnded(error),
+    }));
   }, []);
 
   const change = useCallback(
@@ -115,18 +134,18 @@ export function useWork(detail: AssignmentDetail): Work {
     [change],
   );
 
-  const addLocal = useCallback(
+  const uploadOne = useCallback(
     async (file: File) => {
-      setFailure(null);
-      if (file.size === 0) return fail(new ApiError(400, EMPTY_FILE));
-      if (file.size > MAX_UPLOAD_BYTES) return fail(new ApiError(413, TOO_LARGE));
+      const refuse = (error: ApiError) => fail(error, uploadMessage(file.name, error));
+      if (file.size === 0) return refuse(new ApiError(400, SERVER_EMPTY));
+      if (file.size > MAX_UPLOAD_BYTES) return refuse(new ApiError(413, 'Files up to 50 MB.'));
       const key = `upload-${++uploadSeq}`;
       setUploads((list) => [...list, { key, name: file.name, size: file.size }]);
       let ref: FileRef;
       try {
         ref = await uploadFile(file);
       } catch (error) {
-        fail(error);
+        fail(error, uploadMessage(file.name, error));
         return;
       } finally {
         setUploads((list) => list.filter((u) => u.key !== key));
@@ -135,6 +154,16 @@ export function useWork(detail: AssignmentDetail): Work {
     },
     [change, fail],
   );
+
+  const addFiles = useCallback(
+    async (list: File[]) => {
+      setFailure(null);
+      await Promise.all(list.map(uploadOne));
+    },
+    [uploadOne],
+  );
+
+  const addLocal = useCallback((file: File) => addFiles([file]), [addFiles]);
 
   const remove = useCallback(
     async (fileId: string) => {
@@ -186,10 +215,12 @@ export function useWork(detail: AssignmentDetail): Work {
     submittedAt: submittedAt || undefined,
     busy: submitting || saving > 0 || uploads.length > 0,
     submitting,
-    error: failure?.message ?? null,
+    errors: failure?.messages ?? [],
+    error: failure?.messages[0] ?? null,
     sessionEnded: failure?.session ?? false,
     add,
     addLocal,
+    addFiles,
     remove,
     submit,
     dismissError,

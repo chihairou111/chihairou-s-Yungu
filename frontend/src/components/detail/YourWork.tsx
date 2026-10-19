@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useState, type DragEvent, type ReactElement, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type DragEvent, type ReactElement, type ReactNode, type Ref } from 'react';
 import Link from 'next/link';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -19,13 +19,13 @@ import MicNoneOutlined from '@mui/icons-material/MicNoneOutlined';
 import PhotoCameraOutlined from '@mui/icons-material/PhotoCameraOutlined';
 import ScheduleOutlined from '@mui/icons-material/ScheduleOutlined';
 import { chinaDueLabel } from '@/lib/time';
-import type { AssignmentDetail, FileRef } from '@/lib/types';
+import type { FileRef } from '@/lib/types';
 import { FileKindIcon, fileCaption, formatBytes } from './FileThumb';
 import FileViewer from './FileViewer';
-import { useWork, type PendingUpload, type WorkStatus } from './useWork';
+import type { PendingUpload, WorkStatus } from './useWork';
+import { useWorkContext } from './WorkContext';
 
 interface YourWorkProps {
-  detail: AssignmentDetail;
   /** Opens the recorder (Task 8). */
   onRecord?: () => void;
   /** Opens the camera (Task 8). */
@@ -39,11 +39,25 @@ const noop = () => {};
 /**
  * The student's side of the assignment: status, the files added so far (each opens in the viewer and
  * can be removed), the four ways to add work (Record, Camera, Write, Upload) and Submit, which reads
- * Update once the work has been handed in. Files can also be dropped anywhere on the panel.
+ * Update once the work has been handed in. Files can also be dropped anywhere on the panel. The work
+ * itself lives in the `WorkProvider` above, so it survives a trip to the writer.
  */
-export default function YourWork({ detail, onRecord = noop, onCamera = noop, onWrite }: YourWorkProps) {
-  const work = useWork(detail);
+export default function YourWork({ onRecord = noop, onCamera = noop, onWrite }: YourWorkProps) {
+  const work = useWorkContext();
   const input = useRef<HTMLInputElement>(null);
+  const uploadButton = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLUListElement>(null);
+  // Where focus goes once a removed row has left: the next row's ✕, else the previous one's, else Upload.
+  const focusAfterRemove = useRef<string | null>(null);
+  useEffect(() => {
+    const target = focusAfterRemove.current;
+    if (target === null) return;
+    focusAfterRemove.current = null;
+    const removeButton = Array.from(list.current?.querySelectorAll<HTMLElement>('[data-remove-id]') ?? []).find(
+      (el) => el.dataset.removeId === target,
+    );
+    (removeButton ?? uploadButton.current)?.focus();
+  }, [work.files]);
   const [viewing, setViewing] = useState<number | null>(null);
   const [lastViewed, setLastViewed] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -53,8 +67,15 @@ export default function YourWork({ detail, onRecord = noop, onCamera = noop, onW
     setLastViewed(index);
   };
 
-  const addAll = (list: FileList | null) => {
-    for (const file of Array.from(list ?? [])) void work.addLocal(file);
+  const addAll = (picked: FileList | null) => {
+    if (work.submitting || !picked || picked.length === 0) return;
+    void work.addFiles(Array.from(picked));
+  };
+
+  const removeAt = (index: number) => {
+    const { files } = work;
+    focusAfterRemove.current = files[index + 1]?.id ?? files[index - 1]?.id ?? '';
+    void work.remove(files[index].id);
   };
 
   const carriesFiles = (e: DragEvent) => e.dataTransfer.types.includes('Files');
@@ -64,7 +85,7 @@ export default function YourWork({ detail, onRecord = noop, onCamera = noop, onW
 
   return (
     <Box
-      onDragEnter={(e) => carriesFiles(e) && setDragging(true)}
+      onDragEnter={(e) => carriesFiles(e) && !work.submitting && setDragging(true)}
       onDragOver={(e) => {
         if (!carriesFiles(e)) return;
         e.preventDefault();
@@ -122,9 +143,9 @@ export default function YourWork({ detail, onRecord = noop, onCamera = noop, onW
           Nothing added yet. Record, take photos, write, or upload files — or drop them here.
         </Typography>
       ) : (
-        <Stack component="ul" aria-label="Your files" sx={{ listStyle: 'none', m: 0, p: 0, mt: 2, gap: 0.5 }}>
+        <Stack component="ul" ref={list} aria-label="Your files" sx={{ listStyle: 'none', m: 0, p: 0, mt: 2, gap: 0.5 }}>
           {work.files.map((file, i) => (
-            <FileRow key={file.id} file={file} onOpen={() => open(i)} onRemove={() => void work.remove(file.id)} disabled={work.submitting} />
+            <FileRow key={file.id} file={file} onOpen={() => open(i)} onRemove={() => removeAt(i)} disabled={work.submitting} />
           ))}
           {work.uploads.map((upload) => (
             <UploadRow key={upload.key} upload={upload} />
@@ -145,21 +166,34 @@ export default function YourWork({ detail, onRecord = noop, onCamera = noop, onW
           }
           sx={{ mt: 2, bgcolor: 'error.light', color: 'error.dark', '& .MuiAlert-icon': { color: 'error.main' } }}
         >
-          {work.error}
+          {work.errors.length === 1 ? (
+            work.errors[0]
+          ) : (
+            <Box component="ul" sx={{ m: 0, pl: 2.25 }}>
+              {work.errors.map((message) => (
+                <li key={message}>{message}</li>
+              ))}
+            </Box>
+          )}
         </Alert>
       )}
 
       <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1, mt: 2.5 }}>
-        <AddButton icon={<MicNoneOutlined />} onClick={onRecord}>
+        <AddButton icon={<MicNoneOutlined />} onClick={onRecord} disabled={work.submitting}>
           Record
         </AddButton>
-        <AddButton icon={<PhotoCameraOutlined />} onClick={onCamera}>
+        <AddButton icon={<PhotoCameraOutlined />} onClick={onCamera} disabled={work.submitting}>
           Camera
         </AddButton>
-        <AddButton icon={<EditNoteOutlined />} onClick={onWrite}>
+        <AddButton icon={<EditNoteOutlined />} onClick={onWrite} disabled={work.submitting}>
           Write
         </AddButton>
-        <AddButton icon={<FileUploadOutlined />} onClick={() => input.current?.click()}>
+        <AddButton
+          icon={<FileUploadOutlined />}
+          onClick={() => input.current?.click()}
+          disabled={work.submitting}
+          buttonRef={uploadButton}
+        >
           Upload
         </AddButton>
       </Box>
@@ -175,12 +209,16 @@ export default function YourWork({ detail, onRecord = noop, onCamera = noop, onW
         }}
       />
 
+      {/* While it works the button stays focusable (aria-disabled), so focus is not thrown to the page. */}
       <Button
         variant="contained"
         size="large"
         fullWidth
-        disabled={work.files.length === 0 || work.busy}
-        onClick={() => void work.submit()}
+        disabled={work.files.length === 0 || work.uploads.length > 0}
+        aria-disabled={work.submitting || undefined}
+        onClick={() => {
+          if (!work.submitting) void work.submit();
+        }}
         startIcon={work.submitting ? <CircularProgress size={18} color="inherit" aria-hidden /> : undefined}
         sx={{ mt: 2 }}
       >
@@ -227,9 +265,17 @@ function StatusChip({ status }: { status: WorkStatus }) {
   );
 }
 
-function AddButton({ icon, onClick, children }: { icon: ReactNode; onClick: () => void; children: string }) {
+interface AddButtonProps {
+  icon: ReactNode;
+  onClick: () => void;
+  disabled: boolean;
+  buttonRef?: Ref<HTMLButtonElement>;
+  children: string;
+}
+
+function AddButton({ icon, onClick, disabled, buttonRef, children }: AddButtonProps) {
   return (
-    <Button variant="outlined" startIcon={icon} onClick={onClick} sx={{ justifyContent: 'flex-start', px: 1.75, minHeight: 40 }}>
+    <Button ref={buttonRef} variant="outlined" startIcon={icon} onClick={onClick} disabled={disabled} sx={{ justifyContent: 'flex-start', px: 1.75, minHeight: 40 }}>
       {children}
     </Button>
   );
@@ -304,7 +350,7 @@ function FileRow({ file, onOpen, onRemove, disabled }: { file: FileRef; onOpen: 
         <RowPreview file={file} />
         <RowText name={file.name} caption={caption} />
       </ButtonBase>
-      <IconButton aria-label={`Remove ${file.name}`} onClick={onRemove} disabled={disabled} size="small" sx={{ flexShrink: 0 }}>
+      <IconButton aria-label={`Remove ${file.name}`} data-remove-id={file.id} onClick={onRemove} disabled={disabled} size="small" sx={{ flexShrink: 0 }}>
         <Close fontSize="small" />
       </IconButton>
     </Stack>

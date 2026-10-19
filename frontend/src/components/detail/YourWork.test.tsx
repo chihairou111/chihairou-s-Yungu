@@ -1,10 +1,11 @@
-import { fireEvent, render, screen, waitFor, within } from '../test-render';
+import { act, fireEvent, render, screen, waitFor, within } from '../test-render';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AssignmentDetail, FileRef } from '@/lib/types';
 import { HOUR, NOW, todo } from '../test-fixtures';
 import { ApiError } from './api';
 import { DetailContext } from './DetailContext';
+import { useWorkContext, WorkProvider } from './WorkContext';
 import YourWork from './YourWork';
 
 const nav = vi.hoisted(() => ({ refresh: vi.fn() }));
@@ -39,12 +40,23 @@ function detail(extra: Partial<AssignmentDetail> = {}): AssignmentDetail {
 
 const handlers = { onWrite: vi.fn(), onRecord: vi.fn(), onCamera: vi.fn() };
 
-function setup(d: AssignmentDetail) {
-  return render(
+/** A stand-in for the writer: Your work is unmounted meanwhile; it adds its PDF through the context. */
+function Writer() {
+  const work = useWorkContext();
+  return <button onClick={() => void work.add(ref('pdf', 'written.pdf'))}>Done</button>;
+}
+
+function Dialog({ d, writing }: { d: AssignmentDetail; writing: boolean }) {
+  return (
     <DetailContext.Provider value={{ refresh }}>
-      <YourWork detail={d} {...handlers} />
-    </DetailContext.Provider>,
+      <WorkProvider detail={d}>{writing ? <Writer /> : <YourWork {...handlers} />}</WorkProvider>
+    </DetailContext.Provider>
   );
+}
+
+function setup(d: AssignmentDetail) {
+  const view = render(<Dialog d={d} writing={false} />);
+  return { ...view, writing: (on: boolean) => view.rerender(<Dialog d={d} writing={on} />) };
 }
 
 function uploadInput(): HTMLInputElement {
@@ -109,7 +121,7 @@ describe('YourWork', () => {
     const user = userEvent.setup();
     setup(detail());
     await user.upload(uploadInput(), new File([], 'blank.txt'));
-    expect(await screen.findByRole('alert')).toHaveTextContent('That file is empty.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('blank.txt is empty.');
   });
 
   it('shows the size limit when the server refuses a large file', async () => {
@@ -117,7 +129,88 @@ describe('YourWork', () => {
     const user = userEvent.setup();
     setup(detail());
     await user.upload(uploadInput(), new File(['x'], 'huge.mov'));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Files up to 50 MB.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('huge.mov: files up to 50 MB.');
+  });
+
+  it('in a multi-file pick, an empty first file keeps its message while the next one uploads', async () => {
+    const user = userEvent.setup();
+    setup(detail());
+    await user.upload(uploadInput(), [new File([], 'blank.txt'), new File(['a'], 'notes.txt')]);
+    expect(await screen.findByRole('button', { name: /^notes\.txt/ })).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('blank.txt is empty.');
+  });
+
+  it('shows every failure of a pick, each naming its file', async () => {
+    api.uploadFile.mockRejectedValue(new ApiError(413, 'Files up to 50 MB.'));
+    const user = userEvent.setup();
+    setup(detail());
+    await user.upload(uploadInput(), [new File([], 'blank.txt'), new File(['x'], 'huge.mov')]);
+    const alert = await screen.findByRole('alert');
+    await waitFor(() => expect(within(alert).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['blank.txt is empty.', 'huge.mov: files up to 50 MB.']));
+  });
+
+  it('after a remove, focus moves to the next ✕, else the previous one, else Upload', async () => {
+    const user = userEvent.setup();
+    setup(detail({ myFiles: [ref('a', 'one.txt'), ref('b', 'two.txt'), ref('c', 'three.txt')] }));
+    await user.click(screen.getByRole('button', { name: 'Remove two.txt' }));
+    expect(screen.getByRole('button', { name: 'Remove three.txt' })).toHaveFocus();
+    await user.click(screen.getByRole('button', { name: 'Remove three.txt' }));
+    expect(screen.getByRole('button', { name: 'Remove one.txt' })).toHaveFocus();
+    await user.click(screen.getByRole('button', { name: 'Remove one.txt' }));
+    expect(screen.getByRole('button', { name: 'Upload' })).toHaveFocus();
+  });
+
+  it('while submitting, Submit keeps focus (aria-disabled) and nothing can be added', async () => {
+    let finish!: (v: { submittedAt: number }) => void;
+    api.submit.mockReturnValue(new Promise((r) => (finish = r)));
+    const user = userEvent.setup();
+    setup(detail({ myFiles: [ref('a', 'one.txt')] }));
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    const busy = screen.getByRole('button', { name: 'Submitting…' });
+    expect(busy).toHaveFocus();
+    expect(busy).toBeEnabled();
+    expect(busy).toHaveAttribute('aria-disabled', 'true');
+    await user.click(busy);
+    expect(api.submit).toHaveBeenCalledOnce();
+    for (const name of ['Record', 'Camera', 'Write', 'Upload']) expect(screen.getByRole('button', { name })).toBeDisabled();
+    fireEvent.drop(screen.getByRole('heading', { name: 'Your work' }), { dataTransfer: { files: [new File(['a'], 'late.txt')], types: ['Files'] } });
+    expect(api.uploadFile).not.toHaveBeenCalled();
+    await act(async () => finish({ submittedAt: NOW }));
+    expect(await screen.findByRole('button', { name: 'Update' })).toHaveFocus();
+  });
+
+  it('Submit does not flicker disabled while a draft saves', async () => {
+    let saved!: () => void;
+    api.saveDraft.mockReturnValue(new Promise<void>((r) => (saved = r)));
+    const user = userEvent.setup();
+    setup(detail({ myFiles: [ref('a', 'one.txt'), ref('b', 'two.txt')] }));
+    await user.click(screen.getByRole('button', { name: 'Remove two.txt' }));
+    expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled();
+    await act(async () => saved());
+  });
+
+  it('keeps the files across a trip to the writer, including an upload that lands meanwhile', async () => {
+    const user = userEvent.setup();
+    const view = setup(detail());
+    await user.upload(uploadInput(), new File(['a'], 'first.txt'));
+    expect(await screen.findByRole('button', { name: /^first\.txt/ })).toBeInTheDocument();
+
+    let land!: (f: FileRef) => void;
+    api.uploadFile.mockReturnValueOnce(new Promise((r) => (land = r)));
+    await user.upload(uploadInput(), new File(['b'], 'slow.txt'));
+    view.writing(true);
+    await act(async () => land(ref('id-slow.txt', 'slow.txt')));
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    view.writing(false);
+
+    expect(await screen.findByRole('button', { name: /^first\.txt/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^slow\.txt/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^written\.pdf/ })).toBeInTheDocument();
+    await waitFor(() => expect(api.saveDraft).toHaveBeenLastCalledWith(94616, ['id-first.txt', 'id-slow.txt', 'pdf']));
+    await user.upload(uploadInput(), new File(['c'], 'next.txt'));
+    await waitFor(() =>
+      expect(api.saveDraft).toHaveBeenLastCalledWith(94616, ['id-first.txt', 'id-slow.txt', 'pdf', 'id-next.txt']),
+    );
   });
 
   it('Submit hands in, then reads "Submitted" and offers Update', async () => {

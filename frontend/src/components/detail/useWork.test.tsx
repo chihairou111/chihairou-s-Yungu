@@ -81,7 +81,7 @@ describe('useWork', () => {
     const { result } = setup(detail());
     await act(() => result.current.addLocal(new File([], 'empty.txt')));
     expect(api.uploadFile).not.toHaveBeenCalled();
-    expect(result.current.error).toBe('That file is empty.');
+    expect(result.current.error).toBe('empty.txt is empty.');
   });
 
   it('puts a failed draft save back the way it was', async () => {
@@ -114,6 +114,23 @@ describe('useWork', () => {
     const { result, rerender } = setup(detail({ myFiles: [ref('a')] }));
     rerender({ value: detail({ myFiles: [ref('a'), ref('c')] }) });
     await waitFor(() => expect(result.current.files.map((f) => f.id)).toEqual(['a', 'c']));
+  });
+
+  it('an older detail arriving while a save is on its way does not drop the new file', async () => {
+    let saved!: () => void;
+    api.saveDraft.mockReturnValueOnce(new Promise<void>((r) => (saved = r)));
+    const { result, rerender } = setup(detail());
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.add(ref('a'));
+    });
+    rerender({ value: detail() });
+    expect(result.current.files.map((f) => f.id)).toEqual(['a']);
+    await act(async () => {
+      saved();
+      await pending;
+    });
+    expect(result.current.files.map((f) => f.id)).toEqual(['a']);
   });
 
   it('a 401 ends the session', async () => {

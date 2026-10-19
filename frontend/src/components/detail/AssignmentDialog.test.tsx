@@ -1,7 +1,7 @@
 import { act, render, screen } from '../test-render';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AssignmentDetail } from '@/lib/types';
+import type { AssignmentDetail, FileRef } from '@/lib/types';
 import { DAY, HOUR, NOW, todo } from '../test-fixtures';
 import AssignmentDialog from './AssignmentDialog';
 import { ApiError } from './api';
@@ -20,21 +20,30 @@ vi.mock('./useTaskParam', async (importOriginal) => ({
   useTaskParam: () => param,
 }));
 
-const api = vi.hoisted(() => ({ fetchDetail: vi.fn() }));
+const api = vi.hoisted(() => ({ fetchDetail: vi.fn(), saveDraft: vi.fn() }));
 vi.mock('./api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./api')>()),
   fetchDetail: api.fetchDetail,
+  saveDraft: api.saveDraft,
 }));
+
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+
+const FILE: FileRef = { id: 'f1', name: 'one.pdf', kind: 'pdf', mime: 'application/pdf', size: 10, url: '/api/files/f1', createdAt: NOW };
 
 vi.mock('./YourWork', async () => {
   const { useDetailActions } = await import('./DetailContext');
+  const { useWorkContext } = await import('./WorkContext');
   return {
-    default: function YourWorkStub({ detail }: { detail: AssignmentDetail }) {
+    default: function YourWorkStub() {
       const { refresh } = useDetailActions();
+      const work = useWorkContext();
       return (
         <>
-          <p>{detail.submitted ? 'Submitted' : 'Not submitted'}</p>
+          <p>{work.status === 'not-submitted' ? 'Not submitted' : 'Submitted'}</p>
+          <p>{`${work.files.length} files`}</p>
           <button onClick={() => void refresh()}>Refresh</button>
+          <button onClick={() => void work.add(FILE)}>Add file</button>
         </>
       );
     },
@@ -156,6 +165,22 @@ describe('AssignmentDialog', () => {
     render(<AssignmentDialog now={NOW} />);
     await userEvent.click(await screen.findByRole('button', { name: 'Back to the assignment' }));
     expect(param.closeWriter).toHaveBeenCalled();
+  });
+
+  it('keeps the work (files added) across a trip to the writer and back', async () => {
+    api.fetchDetail.mockResolvedValue(detail());
+    api.saveDraft.mockResolvedValue(undefined);
+    openTask(94616);
+    const { rerender } = render(<AssignmentDialog now={NOW} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Add file' }));
+    expect(await screen.findByText('1 files')).toBeInTheDocument();
+    param.writing = true;
+    rerender(<AssignmentDialog now={NOW} />);
+    expect(screen.queryByText('1 files')).not.toBeInTheDocument();
+    param.writing = false;
+    rerender(<AssignmentDialog now={NOW} />);
+    expect(screen.getByText('1 files')).toBeInTheDocument();
+    expect(api.fetchDetail).toHaveBeenCalledTimes(1);
   });
 
   it('loads afresh behind the skeleton when reopened, never flashing the earlier result', async () => {
