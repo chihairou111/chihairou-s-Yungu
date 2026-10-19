@@ -18,13 +18,22 @@ interface AssignmentsViewProps {
   todayClasses: ClassEvent[];
   /** Server time, shared by every card so relative times agree. */
   now: number;
+  /** Whether the docked Today's classes panel was left open (the `yl_today_panel` cookie). */
+  initialPanelOpen?: boolean;
 }
 
 /**
  * To-do | Submitted tabs attached to the app bar. To-do shows the work in priority columns. The tab
  * lives in the URL (`?tab=submitted`) so it survives reloads.
  */
-export default function AssignmentsView({ todo, submitted, courses, todayClasses, now }: AssignmentsViewProps) {
+export default function AssignmentsView({
+  todo,
+  submitted,
+  courses,
+  todayClasses,
+  now,
+  initialPanelOpen = false,
+}: AssignmentsViewProps) {
   const pathname = usePathname();
   const params = useSearchParams();
   const tab: TabKey = params.get('tab') === 'submitted' ? 'submitted' : 'todo';
@@ -54,7 +63,12 @@ export default function AssignmentsView({ todo, submitted, courses, todayClasses
         id={`panel-${tab}`}
         aria-labelledby={`tab-${tab}`}
         // Phones already clear the bottom nav and the button with the shell's bottom padding.
-        sx={(theme) => ({ [BOTTOM_FAB_MEDIA]: { pb: 9 }, [theme.breakpoints.down('sm')]: { pb: 0 } })}
+        // A size container, so the columns follow the space left beside the docked panel.
+        sx={(theme) => ({
+          containerType: 'inline-size',
+          [BOTTOM_FAB_MEDIA]: { pb: 9 },
+          [theme.breakpoints.down('sm')]: { pb: 0 },
+        })}
       >
         {tab === 'todo' ? (
           <PriorityBoard items={todo} now={now} />
@@ -62,7 +76,7 @@ export default function AssignmentsView({ todo, submitted, courses, todayClasses
           <SubmittedList items={submitted} now={now} />
         )}
       </Box>
-      <TodayDrawer events={todayClasses} now={now} courses={courses} />
+      <TodayDrawer events={todayClasses} now={now} courses={courses} initialPanelOpen={initialPanelOpen} />
     </>
   );
 }

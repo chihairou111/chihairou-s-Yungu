@@ -25,7 +25,11 @@ interface PriorityBoardProps {
   now: number;
 }
 
-/** To-do work in three columns by urgency from 900px; one column (at most 720 wide) below. */
+/**
+ * To-do work in three columns by urgency when the content area is at least 760px wide (from a 900px
+ * window, or a wider one while the Today's classes panel is docked); one column, at most 720 wide,
+ * below that. Measured on the nearest size container (the tab panel), falling back to one column.
+ */
 export default function PriorityBoard({ items, now }: PriorityBoardProps) {
   const groups = groupTodo(items, now);
   if (COLUMNS.every(({ priority }) => groups[priority].length === 0)) return <AllClear />;
@@ -34,8 +38,9 @@ export default function PriorityBoard({ items, now }: PriorityBoardProps) {
     <Box
       sx={{
         display: 'grid',
-        gridTemplateColumns: { xs: 'minmax(0, 1fr)', md: 'repeat(3, minmax(0, 1fr))' },
-        maxWidth: { sm: 720, md: 'none' },
+        gridTemplateColumns: 'minmax(0, 1fr)',
+        maxWidth: 720,
+        '@container (min-width: 760px)': { gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', maxWidth: 'none' },
         columnGap: 3,
         rowGap: 4,
         alignItems: 'start',

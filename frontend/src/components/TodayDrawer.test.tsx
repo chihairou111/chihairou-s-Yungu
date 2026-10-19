@@ -1,8 +1,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from './test-render';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { renderToString } from 'react-dom/server';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClassEvent, Course } from '@/lib/types';
-import TodayDrawer, { shouldRevealEdgeButton } from './TodayDrawer';
+import StyleProvider from './StyleProvider';
+import TodayDrawer, { DOCK_QUERY, shouldRevealEdgeButton } from './TodayDrawer';
 
 const HOUR = 3600_000;
 const MIN = 60_000;
@@ -94,10 +96,14 @@ describe('TodayDrawer edge reveal', () => {
   const nextFrame = () => act(() => new Promise((r) => requestAnimationFrame(() => r(undefined))));
   const button = () => screen.getByRole('button', { name: "Today's classes" });
 
-  it('renders no element other than the button (nothing overlays the page)', () => {
+  it('renders only the button and the closed, inert panel (nothing overlays the page)', () => {
     const { container } = render(<TodayDrawer events={classes} now={NOW} courses={COURSES} />);
-    expect(container.childElementCount).toBe(1);
+    expect(container.childElementCount).toBe(2);
     expect(container.firstElementChild).toBe(button());
+    const panel = container.lastElementChild as HTMLElement;
+    expect(panel.tagName).toBe('ASIDE');
+    expect(panel).toHaveAttribute('data-open', 'false');
+    expect(panel).toHaveAttribute('inert');
   });
 
   it('reveals the button when the pointer nears the right edge and hides it when it moves away or leaves', async () => {
@@ -151,5 +157,126 @@ describe('TodayDrawer edge reveal', () => {
     fireEvent.pointerMove(window, { clientX: window.innerWidth - 20, clientY: 10 });
     await nextFrame();
     expect(button()).toHaveAttribute('data-revealed', 'false');
+  });
+});
+
+/** Simulates the window width: docked panel from 900px, temporary drawer below. */
+function stubWidth(docked: boolean) {
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: query === DOCK_QUERY ? docked : false,
+    media: query,
+    addEventListener() {},
+    removeEventListener() {},
+  }));
+}
+
+function clearPanelCookie() {
+  document.cookie = 'yl_today_panel=; Max-Age=0; Path=/';
+}
+
+describe('TodayDrawer docked panel (900px and up)', () => {
+  beforeEach(() => {
+    stubWidth(true);
+    clearPanelCookie();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    clearPanelCookie();
+  });
+
+  const toggle = () => screen.getByRole('button', { name: "Today's classes" });
+  const panel = () => document.querySelector('aside') as HTMLElement;
+  /** Keyboard, as the edge button only takes the pointer once revealed (jsdom applies no :hover/media). */
+  async function press(button: HTMLElement) {
+    act(() => button.focus());
+    await userEvent.keyboard('{Enter}');
+  }
+
+  it('is a closed panel by default, controlled by the toggle', () => {
+    render(<TodayDrawer events={classes} now={NOW} courses={COURSES} />);
+    expect(panel()).toHaveAttribute('data-open', 'false');
+    expect(panel()).toHaveAttribute('inert');
+    expect(toggle()).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle()).toHaveAttribute('aria-controls', panel().id);
+  });
+
+  it('renders open from the stored state as a labelled complementary region of the page', () => {
+    render(<TodayDrawer events={classes} now={NOW} courses={COURSES} initialPanelOpen />);
+    const region = screen.getByRole('complementary', { name: "Today's classes" });
+    expect(region).toBe(panel());
+    expect(region).toHaveAttribute('data-open', 'true');
+    expect(region).not.toHaveAttribute('inert');
+    expect(within(region).getByRole('heading', { name: "Today's classes" })).toBeInTheDocument();
+    expect(within(region).getByText('Mon, Oct 19')).toBeInTheDocument();
+    expect(within(region).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      'Chinese I08:00–08:40 · D419',
+      'NextH Physics I12:30–13:10 · D508',
+    ]);
+    expect(toggle()).toHaveAttribute('aria-expanded', 'true');
+    // Part of the page: no dialog, no backdrop.
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('server-renders the stored state, so a reload shows the panel without a flash', () => {
+    const html = (open: boolean) =>
+      renderToString(
+        <StyleProvider initialStyle="expressive">
+          <TodayDrawer events={classes} now={NOW} courses={COURSES} initialPanelOpen={open} />
+        </StyleProvider>,
+      );
+    const open = html(true);
+    expect(open).toMatch(/<aside[^>]*data-open="true"/);
+    expect(open).toMatch(/aria-label="Today&#x27;s classes"[^>]*aria-expanded="true"|aria-expanded="true"[^>]*aria-label="Today&#x27;s classes"/);
+    expect(open).toContain('H Physics I');
+    const closed = html(false);
+    expect(closed).toMatch(/<aside[^>]*data-open="false"/);
+    expect(closed).toMatch(/<aside[^>]*inert=""/);
+  });
+
+  it('the toggle opens the panel in place, keeps focus and stores open; again closes and stores closed', async () => {
+    render(<TodayDrawer events={classes} now={NOW} courses={COURSES} />);
+    await press(toggle());
+    expect(panel()).toHaveAttribute('data-open', 'true');
+    expect(screen.getByRole('complementary', { name: "Today's classes" })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(toggle()).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle()).toHaveFocus();
+    expect(document.cookie).toContain('yl_today_panel=open');
+
+    await press(toggle());
+    expect(panel()).toHaveAttribute('data-open', 'false');
+    expect(toggle()).toHaveAttribute('aria-expanded', 'false');
+    expect(document.cookie).toContain('yl_today_panel=closed');
+  });
+
+  it("closes with the panel's own close button", async () => {
+    render(<TodayDrawer events={classes} now={NOW} courses={COURSES} initialPanelOpen />);
+    await userEvent.click(within(panel()).getByRole('button', { name: "Close today's classes" }));
+    expect(panel()).toHaveAttribute('data-open', 'false');
+    expect(panel()).toHaveAttribute('inert');
+    expect(toggle()).toHaveAttribute('aria-expanded', 'false');
+    expect(document.cookie).toContain('yl_today_panel=closed');
+  });
+});
+
+describe('TodayDrawer below 900px', () => {
+  beforeEach(() => {
+    stubWidth(false);
+    clearPanelCookie();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    clearPanelCookie();
+  });
+
+  it('opens the temporary drawer even when the stored state is open, and leaves the cookie alone', async () => {
+    render(<TodayDrawer events={classes} now={NOW} courses={COURSES} initialPanelOpen />);
+    const button = screen.getByRole('button', { name: "Today's classes" });
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    act(() => button.focus());
+    await userEvent.keyboard('{Enter}');
+    expect(screen.getByRole('dialog', { name: "Today's classes" })).toBeInTheDocument();
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    expect(document.cookie).not.toContain('yl_today_panel');
   });
 });

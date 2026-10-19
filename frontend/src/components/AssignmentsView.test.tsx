@@ -21,9 +21,16 @@ const COURSES: Course[] = [
   { id: 1, name: 'Chinese I', color: 'Tomato' },
 ];
 
-function renderView() {
+function renderView(panelOpen = false) {
   return render(
-    <AssignmentsView todo={[todo('Observation task', 2 * DAY)]} submitted={[]} courses={COURSES} todayClasses={[]} now={NOW} />,
+    <AssignmentsView
+      todo={[todo('Observation task', 2 * DAY)]}
+      submitted={[]}
+      courses={COURSES}
+      todayClasses={[]}
+      now={NOW}
+      initialPanelOpen={panelOpen}
+    />,
   );
 }
 
@@ -71,5 +78,15 @@ describe('AssignmentsView', () => {
     nav.search = 'tab=submitted';
     renderView();
     expect(screen.getAllByRole('button', { name: "Today's classes" })).toHaveLength(2);
+  });
+
+  it("renders the Today's classes panel in its stored state, beside the tab panel", () => {
+    const { unmount } = renderView(true);
+    const panel = screen.getByRole('complementary', { name: "Today's classes" });
+    expect(panel).toHaveAttribute('data-open', 'true');
+    expect(screen.getByRole('tabpanel').contains(panel)).toBe(false);
+    unmount();
+    renderView(false);
+    expect(document.querySelector('aside')).toHaveAttribute('data-open', 'false');
   });
 });

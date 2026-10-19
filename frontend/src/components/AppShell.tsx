@@ -12,11 +12,31 @@ import MenuList from '@mui/material/MenuList';
 import Popover from '@mui/material/Popover';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
+import type { Theme } from '@mui/material/styles';
 import Logout from '@mui/icons-material/Logout';
 import { sectionFor } from './nav-items';
-import { CONTENT_MAX_PX, PAGE_HEADER_ATTR, alignedPadding, pagePadding } from './PageHeader';
+import {
+  CONTENT_MAX_PX,
+  PAGE_HEADER_ATTR,
+  TODAY_PANEL_ATTR,
+  TODAY_PANEL_PX,
+  TODAY_PANEL_SPACE,
+  alignedPadding,
+  pagePadding,
+} from './PageHeader';
 import { PHONE_NAV_CLEARANCE } from './NavRail';
 import SettingsMenu from './SettingsMenu';
+
+/** Moves with the docked panel's slide, so the content and the title follow it; still for reduced motion. */
+function panelTransition(theme: Theme, property: string) {
+  return {
+    transition: theme.transitions.create(property, {
+      duration: theme.transitions.duration.enteringScreen,
+      easing: theme.transitions.easing.easeInOut,
+    }),
+    '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+  };
+}
 
 /** "Bruce Zheng" -> "BZ"; "郑博" -> "郑"; blank -> "?". */
 export function initials(name: string): string {
@@ -65,10 +85,14 @@ export default function AppShell({ userName, children }: AppShellProps) {
         minHeight: '100dvh',
         bgcolor: 'background.default',
         [`&:has([${PAGE_HEADER_ATTR}]) > .MuiAppBar-root`]: { borderBottom: 'none' },
+        // A docked Today's classes panel that is open takes its width from the page (from 900px).
+        '@media (min-width: 900px)': {
+          [`&:has([${TODAY_PANEL_ATTR}][data-open="true"])`]: { '--today-panel': `${TODAY_PANEL_PX}px` },
+        },
       }}
     >
       <AppBar position="sticky">
-        <Toolbar sx={(theme) => alignedPadding(theme, 'viewport')}>
+        <Toolbar sx={(theme) => ({ ...alignedPadding(theme, 'viewport'), ...panelTransition(theme, 'padding-left') })}>
           <Typography variant="h1" sx={{ flexGrow: 1, minWidth: 0 }} noWrap>
             {title}
           </Typography>
@@ -132,6 +156,9 @@ export default function AppShell({ userName, children }: AppShellProps) {
         sx={(theme) => ({
           ...pagePadding(theme),
           pt: 2,
+          // Room for the docked panel, which slides in over this margin as the content narrows.
+          mr: TODAY_PANEL_SPACE,
+          ...panelTransition(theme, 'margin-right'),
           // On phones the last card clears the bottom nav (and the button beside it).
           pb: { xs: PHONE_NAV_CLEARANCE, sm: 3 },
           // Content is capped and centred; a page header still spans the full width (see PageHeader).

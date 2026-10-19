@@ -6,6 +6,13 @@ import type { Theme } from '@mui/material/styles';
 /** Marks a page header so the app shell can join it to the app bar (see `AppShell`). */
 export const PAGE_HEADER_ATTR = 'data-page-header';
 
+/** Marks the docked Today's classes panel; while it is open (from 900px) the content narrows for it. */
+export const TODAY_PANEL_ATTR = 'data-today-panel';
+/** Width of the docked panel (px). */
+export const TODAY_PANEL_PX = 344;
+/** Space the open panel takes from the page (a length; 0px while closed). Set by the app shell. */
+export const TODAY_PANEL_SPACE = 'var(--today-panel, 0px)';
+
 /** Content is capped at this width and centred in the space right of the rail (on large screens). */
 export const CONTENT_MAX_PX = 1280;
 /** Phones: the nav sits at the bottom, so the page takes the Material compact margin on both sides. */
@@ -44,12 +51,14 @@ export function pagePadding(theme: Theme): { pl: Responsive; pr: Responsive } {
  */
 export function alignedPadding(theme: Theme, within: 'viewport' | 'content'): { pl: Responsive; pr: Responsive } {
   const { left, right } = margins(theme);
-  const gutter = (bp: keyof Responsive) =>
+  const gutter = (bp: keyof Responsive, reserved = '0px') =>
     within === 'viewport'
-      ? `max(0px, (100% - ${px(left[bp] + right[bp] + CONTENT_MAX_PX)}) / 2)`
+      ? `max(0px, (100% - ${reserved} - ${px(left[bp] + right[bp] + CONTENT_MAX_PX)}) / 2)`
       : `max(0px, (100% - ${px(CONTENT_MAX_PX)}) / 2)`;
   return {
-    pl: perBreakpoint((bp) => `calc(${px(left[bp])} + ${gutter(bp)})`),
+    // The app bar spans the window, over the docked panel too: its title follows the content's left
+    // edge (which moves when the panel takes its space), while its actions stay at the window's end.
+    pl: perBreakpoint((bp) => `calc(${px(left[bp])} + ${gutter(bp, within === 'viewport' ? TODAY_PANEL_SPACE : '0px')})`),
     pr: perBreakpoint((bp) => `calc(${px(right[bp])} + ${gutter(bp)})`),
   };
 }

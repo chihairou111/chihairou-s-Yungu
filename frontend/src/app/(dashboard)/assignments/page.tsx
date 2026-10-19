@@ -1,8 +1,10 @@
 import type { Metadata } from 'next';
 import { io } from 'next/cache';
+import { cookies } from 'next/headers';
 import AssignmentsView from '@/components/AssignmentsView';
 import { data } from '@/lib/data';
 import { todaysClasses } from '@/lib/schedule';
+import { TODAY_PANEL_COOKIE, parseTodayPanel } from '@/lib/today-panel';
 import { weekStartOf } from '@/lib/time';
 
 export const metadata: Metadata = { title: 'Assignments' };
@@ -22,6 +24,17 @@ async function loadAssignments() {
 }
 
 export default async function AssignmentsPage() {
-  const { now, todo, submitted, courses, todayClasses } = await loadAssignments();
-  return <AssignmentsView todo={todo} submitted={submitted} courses={courses} todayClasses={todayClasses} now={now} />;
+  const [{ now, todo, submitted, courses, todayClasses }, cookieStore] = await Promise.all([loadAssignments(), cookies()]);
+  // Read on the server, so a reload paints the panel in its stored state with no flash or slide.
+  const panelOpen = parseTodayPanel(cookieStore.get(TODAY_PANEL_COOKIE)?.value);
+  return (
+    <AssignmentsView
+      todo={todo}
+      submitted={submitted}
+      courses={courses}
+      todayClasses={todayClasses}
+      now={now}
+      initialPanelOpen={panelOpen}
+    />
+  );
 }
