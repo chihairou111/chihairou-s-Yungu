@@ -51,12 +51,51 @@ describe('POST /api/files', () => {
     expect(formData).not.toHaveBeenCalled();
   });
   it('reads a declared body within the multipart slack', async () => {
-    const form = new FormData();
-    form.set('file', new File(['x'], 'a.txt', { type: 'text/plain' }));
-    const formData = vi.fn(async () => form);
-    const request = { headers: new Headers({ 'content-length': String(50 * 1024 * 1024 + 64 * 1024) }), formData } as unknown as Request;
-    expect((await POST(request)).status).toBe(200);
-    expect(formData).toHaveBeenCalledOnce();
+    const real = upload(new File(['x'], 'a.txt', { type: 'text/plain' }));
+    const request = {
+      headers: new Headers({ 'content-length': String(50 * 1024 * 1024 + 64 * 1024), 'content-type': real.headers.get('content-type')! }),
+      body: real.body,
+    } as unknown as Request;
+    const res = await POST(request);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ name: 'a.txt', size: 1 });
+  });
+
+  /** A multipart body of about `total` bytes in 1 MiB chunks, counting what the route pulls from it. */
+  function streamedBody(total: number) {
+    const chunk = new Uint8Array(1024 * 1024).fill(97);
+    const head = new TextEncoder().encode('--b\r\nContent-Disposition: form-data; name="file"; filename="big.bin"\r\n\r\n');
+    const seen = { pulled: 0, cancelled: false };
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(head);
+        seen.pulled += head.length;
+      },
+      pull(controller) {
+        if (seen.pulled >= total) return controller.close();
+        controller.enqueue(chunk);
+        seen.pulled += chunk.length;
+      },
+      cancel() {
+        seen.cancelled = true;
+      },
+    });
+    return { body, seen };
+  }
+  const LIMIT = 50 * 1024 * 1024 + 64 * 1024;
+
+  it.each([
+    ['without a Content-Length (chunked)', {}],
+    ['with a Content-Length that understates it', { 'content-length': '1000' }],
+  ])('413s a body over the limit sent %s, without buffering all of it', async (_case, extra) => {
+    const { body, seen } = streamedBody(200 * 1024 * 1024);
+    const request = { headers: new Headers({ 'content-type': 'multipart/form-data; boundary=b', ...extra }), body } as unknown as Request;
+    const res = await POST(request);
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'Files up to 50 MB.' });
+    // Stopped within one chunk past the limit (plus the stream's own read-ahead), not at 200 MiB.
+    expect(seen.pulled).toBeLessThanOrEqual(LIMIT + 3 * 1024 * 1024);
+    expect(seen.cancelled).toBe(true);
   });
   it('keeps a Chinese file name', async () => {
     const res = await POST(upload(new File(['hello'], '作业.txt', { type: 'text/plain' })));
