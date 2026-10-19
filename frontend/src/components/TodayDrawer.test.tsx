@@ -204,6 +204,16 @@ describe('TodayDrawer docked panel (1200px and up)', () => {
     await userEvent.keyboard('{Enter}');
   }
 
+  it('slides with a decelerating curve both ways, leaving a little faster than it arrives', () => {
+    const { unmount } = render(<TodayDrawer events={classes} now={NOW} courses={COURSES} initialPanelOpen />);
+    // Emphasized decelerate (fast start): the panel answers the click at once rather than easing in.
+    const curve = 'cubic-bezier(0.05, 0.7, 0.1, 1)';
+    expect(getComputedStyle(panel()).transition).toBe(`transform 225ms ${curve}`);
+    unmount();
+    render(<TodayDrawer events={classes} now={NOW} courses={COURSES} />);
+    expect(getComputedStyle(panel()).transition).toMatch(new RegExp(`^transform 195ms ${curve.replace(/[()]/g, "\\$&")}, ?visibility 0s linear 195ms$`));
+  });
+
   it('is a closed panel by default, controlled by the toggle', () => {
     render(<TodayDrawer events={classes} now={NOW} courses={COURSES} />);
     expect(panel()).toHaveAttribute('data-open', 'false');
@@ -309,15 +319,44 @@ describe('TodayDrawer docked panel (1200px and up)', () => {
 });
 
 describe('TodayDrawer after the last class', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   const tuesday: ClassEvent = { ...classes[0], name: 'Algebra II', start: classes[0].start + 24 * HOUR, end: classes[0].end + 24 * HOUR };
 
   it("shows the next school day's classes once today's are over", async () => {
     render(<TodayDrawer events={[...classes, tuesday]} now={MONDAY + 21 * HOUR} courses={COURSES} />);
     await openWithKeyboard();
     const drawer = screen.getByRole('dialog', { name: "Today's classes" });
-    expect(within(drawer).getByRole('heading', { name: 'Done for today' })).toBeInTheDocument();
-    expect(within(drawer).getByText('Tomorrow · Tue, Oct 20')).toBeInTheDocument();
+    // The title says the day is done where it dated today; the next day's date heads its list.
+    expect(within(drawer).getByText('Done for today')).toBeInTheDocument();
+    expect(within(drawer).getByRole('heading', { name: 'Tomorrow · Tue, Oct 20' })).toBeInTheDocument();
     expect(within(drawer).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['NextAlgebra II08:00–08:40 · D419']);
+  });
+
+  it("says the day is done in place of today's date once it shows another day, so only the shown day is dated", async () => {
+    stubWidth(true);
+    render(<TodayDrawer events={[...classes, tuesday]} now={MONDAY + 21 * HOUR} courses={COURSES} initialPanelOpen />);
+    const panel = screen.getByRole('complementary');
+    expect(within(panel).queryByText('Mon, Oct 19')).not.toBeInTheDocument();
+    expect(within(panel).getByText('Done for today')).toBeInTheDocument();
+    expect(within(panel).getByRole('heading', { name: 'Tomorrow · Tue, Oct 20' })).toBeInTheDocument();
+  });
+
+  it('in the drawer, too', async () => {
+    render(<TodayDrawer events={[...classes, tuesday]} now={MONDAY + 21 * HOUR} courses={COURSES} />);
+    await openWithKeyboard();
+    expect(within(screen.getByRole('dialog')).queryByText('Mon, Oct 19')).not.toBeInTheDocument();
+  });
+
+  it('on a day without classes, says "No classes today" above the next school day', async () => {
+    render(<TodayDrawer events={[tuesday]} now={MONDAY + 21 * HOUR} courses={COURSES} />);
+    await openWithKeyboard();
+    const drawer = screen.getByRole('dialog');
+    expect(within(drawer).getByText('No classes today')).toBeInTheDocument();
+    expect(within(drawer).queryByText('Done for today')).not.toBeInTheDocument();
+    expect(within(drawer).getByRole('heading', { name: 'Tomorrow · Tue, Oct 20' })).toBeInTheDocument();
   });
 
   it("lists only today's classes during the day", async () => {

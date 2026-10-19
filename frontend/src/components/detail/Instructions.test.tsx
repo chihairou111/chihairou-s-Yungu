@@ -1,6 +1,7 @@
 import { act, render, screen } from '../test-render';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { buildDetailSeed, buildTodo } from '@/lib/data/fixtures';
 import Instructions, { COLLAPSED_PX, nestHeadings, stripTitle } from './Instructions';
 
 function mockScrollHeight(px: number) {
@@ -76,6 +77,21 @@ describe('stripTitle', () => {
     expect(stripTitle('<p>Essay<img src="a.png"></p>', 'Essay')).toBe('<p>Essay<img src="a.png"></p>');
     expect(stripTitle('<p>Intro</p><h2>Essay</h2>', 'Essay')).toBe('<p>Intro</p><h2>Essay</h2>');
   });
+  it("strips fixture 102's repeated title (full-width colon, CJK)", () => {
+    const html = '<h2>Task 3：开始第一次观察</h2><p>这周请你走进真实场景。</p>';
+    expect(stripTitle(html, 'Task 3：开始第一次观察')).toBe('<p>这周请你走进真实场景。</p>');
+
+    // And the fixture itself, so a change to its title or first block cannot quietly bring the repeat back.
+    const now = Date.UTC(2026, 9, 19, 2);
+    const title = buildTodo(now).find((a) => a.id === 102)!.title;
+    const seed = buildDetailSeed(102, now)!;
+    expect(seed.instructionsHtml.startsWith(`<h2>${title}</h2>`)).toBe(true);
+    render(<Instructions html={seed.instructionsHtml} title={title} />);
+    expect(screen.queryByRole('heading', { name: title })).not.toBeInTheDocument();
+    expect(screen.queryByText(title)).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Instructions' })).toBeInTheDocument();
+  });
+
   it('is not rendered by the component', () => {
     render(<Instructions html="<h2>Essay</h2><p>Write it.</p>" title="Essay" />);
     expect(screen.queryByRole('heading', { name: 'Essay' })).not.toBeInTheDocument();

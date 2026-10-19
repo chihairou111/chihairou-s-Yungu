@@ -107,7 +107,7 @@ describe('classesForPanel', () => {
 
   it("after the last class, shows tomorrow's classes", () => {
     const r = classesForPanel(events, MONDAY + 21 * HOUR);
-    expect(r).toEqual({ label: 'next', dayLabel: 'Tomorrow · Tue, Oct 20', items: r.items });
+    expect(r).toEqual({ label: 'next', dayLabel: 'Tomorrow · Tue, Oct 20', items: r.items, todayHadClasses: true });
     expect(names(r)).toEqual(['Day1 A', 'Day1 B']);
   });
 
@@ -121,10 +121,11 @@ describe('classesForPanel', () => {
 
   it('on a day without classes, shows the next school day only once school is out', () => {
     const saturday = MONDAY + 5 * DAY;
-    expect(classesForPanel(events, saturday + 10 * HOUR)).toEqual({ label: 'today', dayLabel: 'Sat, Oct 24', items: [] });
+    expect(classesForPanel(events, saturday + 10 * HOUR)).toEqual({ label: 'today', dayLabel: 'Sat, Oct 24', items: [], todayHadClasses: false });
     const evening = classesForPanel(events, saturday + 20 * HOUR);
     expect(evening.label).toBe('next');
     expect(evening.dayLabel).toBe('Mon, Oct 26');
+    expect(evening.todayHadClasses).toBe(false);
   });
 
   it("keeps today's ended classes when nothing later is known", () => {

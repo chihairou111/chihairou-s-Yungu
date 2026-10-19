@@ -25,6 +25,8 @@ export interface PanelClasses {
   /** The shown day: "Mon, Oct 19"; for the next day "Tomorrow · Tue, Oct 20" or "Mon, Oct 26". */
   dayLabel: string;
   items: ClassEvent[];
+  /** Whether today has classes at all: after hours the panel says "Done for today" or "No classes today". */
+  todayHadClasses: boolean;
 }
 
 /**
@@ -44,10 +46,11 @@ export function classesForPanel(events: ClassEvent[], now: number): PanelClasses
         label: 'next',
         dayLabel: day === todayNumber + 1 ? `Tomorrow · ${date}` : date,
         items: later.filter((e) => chinaDayNumber(e.start) === day),
+        todayHadClasses: today.length > 0,
       };
     }
   }
-  return { label: 'today', dayLabel: chinaShortDate(now), items: today };
+  return { label: 'today', dayLabel: chinaShortDate(now), items: today, todayHadClasses: today.length > 0 };
 }
 
 /**

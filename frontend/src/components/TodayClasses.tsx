@@ -21,23 +21,9 @@ interface TodayClassesProps {
   courses: Course[];
   /**
    * Today is over and `events` are the next school day's classes: this names that day ("Tomorrow ·
-   * Tue, Oct 20"), under a "Done for today" heading (see `classesForPanel`).
+   * Tue, Oct 20") as the list's heading (see `classesForPanel`; the title above says the day is done).
    */
   nextDay?: string;
-}
-
-/** "Done for today" over the day the list shows instead. */
-function NextDayHeading({ day }: { day: string }) {
-  return (
-    <Box sx={{ mb: 1.5 }}>
-      <Typography variant="body1" component="h3" sx={{ fontWeight: 600 }}>
-        Done for today
-      </Typography>
-      <Typography variant="body2" color="text.secondary">
-        {day}
-      </Typography>
-    </Box>
-  );
 }
 
 /**
@@ -126,7 +112,9 @@ export default function TodayClasses({ events: classes, now, courses, nextDay }:
   );
   return nextDay ? (
     <>
-      <NextDayHeading day={nextDay} />
+      <Typography variant="body1" component="h3" sx={{ fontWeight: 600, mb: 1.5 }}>
+        {nextDay}
+      </Typography>
       {list}
     </>
   ) : (

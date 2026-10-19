@@ -72,6 +72,29 @@ describe('AppShell', () => {
     }
   });
 
+  /** The CSS emotion generated for `el`'s classes, so media-query rules (which jsdom does not apply) can be read. */
+  function rulesFor(el: HTMLElement): string {
+    const css = Array.from(document.querySelectorAll('style'), (s) => s.textContent ?? '').join('\n');
+    const classes = Array.from(el.classList).filter((c) => c.startsWith('css-'));
+    return css
+      .split('}')
+      .filter((rule) => classes.some((c) => rule.includes(`.${c}`)))
+      .join('}');
+  }
+
+  it("reserves room under the content for the bottom-right Today's classes button only where the button shows", () => {
+    nav.pathname = '/assignments';
+    const { unmount } = render(<AppShell userName="Bruce Zheng">content</AppShell>);
+    expect(rulesFor(screen.getByRole('main'))).toMatch(/padding-bottom:calc\(9 \* var\(--mui-spacing\)\)/);
+    unmount();
+
+    // The calendar shows neither the panel nor its button.
+    nav.pathname = '/calendar';
+    render(<AppShell userName="Bruce Zheng">content</AppShell>);
+    expect(rulesFor(screen.getByRole('main'))).not.toMatch(/padding-bottom:calc\(9 \* var\(--mui-spacing\)\)/);
+    nav.pathname = '/assignments';
+  });
+
   it('signs out through the avatar menu', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('{"ok":true}'));
     vi.stubGlobal('fetch', fetchMock);

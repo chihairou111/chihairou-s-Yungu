@@ -25,7 +25,7 @@ import {
   pagePadding,
 } from './PageHeader';
 import { PHONE_NAV_CLEARANCE } from './NavRail';
-import { BOTTOM_FAB_MEDIA } from './TodayDrawer';
+import { BOTTOM_FAB_MEDIA, showsTodayPanel } from './TodayDrawer';
 import SettingsMenu from './SettingsMenu';
 
 /** "Bruce Zheng" -> "BZ"; "郑博" -> "郑"; blank -> "?". */
@@ -155,9 +155,10 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
           // Room for the docked panel, which slides in over this margin.
           mr: TODAY_PANEL_SPACE,
           // Room below the last card for the bottom-right Today's classes button (40 + 16 inset + margin)
-          // where it is always shown; on phones the last card clears the bottom nav and the button beside it.
+          // where it is always shown (not on the calendar, which has no button); on phones the last card
+          // clears the bottom nav and the button beside it.
           pb: { xs: PHONE_NAV_CLEARANCE, sm: 3 },
-          [BOTTOM_FAB_MEDIA]: { pb: 9 },
+          ...(showsTodayPanel(pathname) && { [BOTTOM_FAB_MEDIA]: { pb: 9 } }),
           [theme.breakpoints.down('sm')]: { pb: PHONE_NAV_CLEARANCE },
           // Content is capped and centred; a page header still spans the full width (see PageHeader).
           [`& > :not([${PAGE_HEADER_ATTR}])`]: { maxWidth: CONTENT_MAX_PX, mx: 'auto' },

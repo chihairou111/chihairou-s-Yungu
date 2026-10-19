@@ -202,7 +202,7 @@ export default function CommentsSection({ taskId, comments: incoming }: { taskId
                   </Avatar>
                   <Box sx={{ flex: 1, minWidth: 0 }}>
                     <Stack direction="row" sx={{ alignItems: 'center', gap: 1, minHeight: 32, flexWrap: 'wrap' }}>
-                      <Typography variant="body2" sx={{ fontWeight: 500, overflowWrap: 'anywhere' }}>
+                      <Typography variant="body2" sx={{ fontWeight: 600, overflowWrap: 'anywhere' }}>
                         {c.author}
                       </Typography>
                       <Typography variant="caption" color="text.secondary" sx={{ fontVariantNumeric: 'tabular-nums' }}>

@@ -57,13 +57,18 @@ describe('FileThumb', () => {
     const { container } = render(<FileThumb file={PDF} onOpen={() => {}} />);
     expect(skeleton()).toBeInTheDocument();
     const [key, url, width, options] = vi.mocked(loadPreview).mock.calls[0];
-    expect(key).toBe('x:/api/files/x');
+    // The size too: a file replaced under the same id and URL gets a fresh preview.
+    expect(key).toBe('x:2048:/api/files/x');
     expect(url).toBe('/api/files/x');
     expect(width).toBeGreaterThan(0);
     expect(options!.signal).toBeInstanceOf(AbortSignal);
     await act(async () => page.resolve());
+    const img = container.querySelector('img')!;
+    expect(img).toHaveAttribute('src', PREVIEW.src);
+    // Still behind the skeleton until the image has decoded, so the fade never plays over an empty box.
+    expect(skeleton()).toBeInTheDocument();
+    await act(async () => fireEvent.load(img));
     expect(skeleton()).not.toBeInTheDocument();
-    expect(container.querySelector('img')).toHaveAttribute('src', PREVIEW.src);
     expect(screen.queryByText('.PDF')).not.toBeInTheDocument();
   });
 
@@ -93,7 +98,7 @@ describe('FileThumb', () => {
     expect(container.querySelector('img')).toHaveAttribute('src', PREVIEW.src);
     expect(screen.getByText('PDF · 3 pages · 2 KB')).toBeInTheDocument();
     expect(loadPreview).not.toHaveBeenCalled();
-    expect(cachedPreview).toHaveBeenCalledWith('x:/api/files/x');
+    expect(cachedPreview).toHaveBeenCalledWith('x:2048:/api/files/x');
   });
 
   it('fades the preview in once it has painted, instead of popping it over the skeleton', async () => {
@@ -103,7 +108,49 @@ describe('FileThumb', () => {
     const media = container.querySelector('.thumb-media')!;
     expect(media).toHaveStyle({ opacity: '0' });
     await act(async () => page.resolve());
+    expect(media).toHaveStyle({ opacity: '0' });
+    await act(async () => fireEvent.load(container.querySelector('img')!));
     expect(media).toHaveStyle({ opacity: '1' });
+  });
+
+  it('waits for the image to decode before showing it', async () => {
+    let decoded!: () => void;
+    const decode = vi.fn(() => new Promise<void>((r) => (decoded = r)));
+    Object.defineProperty(HTMLImageElement.prototype, 'decode', { value: decode, configurable: true });
+    try {
+      vi.mocked(loadPreview).mockResolvedValue(PREVIEW);
+      const { container } = render(<FileThumb file={PDF} onOpen={() => {}} />);
+      const img = await vi.waitFor(() => {
+        const found = container.querySelector('img');
+        if (!found) throw new Error('no image yet');
+        return found;
+      });
+      await act(async () => fireEvent.load(img));
+      expect(decode).toHaveBeenCalled();
+      expect(skeleton()).toBeInTheDocument();
+      await act(async () => decoded());
+      expect(skeleton()).not.toBeInTheDocument();
+    } finally {
+      delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
+    }
+  });
+
+  it("drops the page count when the tile moves from a cached PDF to one not yet rendered", () => {
+    vi.mocked(cachedPreview).mockImplementation((key) => (key === 'x:2048:/api/files/x' ? PREVIEW : undefined));
+    vi.mocked(loadPreview).mockReturnValue(new Promise(() => {}));
+    const { rerender } = render(<FileThumb file={PDF} onOpen={() => {}} />);
+    expect(screen.getByText('PDF · 3 pages · 2 KB')).toBeInTheDocument();
+    rerender(<FileThumb file={{ ...PDF, id: 'y', url: '/api/files/y' }} onOpen={() => {}} />);
+    expect(screen.getByText('PDF · 2 KB')).toBeInTheDocument();
+    expect(screen.queryByText(/pages/)).not.toBeInTheDocument();
+    expect(skeleton()).toBeInTheDocument();
+  });
+
+  it('keeps the caption on one line, so the page count arriving never shifts the grid', () => {
+    vi.mocked(loadPreview).mockReturnValue(new Promise(() => {}));
+    render(<FileThumb file={PDF} onOpen={() => {}} />);
+    const caption = screen.getByText('PDF · 2 KB');
+    expect(caption).toHaveStyle({ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' });
   });
 
   it('keeps the preview at the top of the tile whatever the length of the name', () => {
@@ -135,6 +182,7 @@ describe('FileThumb', () => {
     expect(screen.queryByText('.PDF')).not.toBeInTheDocument();
     expect(skeleton()).toBeInTheDocument();
     await act(async () => second.resolve());
+    await act(async () => fireEvent.load(document.querySelector('img')!));
     expect(skeleton()).not.toBeInTheDocument();
     expect(screen.queryByText('.PDF')).not.toBeInTheDocument();
 

@@ -29,6 +29,10 @@ const UNDOCKED_MEDIA = `@media (max-width: ${DOCK_MIN_PX - 0.05}px)`;
 const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
 /** Today's classes is already the calendar's today column, so the calendar shows neither panel nor button. */
 const PANEL_HIDDEN_ON = '/calendar';
+/** Whether the page at `pathname` shows Today's classes (the panel and its button). */
+export function showsTodayPanel(pathname: string): boolean {
+  return pathname !== PANEL_HIDDEN_ON;
+}
 const DOCKED_MEDIA = `@media ${DOCK_QUERY}`;
 /** Docked, but on a touch screen: no hover, so the button stays shown at the bottom right. */
 const DOCKED_TOUCH_MEDIA = `@media (hover: none) and ${DOCK_QUERY}`;
@@ -124,10 +128,11 @@ interface TodayDrawerProps {
 /**
  * Today's classes, part of the dashboard shell (every page but the calendar, whose today column
  * already shows them; the stored state is kept for the other pages). Once today's last class has
- * ended they show the next school day's under "Done for today". From `DOCK_MIN_PX` they dock as a
- * panel on the right, below the page header band: the content narrows to make room in one step
- * (only the panel slides), and the panel stays open (remembered in a cookie) until it is closed.
- * Narrower windows open them in a temporary drawer instead.
+ * ended they show the next school day's, headed by its date, and the title says "Done for today" in
+ * place of today's date. From `DOCK_MIN_PX` they dock as a panel on the right, below the page header
+ * band: the content narrows to make room in one step (only the panel slides), and the panel stays
+ * open (remembered in a cookie) until it is closed. Narrower windows open them in a temporary drawer
+ * instead.
  * One round button toggles either. On wide pointer screens it sits mid-right and appears when the
  * pointer nears the right edge (closed) or is over the panel (open, then straddling the panel's left
  * edge as a collapse chevron), and whenever it has focus. On touch screens and narrow windows it is
@@ -136,7 +141,7 @@ interface TodayDrawerProps {
 export default function TodayDrawer({ events, now: serverNow, courses, initialPanelOpen = false }: TodayDrawerProps) {
   const now = useNow(serverNow);
   const docked = useDocked();
-  const hidden = usePathname() === PANEL_HIDDEN_ON;
+  const hidden = !showsTodayPanel(usePathname());
   const [panelOpen, setPanelOpen] = useState(initialPanelOpen);
   // Open or still sliding out: the list stays mounted and the content keeps the panel's space until
   // the slide ends; on open both return at once (and the list scrolls to Now).
@@ -149,8 +154,20 @@ export default function TodayDrawer({ events, now: serverNow, courses, initialPa
   const expanded = docked ? panelOpen : drawerOpen;
 
   const shown = classesForPanel(events, now);
+  const showsNextDay = shown.label === 'next';
   const list = (
-    <TodayClasses events={shown.items} now={now} courses={courses} nextDay={shown.label === 'next' ? shown.dayLabel : undefined} />
+    <TodayClasses
+      events={shown.items}
+      now={now}
+      courses={courses}
+      nextDay={showsNextDay ? shown.dayLabel : undefined}
+    />
+  );
+  // Under the title: today's date, or once the list shows another day (which it dates itself), that today is over.
+  const subtitle = (
+    <Typography variant="body2" color="text.secondary">
+      {showsNextDay ? (shown.todayHadClasses ? 'Done for today' : 'No classes today') : chinaShortDate(now)}
+    </Typography>
   );
 
   function setPanel(open: boolean) {
@@ -238,9 +255,7 @@ export default function TodayDrawer({ events, now: serverNow, courses, initialPa
             <Typography id={TITLE_ID} variant="h2" sx={{ fontSize: '1.375rem', lineHeight: '28px' }}>
               Today&apos;s classes
             </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {chinaShortDate(now)}
-            </Typography>
+            {subtitle}
           </Box>
           <IconButton aria-label="Close" onClick={() => setDrawerOpen(false)}>
             <Close />
@@ -264,8 +279,10 @@ export default function TodayDrawer({ events, now: serverNow, courses, initialPa
           if (e.target === e.currentTarget && e.propertyName === 'transform' && !panelOpen) setPanelBody(false);
         }}
         sx={(theme) => {
-          const { duration, easing } = theme.transitions;
-          const slide = `transform ${duration.enteringScreen}ms ${easing.easeInOut}`;
+          const { duration } = theme.transitions;
+          // Decelerating both ways (fast start, so it answers the click at once); leaving is a touch quicker.
+          const slideIn = `transform ${duration.enteringScreen}ms ${EASE}`;
+          const slideOut = `transform ${duration.leavingScreen}ms ${EASE}`;
           return {
             display: 'flex',
             // Narrow windows use the drawer; a stored open state never forces the panel there.
@@ -285,8 +302,8 @@ export default function TodayDrawer({ events, now: serverNow, courses, initialPa
             // Closed: off to the right and out of the accessibility tree once it has slid away.
             transform: 'translateX(100%)',
             visibility: 'hidden',
-            transition: `${slide}, visibility 0s linear ${duration.enteringScreen}ms`,
-            '&[data-open="true"]': { transform: 'none', visibility: 'visible', transition: slide },
+            transition: `${slideOut}, visibility 0s linear ${duration.leavingScreen}ms`,
+            '&[data-open="true"]': { transform: 'none', visibility: 'visible', transition: slideIn },
             '@media (prefers-reduced-motion: reduce)': { '&, &[data-open="true"]': { transition: 'none' } },
           };
         }}
@@ -300,9 +317,7 @@ export default function TodayDrawer({ events, now: serverNow, courses, initialPa
             <Typography id={PANEL_TITLE_ID} variant="h3" component="h2">
               Today&apos;s classes
             </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {chinaShortDate(now)}
-            </Typography>
+            {subtitle}
           </Stack>
           {panelBody && list}
         </Box>

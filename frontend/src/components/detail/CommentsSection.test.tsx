@@ -33,6 +33,11 @@ describe('CommentsSection', () => {
     expect(screen.getByPlaceholderText('Add a comment')).toBeInTheDocument();
   });
 
+  it('sets the author apart from the comment by weight, at 600 since CJK fallbacks have no 500', () => {
+    render(<CommentsSection taskId={7} comments={[{ ...TWO[0], author: '林老师' }]} />);
+    expect(screen.getByText('林老师')).toHaveStyle({ fontWeight: '600' });
+  });
+
   it('collapses to a button when empty and expands to the composer', async () => {
     const user = userEvent.setup();
     render(<CommentsSection taskId={7} comments={[]} />);

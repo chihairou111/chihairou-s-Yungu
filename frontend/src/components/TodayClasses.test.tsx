@@ -89,10 +89,9 @@ describe('TodayClasses after the last class', () => {
   const DAY = 24 * HOUR;
   const tomorrow: ClassEvent[] = classes.map((c) => ({ ...c, start: c.start + DAY, end: c.end + DAY }));
 
-  it('says the day is done, names the next school day and marks its first class Next', () => {
+  it('names the next school day over its list and marks its first class Next', () => {
     render(<TodayClasses events={tomorrow} now={MONDAY + 21 * HOUR} courses={COURSES} nextDay="Tomorrow · Tue, Oct 20" />);
-    expect(screen.getByRole('heading', { name: 'Done for today' })).toBeInTheDocument();
-    expect(screen.getByText('Tomorrow · Tue, Oct 20')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Tomorrow · Tue, Oct 20' })).toBeInTheDocument();
     const items = within(screen.getByRole('list')).getAllByRole('listitem');
     expect(items.map((li) => li.dataset.timing)).toEqual(['next', 'later', 'later']);
     expect(within(items[0]).getByText('Next')).toBeInTheDocument();
@@ -100,6 +99,6 @@ describe('TodayClasses after the last class', () => {
 
   it('shows no such heading during the day', () => {
     render(<TodayClasses events={classes} now={EARLY} courses={COURSES} />);
-    expect(screen.queryByText('Done for today')).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('heading').map((h) => h.textContent)).toEqual(['Chinese I', 'CL Business I', 'Self Study']);
   });
 });

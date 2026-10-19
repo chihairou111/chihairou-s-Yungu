@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject, type SyntheticEvent } from 'react';
 import Box from '@mui/material/Box';
 import ButtonBase from '@mui/material/ButtonBase';
 import Skeleton from '@mui/material/Skeleton';
@@ -137,7 +137,8 @@ function useNearViewport<T extends Element>(): [RefObject<T | null>, boolean] {
 
 /**
  * The top of a PDF's first page, filling the preview. Rendered once near the viewport and then kept as an
- * image (see `loadPreview`), so scrolling, remounting or a lost GPU context never leaves it blank.
+ * image (see `loadPreview`), so scrolling, remounting or a lost GPU context never leaves it blank. Reports
+ * ready only once the image has decoded, so the fade-in never plays over an empty box.
  */
 function PdfPage({
   cacheKey,
@@ -167,7 +168,24 @@ function PdfPage({
 
   return (
     <Box component="span" ref={boxRef} sx={{ position: 'absolute', inset: 0, display: 'block', bgcolor: '#fff' }}>
-      {preview && <Box component="img" src={preview.src} alt="" sx={{ ...FILL_SX, objectPosition: 'left top' }} />}
+      {preview && (
+        <Box
+          component="img"
+          src={preview.src}
+          alt=""
+          onLoad={(e: SyntheticEvent<HTMLImageElement>) => {
+            const img = e.currentTarget;
+            // decode() settles once the pixels are ready to paint (not every browser or test DOM has it).
+            const decoded = typeof img.decode === 'function' ? img.decode() : Promise.resolve();
+            decoded.then(
+              () => onLoad('ready'),
+              () => onLoad('ready'),
+            );
+          }}
+          onError={() => onLoad('error')}
+          sx={{ ...FILL_SX, objectPosition: 'left top' }}
+        />
+      )}
     </Box>
   );
 }
@@ -391,13 +409,16 @@ const tileSx = (theme: Theme) => ({
  * over if it fails. The whole tile opens the file.
  */
 export default function FileThumb({ file, onOpen }: { file: FileRef; onOpen: () => void }) {
-  const key = `${file.id}:${previewPdf(file) ?? file.url}`;
+  // The size as well as the id: a cheap guard against a file replaced under the same id and URL.
+  const key = `${file.id}:${file.size}:${previewPdf(file) ?? file.url}`;
   const [state, setState] = useState(() => initialState(file, key));
   // A different file (or PDF) in this tile: start over from its cached preview, if any.
   if (state.key !== key) setState(initialState(file, key));
   const { load, pdf: pdfPreview } = state;
-  const onLoad = useCallback((next: Load) => setState({ key, load: next }), [key]);
-  const onPdfPreview = useCallback((pdf: PdfPreview) => setState({ key, load: 'ready', pdf }), [key]);
+  // Keeps the rendered PDF page (its image reports when it has decoded); ignores a tile's former file.
+  const onLoad = useCallback((next: Load) => setState((s) => (s.key === key ? { ...s, load: next } : s)), [key]);
+  // The page count shows at once; the image fades in once decoded (`onLoad`).
+  const onPdfPreview = useCallback((pdf: PdfPreview) => setState((s) => (s.key === key ? { ...s, pdf } : s)), [key]);
   const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   const caption = fileCaption(file, pdfPreview?.pages);
 
@@ -446,7 +467,8 @@ export default function FileThumb({ file, onOpen }: { file: FileRef; onOpen: () 
         >
           {file.name}
         </Typography>
-        <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
+        {/* One line: the page count arriving later must not push the tile (and its row) taller. */}
+        <Typography component="span" variant="caption" color="text.secondary" noWrap title={caption} sx={{ display: 'block', mt: 0.25 }}>
           {caption}
         </Typography>
       </Box>
