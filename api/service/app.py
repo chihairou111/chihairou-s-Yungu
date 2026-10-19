@@ -5,6 +5,7 @@ JSON everywhere; `Authorization: Bearer <token>` on everything except POST /sess
 or POST /refresh clears the cache. Run: `uvicorn service.app:app --host 127.0.0.1 --port 8100`
 from api/, with YUNGU_STATE_DIR (default /var/lib/yungu-lms).
 """
+import logging
 import mimetypes
 import os
 import time
@@ -31,6 +32,7 @@ from .yungu import UNREACHABLE, ServiceError, SignInAgain, SignInRefused, Unavai
 DEFAULT_STATE_DIR = "/var/lib/yungu-lms"
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024 + 64 * 1024      # 50 MiB of file plus room for the multipart framing
 TOO_LARGE = "Files up to 50 MB."
+log = logging.getLogger("yungu_lms.app")
 BLANK_CREDENTIALS = "Enter your student ID and password."
 
 
@@ -57,6 +59,31 @@ class TooLarge(ServiceError):
 
 class _BodyTooLarge(Exception):
     pass
+
+
+class CatchAll:
+    """Last line: anything a route did not turn into a ServiceError (say a Yungu payload of an
+    unexpected shape tripping a mapper) becomes 502 `{error}`, logged by exception type only."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        started = False
+
+        async def tracking_send(message):
+            nonlocal started
+            started = started or message["type"] == "http.response.start"
+            await send(message)
+        try:
+            await self.app(scope, receive, tracking_send)
+        except Exception as e:
+            log.error("%s %s failed: %s", scope.get("method"), scope.get("path"), type(e).__name__)
+            if started:
+                raise
+            await JSONResponse({"error": UNREACHABLE}, status_code=502)(scope, receive, send)
 
 
 # ------------------------------------------------------------------ bodies
@@ -117,7 +144,7 @@ class Service:
     def __init__(self, state_dir: str, client_factory, now: Callable[[], float], monotonic: Callable[[], float]):
         state = StateDir(state_dir)
         self.auth = Auth(state)
-        self.yungu = Yungu(self.auth, client_factory)
+        self.yungu = Yungu(self.auth, client_factory, clock=monotonic)
         self.cache = ReadCache(clock=monotonic)
         self.submitted = SubmittedFiles(state)
         self._now = now
@@ -262,6 +289,7 @@ def create_app(state_dir: Optional[str] = None, client_factory=YunguTask,
                       client_factory, now, monotonic)
     app = FastAPI(title="Yungu LMS service", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.service = service
+    app.add_middleware(CatchAll)
 
     @app.exception_handler(ServiceError)
     async def service_error(request, exc: ServiceError):

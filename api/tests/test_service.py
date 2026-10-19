@@ -1,7 +1,10 @@
 """FastAPI service (api/service/). TestClient + fake Yungu clients; the network is never touched."""
 import asyncio
+import base64
+import functools
 import json
 import os
+import re
 import socket
 import stat
 import threading
@@ -9,10 +12,13 @@ import threading
 import pytest
 import requests
 import responses
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 import mapping
 from service.app import MAX_UPLOAD_BYTES, create_app
+from service.yungu import LOGIN_RETRY_SECONDS
 from yungu_task import BASE, SUBMITTED, TODO, UploadedFile, YunguError, YunguTask
 
 ME, OTHER = 106, 207
@@ -574,21 +580,83 @@ def test_yungu_failures_are_a_502(api, world, auth, exc):
     assert r.status_code == 502 and r.json() == {"error": UNREACHABLE}
 
 
-def test_relogin_while_yungu_is_down_is_a_502_and_keeps_the_password(api, world, state_dir, auth):
-    world.expire_all()
-    orig = FakeClient.login
-
+def login_down(monkeypatch, hang=None):
+    """Make every FakeClient login fail as if Yungu were unreachable (optionally after `hang` is set)."""
     def down(self):
         self.w.logins.append(self.login_id)
+        if hang is not None:
+            hang.wait(10)
         raise requests.ConnectionError("down")
-    FakeClient.login = down
-    try:
+    monkeypatch.setattr(FakeClient, "login", down)
+
+
+def test_relogin_while_yungu_is_down_is_a_502_and_keeps_the_password(api, world, state_dir, auth, clock,
+                                                                      monkeypatch):
+    world.expire_all()
+    with monkeypatch.context() as m:
+        login_down(m)
         r = api.get("/courses", headers=auth)
-    finally:
-        FakeClient.login = orig
-    assert r.status_code == 502 and r.json() == {"error": UNREACHABLE}
-    assert (state_dir / "credentials.json").exists()
-    assert api.get("/courses", headers=auth).status_code == 200         # recovers on the next request
+        assert r.status_code == 502 and r.json() == {"error": UNREACHABLE}
+        assert (state_dir / "credentials.json").exists()
+        assert api.get("/courses", headers=auth).status_code == 502          # backing off: no new attempt
+        assert world.logins == ["S106", "S106"]
+    clock.t += LOGIN_RETRY_SECONDS + 1
+    assert api.get("/courses", headers=auth).status_code == 200             # recovers once the back-off ends
+    assert world.logins == ["S106", "S106", "S106"]
+
+
+def run_parallel(n, fn):
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(fn())) for _ in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(20)
+    return results
+
+
+def test_concurrent_requests_during_an_outage_make_one_login_attempt(api, world, auth, monkeypatch):
+    n = 6
+    world.expire_all()
+    world.barrier = threading.Barrier(n)
+    login_down(monkeypatch)
+    results = run_parallel(n, lambda: api.get("/courses", headers={**auth, "X-Refresh": "1"}).status_code)
+    assert results == [502] * n
+    assert world.logins == ["S106", "S106"]
+
+
+def test_concurrent_first_requests_after_a_restart_during_an_outage_make_one_attempt(make, world, auth,
+                                                                                       monkeypatch):
+    restarted = make()
+    login_down(monkeypatch)
+    results = run_parallel(6, lambda: restarted.get("/courses", headers=auth).status_code)
+    assert results == [502] * 6
+    assert world.logins == ["S106", "S106"]
+
+
+def test_sign_out_is_not_blocked_by_a_hanging_relogin(api, world, auth,
+                                                                                  monkeypatch, state_dir):
+    hang = threading.Event()
+    world.expire_all()
+    login_down(monkeypatch, hang=hang)
+    first = []
+    t = threading.Thread(target=lambda: first.append(api.get("/courses", headers=auth)))
+    t.start()
+    while world.logins == ["S106"]:            # wait until the re-login is in flight
+        threading.Event().wait(0.01)
+    done = threading.Event()
+    out = []
+
+    def sign_out():
+        out.append(api.delete("/session", headers=auth).status_code)
+        done.set()
+    threading.Thread(target=sign_out).start()
+    assert done.wait(5), "sign-out waited for the hanging re-login"
+    assert out == [204] and not (state_dir / "credentials.json").exists()
+    hang.set()
+    t.join(10)
+    assert first[0].status_code == 401 and first[0].json() == {"error": SIGN_IN_AGAIN}
+    assert world.logins == ["S106", "S106"]
 
 
 class OfflineLogin(YunguTask):
@@ -639,6 +707,140 @@ def test_real_client_expiry_forms_trigger_one_relogin(real, expired):
     r = api.get("/courses", headers=auth)
     assert r.status_code == 200 and r.json() == []
     assert OfflineLogin.logins == 2
+
+
+# ------------------------------------------- malformed data and log hygiene
+@pytest.mark.parametrize("path,breaker", [
+    ("/courses", lambda w: setattr(w, "courses", [{"courseName": "no id"}])),
+    ("/todo", lambda w: w.lists[TODO].__setitem__(0, {"title": "no id"})),
+    ("/submitted", lambda w: w.lists[SUBMITTED].__setitem__(0, {**w.lists[SUBMITTED][0], "deadlineTimeMillis": None})),
+    ("/week?start=1792339200000", lambda w: setattr(w, "week", [[{"name": "no times"}]])),
+    ("/assignments/93251", lambda w: w.mixed[93251].pop("taskTitle")),
+])
+def test_malformed_yungu_data_is_a_502_with_the_error_shape(api, world, auth, path, breaker):
+    breaker(world)
+    r = api.get(path, headers=auth)
+    assert r.status_code == 502 and r.json() == {"error": UNREACHABLE}
+
+
+def test_unexpected_errors_are_logged_by_type_only(api, auth, monkeypatch, caplog):
+    def boom(raw):
+        raise ValueError("SECRET-IN-MESSAGE")
+    monkeypatch.setattr(mapping, "courses", boom)
+    caplog.set_level("DEBUG")
+    r = api.get("/courses", headers=auth)
+    assert r.status_code == 502 and r.json() == {"error": UNREACHABLE}
+    assert "ValueError" in caplog.text and "SECRET-IN-MESSAGE" not in caplog.text
+
+
+def test_yungu_error_bodies_are_never_logged(api, world, auth, caplog):
+    xml = "<Error><OSSAccessKeyId>STS.NTsecretKEY</OSSAccessKeyId><StringToSign>PUT x</StringToSign></Error>"
+    resp = json_response({}, status=403)
+    resp._content = xml.encode()
+    world.fail = YunguError(f"OSS PUT taskFile/1_a.txt -> HTTP 403: {xml}", resp)
+    caplog.set_level("DEBUG")
+    r = api.post("/files", files={"file": ("a.txt", b"1", "text/plain")}, headers=auth)
+    assert r.status_code == 502
+    assert "STS.NTsecretKEY" not in caplog.text and "StringToSign" not in caplog.text
+    assert "HTTP 403" in caplog.text
+
+
+@responses.activate
+def test_real_oss_failure_logs_no_sts_material(real, caplog):
+    api, auth = real
+    sts = {"accessKeyId": "STS.KEYID123", "accessSecret": "SECRET456", "stsToken": "TOKEN789",
+           "bucketName": "bucket", "endpoint": "https://oss.example", "ossPath": "taskFile/"}
+    responses.get(BASE + "/api/sts/token", json={"code": 0, "content": sts})
+    responses.put(re.compile(r"https://bucket\.oss\.example/.*"), status=403,
+                  body="<Error><OSSAccessKeyId>STS.KEYID123</OSSAccessKeyId><SignatureProvided>sig</SignatureProvided></Error>")
+    caplog.set_level("DEBUG")
+    r = api.post("/files", files={"file": ("作业.txt", b"1", "text/plain")}, headers=auth)
+    assert r.status_code == 502 and r.json() == {"error": UNREACHABLE}
+    for secret in ("STS.KEYID123", "SECRET456", "TOKEN789", "SignatureProvided"):
+        assert secret not in caplog.text
+
+
+# ------------------------------------------------ CAS login answer shapes
+CAS = "https://login.yungu.org"
+
+
+@functools.lru_cache(maxsize=1)
+def cas_public_key():
+    return rsa.generate_private_key(public_exponent=65537, key_size=2048).public_key()
+
+
+def mock_cas(**login_kw):
+    der = cas_public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+    responses.get(CAS + "/cas/login", body="<html></html>")
+    responses.get(CAS + "/api/getStudentLoginId", json={})
+    responses.get(CAS + "/cas/getPublicKey", json={"content": base64.b64encode(der).decode()})
+    responses.post(CAS + "/cas/loginForLoginId", **login_kw)
+
+
+def cas_logins():
+    return sum(1 for c in responses.calls if c.request.url.startswith(CAS + "/cas/loginForLoginId"))
+
+
+@pytest.fixture
+def real_cas(make):
+    return make(factory=lambda l, p: YunguTask(l, p))
+
+
+@responses.activate
+@pytest.mark.parametrize("answer", [
+    {"success": False, "msg": "密码错误"},
+    {"msg": "密码错误", "code": 1},                       # no `success` key at all
+    {"success": None, "msg": "密码错误"},
+])
+def test_any_well_formed_non_success_login_answer_is_a_rejection(real_cas, answer):
+    mock_cas(json=answer)
+    r = real_cas.post("/session", json={"loginId": "S106", "password": "hunter2-xyz"})
+    assert r.status_code == 200 and r.json() == {"ok": False, "error": "密码错误"}
+
+
+@responses.activate
+@pytest.mark.parametrize("kw", [
+    {"status": 500, "json": {"success": False, "msg": "系统异常"}},
+    {"status": 502, "body": "<html>bad gateway</html>"},
+    {"status": 200, "body": "<html>not json</html>"},
+    {"body": requests.ConnectionError("refused")},
+])
+def test_transport_errors_at_login_are_unavailable(real_cas, kw):
+    mock_cas(**kw)
+    r = real_cas.post("/session", json={"loginId": "S106", "password": "hunter2-xyz"})
+    assert r.status_code == 502 and r.json() == {"ok": False, "error": UNREACHABLE}
+
+
+@responses.activate
+def test_saved_password_rejected_without_a_success_key_is_forgotten_after_one_attempt(api, make, auth, state_dir):
+    restarted = make(factory=lambda l, p: YunguTask(l, p))
+    mock_cas(json={"msg": "密码错误", "code": 1})
+    assert restarted.get("/courses", headers=auth).json() == {"error": PW_CHANGED}
+    assert restarted.get("/courses", headers=auth).json() == {"error": SIGN_IN_AGAIN}
+    assert cas_logins() == 1 and not (state_dir / "credentials.json").exists()
+
+
+@responses.activate
+def test_saved_password_with_a_5xx_login_is_kept_and_not_retried_per_request(api, make, auth, state_dir, clock):
+    restarted = make(factory=lambda l, p: YunguTask(l, p))
+    mock_cas(status=500, json={"success": False})
+    for _ in range(3):
+        assert restarted.get("/courses", headers=auth).json() == {"error": UNREACHABLE}
+    assert cas_logins() == 1 and (state_dir / "credentials.json").exists()
+    clock.t += LOGIN_RETRY_SECONDS + 1
+    restarted.get("/courses", headers=auth)
+    assert cas_logins() == 2
+
+
+def test_a_failure_after_the_cas_login_is_not_a_rejection(api, world, auth, state_dir, monkeypatch):
+    world.expire_all()
+
+    def current_user_fails(self):
+        self.w.logins.append(self.login_id)
+        raise YunguError("GET /api/currentUser -> code=1000 message=x", json_response({"code": 1000}))
+    monkeypatch.setattr(FakeClient, "login", current_user_fails)
+    assert api.get("/courses", headers=auth).json() == {"error": UNREACHABLE}
+    assert (state_dir / "credentials.json").exists()
 
 
 # --------------------------------------------------- uploads (Review Focus 5)
