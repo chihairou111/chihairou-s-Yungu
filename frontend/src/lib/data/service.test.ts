@@ -11,7 +11,7 @@ vi.mock('next/headers', () => ({
   headers: async () => request.headers,
 }));
 
-import { REFRESH_COOKIE, serviceData as data } from './service';
+import { READ_TIMEOUT_MS, REFRESH_COOKIE, UPLOAD_TIMEOUT_MS, WRITE_TIMEOUT_MS, serviceData as data } from './service';
 
 const PASSWORD_CHANGED = 'Sign in again — your Yungu password may have changed.';
 const UNAVAILABLE = "Can't reach Yungu right now. Try again.";
@@ -122,6 +122,78 @@ describe('serviceData errors', () => {
     expect(error).toBeInstanceOf(ServiceError);
     expect(error).not.toBeInstanceOf(YunguUnavailable);
     expect(error).toMatchObject({ status: 400, message: 'Bad request.' });
+  });
+});
+
+describe('serviceData timeouts: a stalled Yungu or a hung service is "Can\'t reach Yungu", not minutes of waiting', () => {
+  const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+  let asked: number[];
+  let spy: { mockRestore(): void };
+  beforeEach(() => {
+    asked = [];
+    // Every budget is shortened to 5 ms; `asked` keeps the budget each call really set.
+    spy = vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms: number) => {
+      asked.push(ms);
+      return realTimeout(5);
+    });
+  });
+  afterEach(() => spy.mockRestore());
+
+  /** A service that never answers but gives up when the request is aborted, as fetch does. */
+  const hang = () =>
+    fetchMock.mockImplementation(
+      (_url, init) => new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal!.reason))),
+    );
+
+  it('the budgets: 45 s to read, 90 s to write, 5 min to upload', () => {
+    expect([READ_TIMEOUT_MS, WRITE_TIMEOUT_MS, UPLOAD_TIMEOUT_MS]).toEqual([45_000, 90_000, 300_000]);
+  });
+
+  it.each([
+    ['getTodo', () => data.getTodo()],
+    ['getSubmitted', () => data.getSubmitted()],
+    ['getWeek', () => data.getWeek(0)],
+    ['getCourses', () => data.getCourses()],
+    ['getAssignmentDetail', () => data.getAssignmentDetail(93251)],
+    ['getFile', () => data.getFile('1')],
+  ])('%s gives up after the read budget with YunguUnavailable', async (_name, run) => {
+    hang();
+    await expect(run()).rejects.toEqual(new YunguUnavailable(UNAVAILABLE));
+    expect(asked).toEqual([READ_TIMEOUT_MS]);
+    expect(call().init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it.each([
+    ['saveDraft', () => data.saveDraft(93251, ['1'])],
+    ['submit', () => data.submit(93251, ['1'])],
+    ['addComment', () => data.addComment(93251, 'x')],
+    ['deleteComment', () => data.deleteComment(93251, '2')],
+    ['refresh', () => data.refresh()],
+    ['signOut', () => data.signOut('tok')],
+  ])('%s gives up after the longer write budget with YunguUnavailable', async (_name, run) => {
+    hang();
+    await expect(run()).rejects.toEqual(new YunguUnavailable(UNAVAILABLE));
+    expect(asked).toEqual([WRITE_TIMEOUT_MS]);
+  });
+
+  it('signIn gives up after the write budget with the sign-in form\'s "Can\'t reach Yungu"', async () => {
+    hang();
+    expect(await data.signIn('S1', 'pw')).toEqual({ ok: false, error: UNAVAILABLE });
+    expect(asked).toEqual([WRITE_TIMEOUT_MS]);
+  });
+
+  it('uploadFile gives up after the upload budget', async () => {
+    hang();
+    await expect(data.uploadFile('a.pdf', 'application/pdf', new Uint8Array([1]))).rejects.toEqual(new YunguUnavailable(UNAVAILABLE));
+    expect(asked).toEqual([UPLOAD_TIMEOUT_MS]);
+  });
+
+  it('a body that stops arriving times out too', async () => {
+    fetchMock.mockImplementation(async (_url, init) => {
+      const stalled = new ReadableStream({ start: (c) => init?.signal?.addEventListener('abort', () => c.error(init.signal!.reason)) });
+      return new Response(stalled, { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    await expect(data.getTodo()).rejects.toEqual(new YunguUnavailable(UNAVAILABLE));
   });
 });
 

@@ -12,6 +12,18 @@ const REFRESH_HEADER = 'x-refresh';
 const DEFAULT_URL = 'http://127.0.0.1:8100';
 const GENERIC_ERROR = 'Something went wrong. Try again.';
 
+/**
+ * How long one call to the service may take, body included, before it counts as "Can't reach Yungu"
+ * (without one, fetch waits about 5 minutes for a hung service). The service gives each Yungu socket
+ * operation 15 s; a cold read is a handful of sequential Yungu calls, a sign-in or re-login five more.
+ * Writes get twice the read budget: one that runs out may still go through on Yungu, so the budget is
+ * generous, and if it does run out the pop-up shows its usual inline error (never a false success)
+ * and its next load shows what Yungu really holds. Uploads also carry the file on to OSS (up to 50 MB).
+ */
+export const READ_TIMEOUT_MS = 45_000;
+export const WRITE_TIMEOUT_MS = 90_000;
+export const UPLOAD_TIMEOUT_MS = 300_000;
+
 const baseUrl = () => (process.env.YUNGU_API_URL || DEFAULT_URL).replace(/\/+$/, '');
 
 async function errorText(res: Response): Promise<string | null> {
@@ -19,11 +31,17 @@ async function errorText(res: Response): Promise<string | null> {
   return body && typeof body === 'object' && 'error' in body && typeof body.error === 'string' ? body.error : null;
 }
 
-/** One call to the service; a non-2xx answer or no answer at all becomes the matching error type. */
-async function send(path: string, init: RequestInit): Promise<Response> {
+/**
+ * One call to the service; a non-2xx answer, no answer at all, or no answer within `timeoutMs` (a GET
+ * defaults to the read budget, anything else to the write budget) becomes the matching error type. The
+ * budget covers the body too: a body that stops arriving fails its `res.json()`, which `body()` and
+ * `errorText()` treat as unavailable.
+ */
+async function send(path: string, init: RequestInit, timeoutMs?: number): Promise<Response> {
+  const budget = timeoutMs ?? ((init.method ?? 'GET') === 'GET' ? READ_TIMEOUT_MS : WRITE_TIMEOUT_MS);
   let res: Response;
   try {
-    res = await fetch(`${baseUrl()}${path}`, { ...init, cache: 'no-store' });
+    res = await fetch(`${baseUrl()}${path}`, { ...init, cache: 'no-store', signal: AbortSignal.timeout(budget) });
   } catch {
     throw new YunguUnavailable();
   }
@@ -35,7 +53,7 @@ async function send(path: string, init: RequestInit): Promise<Response> {
 }
 
 /** A call as the signed-in student: our session token from the request cookie as the Bearer token. */
-async function authed(path: string, init: RequestInit = {}): Promise<Response> {
+async function authed(path: string, init: RequestInit = {}, timeoutMs?: number): Promise<Response> {
   const store = await cookies();
   const session = decodeSession(store.get(SESSION_COOKIE)?.value);
   if (!session) throw new SessionEnded();
@@ -46,7 +64,7 @@ async function authed(path: string, init: RequestInit = {}): Promise<Response> {
     const refresh = store.get(REFRESH_COOKIE)?.value === '1' || (await headers()).get(REFRESH_HEADER) === '1';
     if (refresh) sent.set('X-Refresh', '1');
   }
-  return send(path, { ...init, method, headers: sent });
+  return send(path, { ...init, method, headers: sent }, timeoutMs);
 }
 
 async function body<T>(res: Response): Promise<T> {
@@ -99,7 +117,7 @@ export const serviceData: YunguData = {
   async uploadFile(name, mime, bytes) {
     const form = new FormData();
     form.append('file', new Blob([bytes as BlobPart], { type: mime }), name);
-    return body<FileRef>(await authed('/files', { method: 'POST', body: form }));
+    return body<FileRef>(await authed('/files', { method: 'POST', body: form }, UPLOAD_TIMEOUT_MS));
   },
   async getFile(id, opts) {
     const path = `/files/${encodeURIComponent(id)}?preview=${opts?.preview ? 1 : 0}`;

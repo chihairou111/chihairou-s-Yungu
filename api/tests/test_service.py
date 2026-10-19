@@ -17,7 +17,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 import mapping
-from service.app import MAX_UPLOAD_BYTES, create_app
+from service.app import MAX_UPLOAD_BYTES, YUNGU_TIMEOUT_SECONDS, create_app
 from service.yungu import LOGIN_RETRY_SECONDS
 from yungu_task import BASE, SUBMITTED, TODO, UploadedFile, YunguError, YunguTask
 
@@ -440,6 +440,12 @@ def test_upload_clears_the_cache(api, world, auth):
     api.post("/files", files={"file": ("a.txt", b"1", "text/plain")}, headers=auth)
     api.get("/courses", headers=auth)
     assert world.count("courses") == 2
+
+
+def test_the_service_builds_yungu_clients_with_a_short_timeout(state_dir):
+    app = create_app(state_dir=str(state_dir))
+    c = app.state.service.yungu._factory("S106", "pw")
+    assert isinstance(c, YunguTask) and c.timeout == YUNGU_TIMEOUT_SECONDS == 15
 
 
 # --------------------------------------------- session expiry (Review Focus 1)

@@ -170,3 +170,20 @@ def test_session_expired():
     assert session_expired({"code": 500}) is False
     assert session_expired(None) is False
     assert session_expired("<html>") is False
+
+
+def test_oss_put_keeps_its_own_long_timeout_under_a_short_client_timeout(monkeypatch):
+    seen = {}
+
+    class Ok:
+        status_code = 200
+
+    def put(url, **kw):
+        seen["timeout"] = kw["timeout"]
+        return Ok()
+    monkeypatch.setattr(yungu_task.requests, "put", put)
+    c = YunguTask("id", "pw", timeout=15)
+    sts = {"accessKeyId": "k", "accessSecret": "s", "stsToken": "t", "bucketName": "b",
+           "endpoint": "https://oss-cn-hangzhou.aliyuncs.com"}
+    c._oss_put(sts, "taskFile/x.txt", b"1", "text/plain")
+    assert seen["timeout"] == 300

@@ -37,6 +37,11 @@ log = logging.getLogger("yungu_lms.app")
 T = TypeVar("T")
 BLANK_CREDENTIALS = "Enter your student ID and password."
 UNKNOWN_TASK = 1035          # Yungu's answer (HTTP 200, JSON code 1035) for a taskPublishId that does not exist
+# Per socket operation (connect, each read) of every Yungu call. The client's own default (60 s) let a
+# stalled Yungu hold a page for minutes: a cold Submitted list is several sequential page calls and a
+# login is five calls under the login lock other requests wait on. The OSS upload keeps its own
+# max(timeout, 300) s. Next gives up on the whole service call well before these add up (service.ts).
+YUNGU_TIMEOUT_SECONDS = 15
 
 
 class NotFound(ServiceError):
@@ -112,6 +117,10 @@ def _known(lookup: Callable[[], T]) -> T:
         if error_code(e) == UNKNOWN_TASK:
             raise NotFound() from None
         raise
+
+
+def yungu_client(login_id: str, password: str) -> YunguTask:
+    return YunguTask(login_id, password, timeout=YUNGU_TIMEOUT_SECONDS)
 
 
 def _file_ids(ids: List[str]) -> List[int]:
@@ -297,7 +306,7 @@ class Service:
 
 
 # --------------------------------------------------------------------- app
-def create_app(state_dir: Optional[str] = None, client_factory=YunguTask,
+def create_app(state_dir: Optional[str] = None, client_factory=yungu_client,
                now: Callable[[], float] = time.time, monotonic: Callable[[], float] = time.monotonic) -> FastAPI:
     service = Service(state_dir or os.environ.get("YUNGU_STATE_DIR") or DEFAULT_STATE_DIR,
                       client_factory, now, monotonic)
