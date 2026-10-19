@@ -83,11 +83,6 @@ def main():
     def put(name, data):
         written[name] = scrub(data, secrets)
 
-    def comments_of(publish_id):   # read-only POST, as the web UI sends it
-        return c._api("POST", "/api/student/getAchievementDetail/comment", json_body={
-            "distributionType": 1, "ifPc": True, "studentId": c.user_id, "teamId": None,
-            "taskPublishId": str(publish_id)})["content"]
-
     put("todo_page.json", c.list_tasks(TODO, 1, 10))
     put("submitted_page1.json", c.list_tasks(SUBMITTED, 1, 10))
     put("week.json", week_whitelist(c.calendar_week()))
@@ -100,7 +95,7 @@ def main():
     for label, pid in targets.items():
         put(f"mixed_{label}.json", c.task_detail(pid))
         put(f"achievement_{label}.json", c.achievement(pid))
-        put(f"comments_{label}.json", comments_of(pid))
+        put(f"comments_{label}.json", c.comments(pid))
     # The task with the most teacher attachments (pdf, video, image, .numbers ...), among those
     # on the To-do list and the first two Submitted pages. Read-only.
     pool = [t["taskPublishId"] for t in c.iter_tasks(TODO)] + \

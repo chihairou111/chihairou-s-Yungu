@@ -6,7 +6,7 @@ Field decisions (chosen from recorded fixtures, tests/fixtures/):
   * Assignment.submittedAt: the Submitted list has no hand-in time field. `modifiedTime` on a
     Submitted item is the last change to the student's work (it falls between publish and
     deadline for on-time work, and 93251 moved when a comment was added), so it is used as the
-    hand-in time. Without it: min(dueAt, now_ms), i.e. never late and never in the future.
+    hand-in time, clamped by `ifTimeout` (see assignment()). Without it: min(dueAt, now_ms), i.e. never late and never in the future.
   * Assignment.status: 'Submitted' when doTaskStatus is 'Submitted' (doTaskStatusId 4), else 'To submit'.
   * Assignment.schoolGroup: only the three To-do group names survive; the Submitted/Archived
     group is literally "list" and maps to null.
@@ -66,7 +66,14 @@ def assignment(raw: dict, group: Optional[str], now_ms: int) -> dict:
         "schoolGroup": group if group in SCHOOL_GROUPS else None,
     }
     if submitted:
-        out["submittedAt"] = china_ms(raw.get("modifiedTime")) or min(due, now_ms)
+        at = china_ms(raw.get("modifiedTime")) or min(due, now_ms)
+        # modifiedTime also moves on later comments, so `ifTimeout` (Yungu's own late flag) decides
+        # which side of the deadline the hand-in time sits on: the UI shows "late" iff submittedAt > dueAt.
+        if raw.get("ifTimeout") is False and at > due:
+            at = due
+        elif raw.get("ifTimeout") is True and at <= due:
+            at = due + 1
+        out["submittedAt"] = at
     return out
 
 

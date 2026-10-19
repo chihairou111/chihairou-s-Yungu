@@ -79,6 +79,26 @@ def test_late_submission_has_submitted_at_after_due(load):
     assert a["submittedAt"] > a["dueAt"]
 
 
+def test_comment_bumped_modified_time_cannot_make_on_time_work_late(load):
+    raw = {**tasks(load("submitted_page1.json"))[0], "ifTimeout": False}
+    raw["modifiedTime"] = "2099-01-01 00:00:00"          # e.g. a teacher comment long after the deadline
+    a = mapping.assignment(raw, "list", NOW)
+    assert a["submittedAt"] == a["dueAt"]                # not > dueAt, so not shown as late
+
+
+def test_late_flag_keeps_submitted_at_after_due_even_if_modified_time_is_earlier(load):
+    raw = {**tasks(load("submitted_page1.json"))[0], "ifTimeout": True}
+    raw["modifiedTime"] = "2000-01-01 00:00:00"
+    a = mapping.assignment(raw, "list", NOW)
+    assert a["submittedAt"] == a["dueAt"] + 1
+
+
+def test_on_time_hand_in_before_deadline_is_untouched(load):
+    raw = {**tasks(load("submitted_page1.json"))[0], "ifTimeout": False}
+    a = mapping.assignment(raw, "list", NOW)
+    assert a["submittedAt"] == mapping.china_ms(raw["modifiedTime"]) <= a["dueAt"]
+
+
 def test_submitted_without_modified_time_falls_back_without_inventing_lateness(load):
     raw = {**tasks(load("submitted_page1.json"))[0], "modifiedTime": None}
     a = mapping.assignment(raw, "list", 10**15)
