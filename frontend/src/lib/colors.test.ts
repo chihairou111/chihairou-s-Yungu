@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { COURSE_COLORS, EVENT_TINT, contrastRatio, courseColorHex, lightEventColors, readableTextOn, tint } from './colors';
-
-const DARK = 'rgba(0,0,0,0.87)';
+import { COURSE_COLORS, EVENT_TINT, contrastRatio, courseColorHex, lightEventColors, tint } from './colors';
 
 describe('COURSE_COLORS', () => {
   it('uses the Google Calendar event palette', () => {
@@ -29,42 +27,14 @@ describe('contrastRatio', () => {
   });
 });
 
-describe('readableTextOn', () => {
-  it('puts white text on dark colors', () => {
-    for (const name of ['Tomato', 'Basil', 'Blueberry', 'Grape', 'Graphite'] as const) {
-      expect(readableTextOn(COURSE_COLORS[name]), name).toBe('#fff');
-    }
-  });
-
-  it('puts near-black text on light colors', () => {
-    for (const name of ['Banana', 'Flamingo', 'Tangerine', 'Sage', 'Peacock', 'Lavender'] as const) {
-      expect(readableTextOn(COURSE_COLORS[name]), name).toBe(DARK);
-    }
-  });
-
-  it('always meets WCAG AA (4.5:1) on every palette color', () => {
-    for (const [name, hex] of Object.entries(COURSE_COLORS)) {
-      const fg = readableTextOn(hex) === '#fff' ? '#ffffff' : '#212121'; // 87% black over white-ish ≈ #212121 worst case
-      expect(contrastRatio(fg, hex), name).toBeGreaterThanOrEqual(4.5);
-    }
-  });
-
-  it('accepts lowercase and 3-digit hex', () => {
-    expect(readableTextOn('#fff')).toBe(DARK);
-    expect(readableTextOn('#000')).toBe('#fff');
-    expect(readableTextOn('#3f51b5')).toBe('#fff');
-  });
-});
-
 describe('courseColorHex', () => {
   it('maps a palette name to its hex', () => {
     expect(courseColorHex('Banana')).toBe('#F6BF26');
   });
 
-  it('falls back to Graphite for a name outside the palette, so text color never fails', () => {
+  it('falls back to Graphite for a name outside the palette', () => {
     for (const bad of ['Chartreuse', 'toString', '', '__proto__']) {
       expect(courseColorHex(bad), bad).toBe('#616161');
-      expect(() => readableTextOn(courseColorHex(bad))).not.toThrow();
     }
   });
 });

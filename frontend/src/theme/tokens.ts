@@ -57,8 +57,6 @@ export interface YunguTokens {
   shape: ShapeScale;
   color: ColorRoles;
   rail: RailTokens;
-  /** Material 3 segmented buttons show a check on the selected segment. */
-  segmentedCheck: boolean;
   /**
    * Top app bar surface, shared by the page header that extends it (tabs, page controls).
    * `edge` is the one boundary between that header and the content (a CSS border value).

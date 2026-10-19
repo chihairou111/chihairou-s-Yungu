@@ -48,16 +48,11 @@ test('sign in, browse assignments and calendar, sign out', async ({ page }) => {
   await page.keyboard.press('Escape');
   await expect(drawer).toBeHidden();
 
-  // By course: Classroom-style course cards, with idle courses below "No work due".
-  await page.getByRole('button', { name: 'By course' }).click();
-  await expect(page).toHaveURL(/\?view=course$/);
-  await expect(page.getByRole('article', { name: 'Product Design I' })).toBeVisible();
-  const idle = page.getByRole('region', { name: 'No work due' });
-  await expect(idle.getByRole('article', { name: 'Chinese I' })).toBeVisible();
-  await page.reload();
-  await expect(page.getByRole('button', { name: 'By course' })).toHaveAttribute('aria-pressed', 'true');
-  await page.getByRole('button', { name: 'By priority' }).click();
-  await expect(page).toHaveURL(/\/assignments$/);
+  // By course is gone: no grouping switch, and a stale ?view=course still shows the priority columns.
+  await expect(page.getByRole('button', { name: 'By course' })).toHaveCount(0);
+  await page.goto('/assignments?view=course');
+  await expect(page.getByRole('heading', { name: 'Overdue', exact: true })).toBeVisible();
+  await page.goto('/assignments');
 
   // The session cookie survives a reload.
   await page.reload();
@@ -110,9 +105,6 @@ test.describe('phone width', () => {
     // Cards use the compact 16px margins: at least 340 of the 390px.
     const card = (await page.getByRole('article').first().boundingBox())!;
     expect(card.width).toBeGreaterThanOrEqual(340);
-    await page.goto('/assignments?view=course');
-    await expect(page.getByRole('article', { name: 'Chinese I' })).toBeVisible();
-    await expectNoHorizontalScroll(page);
     await page.goto('/assignments?tab=submitted');
     await expect(page.getByText('Late', { exact: true })).toBeVisible();
     await expectNoHorizontalScroll(page);
@@ -145,11 +137,8 @@ test.describe('phone width', () => {
     const lastCard = (await page.getByRole('article').last().boundingBox())!;
     expect(lastCard.y + lastCard.height).toBeLessThanOrEqual(navBox.y);
 
-    // The view switch scrolls with the content: only the title and tabs stay pinned.
+    // Only the title and tabs stay pinned.
     await page.evaluate(() => window.scrollTo(0, 0));
-    const views = page.getByRole('group', { name: 'Group to-do work' });
-    await expect(views).toHaveCount(1);
-    expect(await views.evaluate((el) => el.closest('[data-page-header]') === null)).toBe(true);
     const header = (await page.locator('[data-page-header]').boundingBox())!;
     expect(Math.round(header.y + header.height)).toBe(104);
 
@@ -200,8 +189,8 @@ test.describe('half-width window', () => {
 });
 
 test.describe('style switcher', () => {
-  const radius = (page: Page, name: string) =>
-    page.getByRole('article', { name }).evaluate((el) => getComputedStyle(el).borderTopLeftRadius);
+  const card = (page: Page) => page.getByRole('article').first();
+  const radius = (page: Page) => card(page).evaluate((el) => getComputedStyle(el).borderTopLeftRadius);
 
   async function chooseStyle(page: Page, label: string) {
     await page.getByRole('button', { name: 'Settings' }).click();
@@ -210,27 +199,26 @@ test.describe('style switcher', () => {
 
   test('the gear switches between rounded and classic at once, and the choice survives a reload', async ({ page }) => {
     await signIn(page);
-    await page.goto('/assignments?view=course');
-    // A new visitor gets the rounded Material 3 style: 12px course cards.
-    await expect.poll(() => radius(page, 'Chinese I')).toBe('12px');
+    // A new visitor gets the rounded Material 3 style: 12px cards.
+    await expect.poll(() => radius(page)).toBe('12px');
 
     await chooseStyle(page, 'Classic (Material 2)');
-    await expect.poll(() => radius(page, 'Chinese I')).toBe('4px');
+    await expect.poll(() => radius(page)).toBe('4px');
     await page.getByRole('button', { name: 'Settings' }).click();
     await expect(page.getByRole('menuitemradio', { name: 'Classic (Material 2)' })).toHaveAttribute('aria-checked', 'true');
     await page.keyboard.press('Escape');
 
     await page.reload();
-    await expect(page.getByRole('article', { name: 'Chinese I' })).toBeVisible();
-    expect(await radius(page, 'Chinese I')).toBe('4px');
+    await expect(card(page)).toBeVisible();
+    expect(await radius(page)).toBe('4px');
     const cookie = (await page.context().cookies()).find((c) => c.name === 'yl_style');
     expect(cookie?.value).toBe('classic');
 
     await chooseStyle(page, 'Rounded (Material 3)');
-    await expect.poll(() => radius(page, 'Chinese I')).toBe('12px');
+    await expect.poll(() => radius(page)).toBe('12px');
     await page.reload();
-    await expect(page.getByRole('article', { name: 'Chinese I' })).toBeVisible();
-    expect(await radius(page, 'Chinese I')).toBe('12px');
+    await expect(card(page)).toBeVisible();
+    expect(await radius(page)).toBe('12px');
   });
 
   test('the sign-in page renders in the stored style on first paint', async ({ page, context, baseURL }) => {

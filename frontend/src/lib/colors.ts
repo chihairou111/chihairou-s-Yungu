@@ -20,11 +20,6 @@ export function courseColorHex(color: string): string {
   return Object.hasOwn(COURSE_COLORS, color) ? COURSE_COLORS[color as CourseColor] : COURSE_COLORS.Graphite;
 }
 
-const WHITE = '#fff';
-/** Material "high-emphasis" text on light surfaces. */
-const DARK = 'rgba(0,0,0,0.87)';
-const DARK_ALPHA = 0.87;
-
 type Rgb = [number, number, number];
 
 function parseHex(hex: string): Rgb {
@@ -50,14 +45,6 @@ function ratio(a: Rgb, b: Rgb): number {
 /** WCAG contrast ratio between two hex colors (1–21). */
 export function contrastRatio(a: string, b: string): number {
   return ratio(parseHex(a), parseHex(b));
-}
-
-/** White or Material near-black, whichever reads better on `hex` (WCAG contrast). */
-export function readableTextOn(hex: string): string {
-  const bg = parseHex(hex);
-  // 87% black composited over the background.
-  const dark = bg.map((c) => Math.round(c * (1 - DARK_ALPHA))) as Rgb;
-  return ratio([255, 255, 255], bg) >= ratio(dark, bg) ? WHITE : DARK;
 }
 
 function toHex(rgb: Rgb): string {

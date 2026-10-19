@@ -60,7 +60,6 @@ const tokens: YunguTokens = {
     activeHoverBg: hoverOnSecondaryContainer,
     activeFocus: { outlineOffset: -2 },
   },
-  segmentedCheck: true,
   // M3 top app bar in its scrolled-under tone: the header reads as one tonal band above the
   // surface, with no line.
   header: { bg: color.surfaceContainer, edge: 'none' },
@@ -120,7 +119,7 @@ const theme = createTheme({
     MuiIconButton: { styleOverrides: { root: { borderRadius: shape.full } } },
     // Assist / filter chip shape.
     MuiChip: { styleOverrides: { root: { borderRadius: shape.small } } },
-    // Cards: tonal surface, no shadow; the medium corner clips the course header band.
+    // Cards: tonal surface, no shadow.
     MuiCard: {
       styleOverrides: { root: { backgroundColor: color.surfaceContainerLow, boxShadow: 'none' } },
     },
@@ -179,24 +178,6 @@ const theme = createTheme({
     // Primary tabs: a 3px indicator with rounded top corners.
     MuiTabs: {
       styleOverrides: { indicator: { height: 3, borderTopLeftRadius: 3, borderTopRightRadius: 3 } },
-    },
-    // Segmented button: a full-pill outline, secondary container on the selected segment.
-    MuiToggleButtonGroup: { styleOverrides: { root: { borderRadius: shape.full } } },
-    MuiToggleButton: {
-      styleOverrides: {
-        root: {
-          borderRadius: shape.full,
-          borderColor: color.outline,
-          color: color.onSurface,
-          minHeight: 40,
-          '&:hover': { backgroundColor: hoverOnSurface },
-          '&.Mui-selected, &.Mui-selected.MuiToggleButton-primary': {
-            backgroundColor: color.secondaryContainer,
-            color: color.onSecondaryContainer,
-          },
-          '&.Mui-selected:hover': { backgroundColor: hoverOnSecondaryContainer },
-        },
-      },
     },
     // Outlined text field: extra-small corner.
     MuiOutlinedInput: {
