@@ -25,6 +25,7 @@ import DetailHeader from './DetailHeader';
 import Instructions from './Instructions';
 import { EASE_OUT, FADE_MS, popIn } from './motion';
 import { useTaskParam } from './useTaskParam';
+import { useRegisterDetailRefresh } from '../RefreshContext';
 import { WorkProvider } from './WorkContext';
 import WriteView from './WriteView';
 import YourWork, { type WorkFocus } from './YourWork';
@@ -116,6 +117,9 @@ export default function AssignmentDialog({ now }: { now: number }) {
     }),
     [taskId, generation],
   );
+
+  // The app bar's Refresh (behind the backdrop, but reachable by its action) reloads this one too.
+  useRegisterDetailRefresh(isOpen && taskId !== null ? actions.refresh : null);
 
   // A non-numeric id is never sent to the server.
   const loaded: Loaded | null = view.taskId === null ? { kind: 'not-found' } : result?.key === key ? result.loaded : null;

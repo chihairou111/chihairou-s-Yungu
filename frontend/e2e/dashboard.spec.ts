@@ -236,6 +236,40 @@ test.describe('style switcher', () => {
   });
 });
 
+test('refresh: reloads each page from the service past its cache, in either style', async ({ page }) => {
+  await signIn(page);
+  for (const [path, style] of [
+    ['/assignments', 'Rounded (Material 3)'],
+    ['/calendar', 'Classic (Material 2)'],
+  ] as const) {
+    await page.goto(path);
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByRole('menuitemradio', { name: style }).click();
+    const refresh = page.getByRole('banner').getByRole('button', { name: 'Refresh' });
+    await expect(refresh).toBeVisible();
+    // Left of the gear, the same size.
+    const [r, g] = [await refresh.boundingBox(), await page.getByRole('button', { name: 'Settings' }).boundingBox()];
+    expect(r!.x + r!.width).toBeLessThanOrEqual(g!.x);
+    expect(r!.height).toBe(g!.height);
+
+    const dropped = page.waitForResponse((res) => res.url().endsWith('/api/refresh') && res.request().method() === 'POST');
+    // The re-render that follows asks for the page again, with the no-cache flag set.
+    const rerendered = page.waitForRequest(async (req) => {
+      if (new URL(req.url()).pathname !== path) return false;
+      // The cookie header is only in allHeaders().
+      const headers = await req.allHeaders();
+      return headers['rsc'] === '1' && (headers['cookie'] ?? '').includes('yl_refresh=1');
+    });
+    await refresh.click();
+    expect((await dropped).status()).toBe(204);
+    await rerendered;
+    await expect(refresh).not.toHaveAttribute('aria-disabled', 'true');
+    await expect(refresh).toBeFocused();
+    await expect(page.getByRole('main')).toBeVisible();
+    await expect.poll(async () => (await page.context().cookies()).some((c) => c.name === 'yl_refresh' && c.value === '1')).toBe(false);
+  }
+});
+
 test.describe("docked today's classes panel", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 

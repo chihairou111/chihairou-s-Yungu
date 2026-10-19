@@ -9,7 +9,7 @@ import StyleProvider from './StyleProvider';
 const nav = vi.hoisted(() => ({ pathname: '/assignments', replace: vi.fn() }));
 vi.mock('next/navigation', () => ({
   usePathname: () => nav.pathname,
-  useRouter: () => ({ replace: nav.replace }),
+  useRouter: () => ({ replace: nav.replace, refresh: vi.fn() }),
 }));
 
 afterEach(() => {
@@ -139,8 +139,8 @@ describe('Settings menu', () => {
   it('sits left of the avatar as a labelled menu button', () => {
     renderStyled('expressive');
     const buttons = within(screen.getByRole('banner')).getAllByRole('button');
-    expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(['Settings', 'Account: Bruce Zheng']);
-    expect(buttons[0]).toHaveAttribute('aria-haspopup', 'menu');
+    expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(['Refresh', 'Settings', 'Account: Bruce Zheng']);
+    expect(buttons[1]).toHaveAttribute('aria-haspopup', 'menu');
   });
 
   it('lists both styles under "Style" with the current one checked', async () => {

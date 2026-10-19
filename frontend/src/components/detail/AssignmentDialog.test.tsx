@@ -1,8 +1,10 @@
-import { act, render, screen } from '../test-render';
+import { act, render, screen, waitFor } from '../test-render';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AssignmentDetail, FileRef } from '@/lib/types';
 import { DAY, HOUR, NOW, todo } from '../test-fixtures';
+import RefreshButton from '../RefreshButton';
+import { RefreshProvider } from '../RefreshContext';
 import AssignmentDialog from './AssignmentDialog';
 import { ApiError } from './api';
 
@@ -27,7 +29,7 @@ vi.mock('./api', async (importOriginal) => ({
   saveDraft: api.saveDraft,
 }));
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn(), replace: vi.fn() }) }));
 
 const FILE: FileRef = { id: 'f1', name: 'one.pdf', kind: 'pdf', mime: 'application/pdf', size: 10, url: '/api/files/f1', createdAt: NOW };
 
@@ -238,5 +240,34 @@ describe('AssignmentDialog', () => {
     await userEvent.click(refresh);
     expect(await screen.findByText('Submitted')).toBeInTheDocument();
     expect(screen.getByRole('dialog')).not.toHaveAttribute('aria-busy');
+  });
+
+  it("is refreshed in place by the app bar's Refresh while open, and not once closed", async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 204 })));
+    api.fetchDetail.mockResolvedValueOnce(detail());
+    openTask(94616);
+    const ui = () => (
+      <RefreshProvider>
+        <RefreshButton />
+        <AssignmentDialog now={NOW} />
+      </RefreshProvider>
+    );
+    const { rerender } = render(ui());
+    expect(await screen.findByText('Not submitted')).toBeInTheDocument();
+    api.fetchDetail.mockResolvedValueOnce(detail({ submitted: true }));
+    // Behind the modal's backdrop for pointer and screen reader, but the action is the same.
+    const appBarRefresh = screen.getAllByRole('button', { name: 'Refresh', hidden: true }).find((b) => !b.closest('[role="dialog"]'))!;
+    await userEvent.click(appBarRefresh);
+    expect(await screen.findByText('Submitted')).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).not.toHaveAttribute('aria-busy');
+    expect(api.fetchDetail).toHaveBeenCalledTimes(2);
+
+    param.isOpen = false;
+    rerender(ui());
+    await userEvent.click(appBarRefresh);
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    await act(async () => {});
+    expect(api.fetchDetail).toHaveBeenCalledTimes(2);
+    vi.unstubAllGlobals();
   });
 });

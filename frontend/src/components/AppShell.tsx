@@ -26,6 +26,8 @@ import {
 } from './PageHeader';
 import { PHONE_NAV_CLEARANCE } from './NavRail';
 import { BOTTOM_FAB_MEDIA, showsTodayPanel } from './TodayDrawer';
+import RefreshButton from './RefreshButton';
+import { RefreshProvider } from './RefreshContext';
 import SettingsMenu from './SettingsMenu';
 
 /** "Bruce Zheng" -> "BZ"; "郑博" -> "郑"; blank -> "?". */
@@ -48,8 +50,8 @@ interface AppShellProps {
 }
 
 /**
- * Material app bar (section title, settings and account menus) over the page content. A page may
- * extend the bar with a `PageHeader` (tabs, page controls); the bar then gives up its bottom edge
+ * Material app bar (section title, Refresh, settings and account menus) over the page content. A page
+ * may extend the bar with a `PageHeader` (tabs, page controls); the bar then gives up its bottom edge
  * so the two read as one header. The Today's classes panel sits beside the content on every page.
  */
 export default function AppShell({ userName, children, panel }: AppShellProps) {
@@ -74,7 +76,7 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
     }
   }
 
-  return (
+  const shell = (
     <Box
       sx={{
         minHeight: '100dvh',
@@ -92,6 +94,7 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
           <Typography variant="h1" sx={{ flexGrow: 1, minWidth: 0 }} noWrap>
             {title}
           </Typography>
+          <RefreshButton />
           <SettingsMenu />
           <IconButton
             id="account-button"
@@ -171,4 +174,6 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
       {panel}
     </Box>
   );
+  // The bar's Refresh also reloads an open assignment pop-up, which lives in the page content.
+  return <RefreshProvider>{shell}</RefreshProvider>;
 }
