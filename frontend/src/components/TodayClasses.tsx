@@ -96,7 +96,7 @@ export default function TodayClasses({ events: classes, now, courses, nextDay }:
               />
               <Typography
                 variant="body2"
-                component="h3"
+                component={nextDay ? 'h4' : 'h3'}
                 sx={{ fontWeight: 600, overflowWrap: 'anywhere', textWrap: 'pretty', color: ended ? 'text.secondary' : 'text.primary' }}
               >
                 {c.name}

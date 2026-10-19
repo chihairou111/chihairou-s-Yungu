@@ -204,14 +204,16 @@ describe('TodayDrawer docked panel (1200px and up)', () => {
     await userEvent.keyboard('{Enter}');
   }
 
-  it('slides with a decelerating curve both ways, leaving a little faster than it arrives', () => {
+  it('decelerates in and accelerates out, leaving a little faster than it arrives', () => {
     const { unmount } = render(<TodayDrawer events={classes} now={NOW} courses={COURSES} initialPanelOpen />);
     // Emphasized decelerate (fast start): the panel answers the click at once rather than easing in.
     const curve = 'cubic-bezier(0.05, 0.7, 0.1, 1)';
+    // Leaving uses emphasized accelerate, so the panel is gone about when the content reclaims the space.
+    const out = 'cubic-bezier(0.3, 0, 0.8, 0.15)';
     expect(getComputedStyle(panel()).transition).toBe(`transform 225ms ${curve}`);
     unmount();
     render(<TodayDrawer events={classes} now={NOW} courses={COURSES} />);
-    expect(getComputedStyle(panel()).transition).toMatch(new RegExp(`^transform 195ms ${curve.replace(/[()]/g, "\\$&")}, ?visibility 0s linear 195ms$`));
+    expect(getComputedStyle(panel()).transition).toMatch(new RegExp(`^transform 195ms ${out.replace(/[()]/g, "\\$&")}, ?visibility 0s linear 195ms$`));
   });
 
   it('is a closed panel by default, controlled by the toggle', () => {

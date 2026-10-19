@@ -49,6 +49,8 @@ const OPEN_BUTTON_RIGHT_PX = TODAY_PANEL_PX - 16;
 /** Where the button parks at the bottom right instead: touch screens and narrow windows. */
 export const BOTTOM_FAB_MEDIA = `@media (hover: none), (max-width: ${DOCK_MIN_PX - 0.05}px)`;
 const EASE = 'cubic-bezier(0.05, 0.7, 0.1, 1)';
+// Emphasized accelerate, for the panel leaving: it must clear the gutter by the time the content reclaims it.
+const EASE_OUT = 'cubic-bezier(0.3, 0, 0.8, 0.15)';
 
 function subscribeDock(onChange: () => void) {
   const query = window.matchMedia?.(DOCK_QUERY);
@@ -280,9 +282,9 @@ export default function TodayDrawer({ events, now: serverNow, courses, initialPa
         }}
         sx={(theme) => {
           const { duration } = theme.transitions;
-          // Decelerating both ways (fast start, so it answers the click at once); leaving is a touch quicker.
+          // Entering decelerates (answers the click at once); leaving accelerates and is a touch quicker.
           const slideIn = `transform ${duration.enteringScreen}ms ${EASE}`;
-          const slideOut = `transform ${duration.leavingScreen}ms ${EASE}`;
+          const slideOut = `transform ${duration.leavingScreen}ms ${EASE_OUT}`;
           return {
             display: 'flex',
             // Narrow windows use the drawer; a stored open state never forces the panel there.
