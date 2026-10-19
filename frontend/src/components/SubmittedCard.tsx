@@ -24,7 +24,7 @@ export default function SubmittedCard({ assignment }: { assignment: Assignment }
           {chinaMonthDay(assignment.dueAt)}
         </Typography>
       </Stack>
-      <Stack direction="row" sx={{ mt: 0.5, alignItems: 'center', gap: 1 }}>
+      <Stack direction="row" sx={{ mt: 0.5, minHeight: 24, alignItems: 'center', gap: 1 }}>
         <Typography
           id={headingId}
           variant="h3"
