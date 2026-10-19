@@ -28,9 +28,13 @@ export type StoredFile = { ref: FileRef; bytes: Uint8Array } | { redirect: strin
  * a Google Calendar palette name (`CourseColor`) on every course; unknown names render as Graphite.
  *
  * Files: in the real implementation every `FileRef.url` — the teacher's attachments included, not only
- * the student's uploads — must be `/api/files/<id>`. The browser never talks to task.yungu.org or OSS
- * directly: the service holds the yungu `SESSION` cookie and resolves each file to a signed OSS URL
- * server-side (`getFile` → `{ redirect }`). Fixtures may keep `/mock/*` URLs during the mock phase.
+ * the student's uploads — must be `/api/files/<id>`. The browser never talks to task.yungu.org and never
+ * holds Yungu credentials: the service keeps the yungu `SESSION` cookie and resolves each file to a
+ * short-lived signed OSS URL server-side (`getFile` → `{ redirect }`). The browser does fetch the bytes
+ * from OSS itself: `/api/files/<id>` answers with a 302 to that signed URL (downloads, images, video,
+ * audio), except for the viewer's PDF frame (`?view=pdf`), which Next streams through from OSS. Yungu
+ * online documents (`FileRef.online`) have no file; the service answers 422 for them. Fixtures may keep
+ * `/mock/*` URLs during the mock phase.
  *
  * Ownership is the real backend's job: `getFile` must only resolve files the signed-in student may see
  * (their own uploads and the attachments of their assignments), and `deleteComment` must only remove the
