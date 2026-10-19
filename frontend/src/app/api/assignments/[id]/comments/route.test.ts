@@ -16,6 +16,7 @@ beforeEach(() => {
 });
 
 import { POST } from './route';
+import { MAX_COMMENT } from '@/lib/limits';
 
 describe('POST comments', () => {
   it('401s without a session', async () => {
@@ -33,6 +34,14 @@ describe('POST comments', () => {
     const res = await POST(json({ text: 'hi' }, 'POST'), ctx({ id: '999999' }));
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: 'Assignment not found' });
+  });
+  it('400s on a comment over 2,000 characters, the same limit the form has', async () => {
+    expect(MAX_COMMENT).toBe(2000);
+    const res = await POST(json({ text: 'x'.repeat(MAX_COMMENT + 1) }, 'POST'), ctx({ id: '103' }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'Comments up to 2,000 characters.' });
+    const atLimit = await POST(json({ text: 'x'.repeat(MAX_COMMENT) }, 'POST'), ctx({ id: '103' }));
+    expect(atLimit.status).toBe(200);
   });
   it('adds a trimmed comment', async () => {
     const res = await POST(json({ text: ' hello ' }, 'POST'), ctx({ id: '103' }));

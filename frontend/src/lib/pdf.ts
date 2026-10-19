@@ -15,13 +15,38 @@ h2 { font-size: 15pt; }
 </style></head><body>${bodyHtml}</body></html>`;
 }
 
-/** Renders sanitised html to an A4 PDF. A fresh Chromium per call, always closed. */
-export async function renderPdf(title: string, html: string): Promise<Uint8Array> {
+/** How long loading the document, and then printing it, may each take. */
+const STEP_TIMEOUT_MS = 20_000;
+
+/** The render running now (or the last one); each new render waits for it, so only one Chromium runs at a time. */
+let queue: Promise<unknown> = Promise.resolve();
+
+/** Renders sanitised html to an A4 PDF. A fresh Chromium per call, always closed; calls run one after another. */
+export function renderPdf(title: string, html: string): Promise<Uint8Array> {
+  const run = queue.then(() => renderNow(title, html));
+  queue = run.catch(() => {});
+  return run;
+}
+
+function withTimeout<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function renderNow(title: string, html: string): Promise<Uint8Array> {
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? CHROMIUM_DEFAULT, args: ['--no-sandbox'] });
   try {
     const page = await browser.newPage();
-    await page.setContent(buildDocument(title, html), { waitUntil: 'load' });
-    const pdf = await page.pdf({ format: 'A4', margin: { top: '20mm', right: '20mm', bottom: '20mm', left: '20mm' }, printBackground: true });
+    await page.setContent(buildDocument(title, html), { waitUntil: 'load', timeout: STEP_TIMEOUT_MS });
+    // page.pdf takes no timeout of its own; closing the browser (below) abandons a print that ran out of time.
+    const pdf = await withTimeout(
+      page.pdf({ format: 'A4', margin: { top: '20mm', right: '20mm', bottom: '20mm', left: '20mm' }, printBackground: true }),
+      STEP_TIMEOUT_MS,
+      'Printing the PDF timed out',
+    );
     return new Uint8Array(pdf);
   } finally {
     await browser.close();

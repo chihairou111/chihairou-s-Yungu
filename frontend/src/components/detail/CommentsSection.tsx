@@ -13,13 +13,13 @@ import Typography from '@mui/material/Typography';
 import DeleteOutlined from '@mui/icons-material/DeleteOutlined';
 import ExpandMore from '@mui/icons-material/ExpandMore';
 import { alpha } from '@mui/material/styles';
+import { MAX_COMMENT } from '@/lib/limits';
 import type { Comment } from '@/lib/types';
 import { chinaRelativeTime } from '@/lib/time';
 import { VISUALLY_HIDDEN } from '../visually-hidden';
 import { addComment, ApiError, deleteComment, isSessionEnded } from './api';
 import { useDetailActions } from './DetailContext';
 
-export const MAX_COMMENT = 2000;
 /** The character counter appears this close to the limit. */
 const COUNTER_FROM = 1800;
 

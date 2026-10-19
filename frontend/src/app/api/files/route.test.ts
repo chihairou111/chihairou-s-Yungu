@@ -41,10 +41,33 @@ describe('POST /api/files', () => {
     expect(res.status).toBe(413);
     expect(await res.json()).toEqual({ error: 'Files up to 50 MB.' });
   });
+  it('413s on a declared body over the limit without reading it', async () => {
+    const formData = vi.fn();
+    const request = { headers: new Headers({ 'content-length': String(50 * 1024 * 1024 + 64 * 1024 + 1) }), formData } as unknown as Request;
+    const res = await POST(request);
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'Files up to 50 MB.' });
+    expect(formData).not.toHaveBeenCalled();
+  });
+  it('reads a declared body within the multipart slack', async () => {
+    const form = new FormData();
+    form.set('file', new File(['x'], 'a.txt', { type: 'text/plain' }));
+    const formData = vi.fn(async () => form);
+    const request = { headers: new Headers({ 'content-length': String(50 * 1024 * 1024 + 64 * 1024) }), formData } as unknown as Request;
+    expect((await POST(request)).status).toBe(200);
+    expect(formData).toHaveBeenCalledOnce();
+  });
   it('keeps a Chinese file name', async () => {
     const res = await POST(upload(new File(['hello'], '作业.txt', { type: 'text/plain' })));
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ name: '作业.txt', mime: 'text/plain', size: 5 });
+  });
+  it('strips MIME parameters before checking the type', async () => {
+    const res = await POST(upload(new File(['x'], 'a.txt', { type: 'text/plain;charset=utf-8' })));
+    expect(res.status).toBe(200);
+    expect((await res.json()).mime).toBe('text/plain');
+    const spaced = await POST(upload(new File(['x'], 'a.csv', { type: 'text/csv ; charset=UTF-8' })));
+    expect((await spaced.json()).mime).toBe('text/csv');
   });
   it('stores an invalid MIME type as application/octet-stream', async () => {
     const res = await POST(upload(new File(['x'], 'a.txt', { type: 'text/plain\r\nX: y' })));

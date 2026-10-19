@@ -39,6 +39,21 @@ describe('POST /api/render-pdf', () => {
     expect(res.status).toBe(413);
     expect(await res.json()).toEqual({ error: 'That document is too long.' });
   });
+  it('413s on a declared body over 2 MiB without reading it', async () => {
+    const json = vi.fn();
+    const request = { headers: new Headers({ 'content-length': String(2 * 1024 * 1024 + 1) }), json } as unknown as Request;
+    const res = await POST(request);
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'That document is too long.' });
+    expect(json).not.toHaveBeenCalled();
+  });
+  it('measures the 1 MB html limit in UTF-8 bytes, not characters', async () => {
+    // 400,000 characters, but 1.2 MB of UTF-8.
+    const res = await POST(post({ title: 'a', html: '<p>' + '你'.repeat(400_000) + '</p>' }));
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'That document is too long.' });
+    expect(renderPdf).not.toHaveBeenCalled();
+  });
   it('returns a pdf FileRef named after the title and renders sanitised html', async () => {
     const res = await POST(post({ title: '观察记录', html: '<p onclick="x">你好</p><script>bad()</script>' }));
     expect(res.status).toBe(200);
@@ -51,10 +66,17 @@ describe('POST /api/render-pdf', () => {
     expect((await (await POST(post({ title: 'a/b\\c:d?', html: '<p>x</p>' }))).json()).name).toBe('abcd.pdf');
     expect((await (await POST(post({ html: '<p>x</p>' }))).json()).name).toBe('Writing.pdf');
   });
-  it('500s with a readable error when rendering fails', async () => {
-    vi.mocked(renderPdf).mockRejectedValueOnce(new Error('boom'));
-    const res = await POST(post({ title: 'a', html: '<p>x</p>' }));
-    expect(res.status).toBe(500);
-    expect(await res.json()).toEqual({ error: 'Could not create the PDF. Try again.' });
+  it('500s with a readable error when rendering fails, logging the cause on the server', async () => {
+    const boom = new Error('boom');
+    vi.mocked(renderPdf).mockRejectedValueOnce(boom);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await POST(post({ title: 'a', html: '<p>x</p>' }));
+      expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({ error: 'Could not create the PDF. Try again.' });
+      expect(log).toHaveBeenCalledWith(expect.any(String), boom);
+    } finally {
+      log.mockRestore();
+    }
   });
 });
