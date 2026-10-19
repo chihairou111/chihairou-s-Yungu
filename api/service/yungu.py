@@ -93,6 +93,12 @@ def _body(e: Exception):
         return None
 
 
+def error_code(e: Exception):
+    """Yungu's JSON `code` behind a YunguError (HTTP 200 answers with code != 0), else None."""
+    body = _body(e)
+    return body.get("code") if isinstance(body, dict) else None
+
+
 def is_expired(e: Exception) -> bool:
     if isinstance(e, SessionExpired):
         return True

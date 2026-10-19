@@ -709,6 +709,53 @@ def test_real_client_expiry_forms_trigger_one_relogin(real, expired):
     assert OfflineLogin.logins == 2
 
 
+# ------------------------------------------------ unknown ids (Yungu code 1035)
+UNKNOWN = {"code": 1035, "message": "任务不存在", "content": None}
+
+
+@responses.activate
+def test_unknown_assignment_id_from_the_real_client_is_a_404(real, caplog):
+    api, auth = real
+    responses.get(BASE + "/api/getMixedPublishDetail", json=UNKNOWN)             # HTTP 200, as live
+    caplog.set_level("DEBUG")
+    r = api.get("/assignments/999999999", headers=auth)
+    assert r.status_code == 404 and r.json() == {"error": "Not found."}
+    assert OfflineLogin.logins == 1                                              # not taken for expiry
+    assert "任务不存在" not in caplog.text and "1035" not in caplog.text
+
+
+@responses.activate
+@pytest.mark.parametrize("method,path,body", [
+    ("PUT", "/assignments/999999999/draft", {"fileIds": ["1"]}),
+    ("POST", "/assignments/999999999/submit", {"fileIds": ["1"]}),
+    ("POST", "/assignments/999999999/comments", {"text": "hi"}),
+    ("DELETE", "/assignments/999999999/comments/1", None),
+])
+def test_writes_on_an_unknown_assignment_id_are_a_404(real, method, path, body):
+    api, auth = real
+    responses.post(BASE + "/api/student/getAchievementDetail", json=UNKNOWN)
+    responses.post(BASE + "/api/student/getAchievementDetail/comment", json=UNKNOWN)
+    r = api.request(method, path, json=body, headers=auth)
+    assert r.status_code == 404 and r.json() == {"error": "Not found."}
+    assert not any(c.request.url.split("?")[0].endswith(("/submitAchievementForDrafts", "/saveCommentary",
+                   "/submitAchievementSendMessage", "/deletedCommentary")) for c in responses.calls)
+
+
+@responses.activate
+def test_other_nonzero_codes_on_the_detail_lookup_stay_a_502(real):
+    api, auth = real
+    responses.get(BASE + "/api/getMixedPublishDetail", json={"code": 1036, "message": "x"})
+    r = api.get("/assignments/93251", headers=auth)
+    assert r.status_code == 502 and r.json() == {"error": UNREACHABLE}
+
+
+@responses.activate
+def test_code_1035_outside_an_id_lookup_is_not_a_404(real):
+    api, auth = real
+    responses.get(COURSES_URL, json=UNKNOWN)
+    assert api.get("/courses", headers=auth).status_code == 502
+
+
 # ------------------------------------------- malformed data and log hygiene
 @pytest.mark.parametrize("path,breaker", [
     ("/courses", lambda w: setattr(w, "courses", [{"courseName": "no id"}])),

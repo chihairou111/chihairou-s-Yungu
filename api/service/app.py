@@ -10,7 +10,7 @@ import mimetypes
 import os
 import time
 from datetime import datetime
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, TypeVar
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
@@ -22,18 +22,21 @@ from starlette.exceptions import HTTPException
 from starlette.requests import ClientDisconnect
 
 import mapping
-from yungu_task import CST, SUBMITTED, TODO, YunguTask
+from yungu_task import CST, SUBMITTED, TODO, YunguError, YunguTask
 
 from .auth import Auth
 from .cache import ReadCache
 from .state import StateDir, SubmittedFiles
-from .yungu import UNREACHABLE, ServiceError, SignInAgain, SignInRefused, Unavailable, Yungu, checked_redirect
+from .yungu import (UNREACHABLE, ServiceError, SignInAgain, SignInRefused, Unavailable, Yungu, checked_redirect,
+                    error_code)
 
 DEFAULT_STATE_DIR = "/var/lib/yungu-lms"
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024 + 64 * 1024      # 50 MiB of file plus room for the multipart framing
 TOO_LARGE = "Files up to 50 MB."
 log = logging.getLogger("yungu_lms.app")
+T = TypeVar("T")
 BLANK_CREDENTIALS = "Enter your student ID and password."
+UNKNOWN_TASK = 1035          # Yungu's answer (HTTP 200, JSON code 1035) for a taskPublishId that does not exist
 
 
 class NotFound(ServiceError):
@@ -98,6 +101,17 @@ class FileIdsBody(BaseModel):
 
 class TextBody(BaseModel):
     text: str
+
+
+def _known(lookup: Callable[[], T]) -> T:
+    """Run a Yungu call keyed by an assignment id; Yungu's "no such task" answer becomes a 404.
+    Only for those lookups: elsewhere code 1035 stays an ordinary failure (502)."""
+    try:
+        return lookup()
+    except YunguError as e:
+        if error_code(e) == UNKNOWN_TASK:
+            raise NotFound() from None
+        raise
 
 
 def _file_ids(ids: List[str]) -> List[int]:
@@ -199,10 +213,10 @@ class Service:
         return self.cache.get(("detail", assignment_id), lambda: self._detail(assignment_id), refresh)
 
     def _detail(self, aid: int) -> dict:
-        mixed = self.yungu.call(lambda c: c.task_detail(aid))
+        mixed = self.yungu.call(lambda c: _known(lambda: c.task_detail(aid)))
         if not isinstance(mixed, dict) or not mixed.get("taskPublishId"):
             raise NotFound()
-        achievement = self.yungu.call(lambda c: c.achievement(aid))
+        achievement = self.yungu.call(lambda c: _known(lambda: c.achievement(aid)))
         if not isinstance(achievement, dict):
             raise NotFound()
         comments = self.yungu.call(lambda c: c.comments(aid))
@@ -222,7 +236,7 @@ class Service:
 
     # ------------------------------------------------------------- writes
     def _relation(self, client, aid: int) -> int:
-        achievement = client.achievement(aid)
+        achievement = _known(lambda: client.achievement(aid))
         if not isinstance(achievement, dict) or not achievement.get("taskUserRelationId"):
             raise NotFound()
         return achievement["taskUserRelationId"]
@@ -256,7 +270,7 @@ class Service:
 
     def add_comment(self, aid: int, text: str) -> dict:
         try:
-            self.yungu.call(lambda c: c.add_comment(aid, text))
+            self.yungu.call(lambda c: _known(lambda: c.add_comment(aid, text)))   # looks up the id first
             rows = self.yungu.call(lambda c: c.comments(aid))
             me = self.yungu.call(lambda c: c.user_id)
         finally:
@@ -274,7 +288,7 @@ class Service:
         if not comment_id.isdigit():
             return
         try:
-            rows = self.yungu.call(lambda c: c.comments(aid))
+            rows = self.yungu.call(lambda c: _known(lambda: c.comments(aid)))
             me = self.yungu.call(lambda c: c.user_id)
             if any(str(r.get("feedbackId")) == comment_id and r.get("userId") == me for r in rows or []):
                 self.yungu.call(lambda c: c.delete_comment(int(comment_id)))
