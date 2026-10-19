@@ -4,7 +4,7 @@ import { mockData } from './mock';
 import { serviceData } from './service';
 
 export { BLANK_CREDENTIALS_ERROR } from './messages';
-export { AssignmentNotFound, ServiceError, SessionEnded, YunguUnavailable } from './errors';
+export { AssignmentNotFound, CommentNotFound, ServiceError, SessionEnded, YunguUnavailable } from './errors';
 
 export type SignInResult = { ok: true; displayName: string; token: string } | { ok: false; error: string };
 
@@ -38,7 +38,9 @@ export type StoredFile = { ref: FileRef; bytes: Uint8Array } | { redirect: strin
  *
  * Errors (the service implementation; the mock does not fail): a 401 throws `SessionEnded` carrying the
  * service's message, a 502 or an unreachable service `YunguUnavailable`, other statuses `ServiceError`
- * (e.g. 413 "Files up to 50 MB."), a 404 on a write `AssignmentNotFound`. Pages turn `SessionEnded` into
+ * (e.g. 413 "Files up to 50 MB."), a 404 on a write `AssignmentNotFound`, and `deleteComment` on a comment
+ * that is not the student's own `CommentNotFound`. The mock throws the same two 404s, so the write
+ * Route Handlers need no existence check of their own. Pages turn `SessionEnded` into
  * the login page and `YunguUnavailable` into a message; Route Handlers answer with the status
  * (`withServiceErrors` in `../api-auth`).
  *

@@ -13,6 +13,5 @@ export const POST = withServiceErrors(async (request: Request, { params }: { par
     return NextResponse.json({ error: 'Write a comment first.' }, { status: 400 });
   }
   if (text.trim().length > MAX_COMMENT) return NextResponse.json({ error: COMMENT_TOO_LONG }, { status: 400 });
-  if (!(await data.getAssignmentDetail(id))) return NextResponse.json({ error: NOT_FOUND_ASSIGNMENT }, { status: 404 });
   return NextResponse.json(await data.addComment(id, text.trim()));
 });

@@ -17,7 +17,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 import mapping
-from service.app import MAX_UPLOAD_BYTES, YUNGU_TIMEOUT_SECONDS, create_app
+from service.app import LIST_PAGE_SIZE, MAX_UPLOAD_BYTES, YUNGU_TIMEOUT_SECONDS, create_app
 from service.yungu import LOGIN_RETRY_SECONDS
 from yungu_task import BASE, SUBMITTED, TODO, UploadedFile, YunguError, YunguTask
 
@@ -86,6 +86,7 @@ class World:
         self.ach = {93251: load("achievement_93251.json"), 94929: load("achievement_todo.json")}
         self.comments = {93251: load("comments_sample.json"), 94929: []}
         self.next_feedback = 400000
+        self.page_sizes = []            # page_size of every iter_tasks call
 
     def expire_all(self):
         self.valid_from = self.sessions + 1
@@ -130,6 +131,7 @@ class FakeClient:
 
     def iter_tasks(self, status=TODO, page_size=10, **kw):
         self._hit("iter_tasks", status)
+        self.w.page_sizes.append(page_size)
         return iter([dict(t) for t in self.w.lists[status]])
 
     def calendar_week(self, day=None, start_ms=None):
@@ -435,11 +437,21 @@ def test_writes_clear_the_cache(api, world, auth, method, path, body):
     assert world.count("courses") == 2
 
 
-def test_upload_clears_the_cache(api, world, auth):
+def test_upload_keeps_the_cache(api, world, auth):
+    """An upload attaches the file to nothing, so no read changes: the next draft save or submit is
+    what clears the cache (and it must not pay for a cold detail rebuild first)."""
     api.get("/courses", headers=auth)
-    api.post("/files", files={"file": ("a.txt", b"1", "text/plain")}, headers=auth)
+    api.get("/submitted", headers=auth)
+    assert api.post("/files", files={"file": ("a.txt", b"1", "text/plain")}, headers=auth).status_code == 200
     api.get("/courses", headers=auth)
-    assert world.count("courses") == 2
+    api.get("/submitted", headers=auth)
+    assert world.count("courses") == 1 and world.count("iter_tasks") == 1
+
+
+def test_lists_are_fetched_in_pages_of_50(api, world, auth):
+    api.get("/todo", headers=auth)
+    api.get("/submitted", headers=auth)
+    assert LIST_PAGE_SIZE == 50 and world.page_sizes == [50, 50]
 
 
 def test_the_service_builds_yungu_clients_with_a_short_timeout(state_dir):
@@ -1077,10 +1089,10 @@ def test_delete_own_comment_calls_delete_comment(api, world, auth):
     assert r.status_code == 204 and world.calls[-1] == ("delete_comment", (327994,))
 
 
-def test_someone_elses_comment_is_left_alone(api, world, auth):
-    r = api.delete("/assignments/93251/comments/327995", headers=auth)       # the teacher's
-    assert r.status_code == 204 and world.count("delete_comment") == 0
-    assert api.delete("/assignments/93251/comments/nope", headers=auth).status_code == 204
+def test_someone_elses_comment_is_left_alone_and_is_a_404(api, world, auth):
+    for comment_id in ("327995", "999", "nope"):                 # the teacher's, unknown, not an id
+        r = api.delete(f"/assignments/93251/comments/{comment_id}", headers=auth)
+        assert r.status_code == 404 and r.json() == {"error": "Comment not found."}, comment_id
     assert world.count("delete_comment") == 0
 
 

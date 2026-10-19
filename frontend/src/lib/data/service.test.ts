@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeSession } from '../session-cookie';
-import { AssignmentNotFound, ServiceError, SessionEnded, YunguUnavailable } from './errors';
+import { AssignmentNotFound, CommentNotFound, ServiceError, SessionEnded, YunguUnavailable } from './errors';
 
 const request = vi.hoisted(() => ({ cookies: new Map<string, string>(), headers: new Headers() }));
 vi.mock('next/headers', () => ({
@@ -313,6 +313,13 @@ describe('serviceData writes', () => {
     const error = await run().catch((e: unknown) => e);
     expect(error).toBeInstanceOf(AssignmentNotFound);
     expect(error).toMatchObject({ status: 404 });
+  });
+
+  it("deleteComment turns the service's 404 for a comment that is not mine into CommentNotFound", async () => {
+    reply(json(404, { error: 'Comment not found.' }));
+    const error = await data.deleteComment(93251, '327995').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(CommentNotFound);
+    expect(error).toMatchObject({ status: 404, message: 'Comment not found' });
   });
 
   it('writes never send X-Refresh', async () => {

@@ -94,7 +94,7 @@ describe('mock store', () => {
   it('only lets me delete my own comments', async () => {
     const detail = (await data.getAssignmentDetail(101))!;
     const theirs = detail.comments.find((c) => !c.mine)!;
-    await data.deleteComment(101, theirs.id);
+    await expect(data.deleteComment(101, theirs.id)).rejects.toMatchObject({ name: 'CommentNotFound', status: 404 });
     expect((await data.getAssignmentDetail(101))!.comments.some((c) => c.id === theirs.id)).toBe(true);
   });
 

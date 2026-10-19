@@ -32,6 +32,14 @@ export class YunguUnavailable extends ServiceError {
   }
 }
 
+/** 404 on deleting a comment that is not the student's own (someone else's, or none by that id). */
+export class CommentNotFound extends ServiceError {
+  constructor() {
+    super(404, 'Comment not found');
+    this.name = 'CommentNotFound';
+  }
+}
+
 /** 404 on a write keyed by an assignment id the service does not know. */
 export class AssignmentNotFound extends ServiceError {
   constructor(message = 'Not found.') {

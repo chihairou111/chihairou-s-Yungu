@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { COURSE_COLORS } from '../colors';
 import { groupTodo, isSubmittedLate } from '../priority';
 import { dayIndex, weekStartOf } from '../time';
+import { AssignmentNotFound, CommentNotFound } from './errors';
 import { BLANK_CREDENTIALS_ERROR, data } from './index';
+import { mockData } from './mock';
 
 const DAY = 24 * 3600_000;
 
@@ -147,5 +149,25 @@ describe('assignment detail fixtures', () => {
     const d = await data.getAssignmentDetail(201);
     expect(d!.submitted).toBe(true);
     expect(d!.myFiles.length).toBeGreaterThan(0);
+  });
+});
+
+describe('mock writes on unknown assignments and comments', () => {
+  it('throws AssignmentNotFound for an id it does not know, as the service answers 404', async () => {
+    for (const write of [
+      () => mockData.saveDraft(999999, []),
+      () => mockData.submit(999999, ['1']),
+      () => mockData.addComment(999999, 'hi'),
+      () => mockData.deleteComment(999999, 'x'),
+    ]) {
+      await expect(write()).rejects.toBeInstanceOf(AssignmentNotFound);
+    }
+  });
+
+  it("throws CommentNotFound for someone else's comment or an unknown one, and leaves it", async () => {
+    const theirs = (await mockData.getAssignmentDetail(101))!.comments.find((c) => !c.mine)!;
+    await expect(mockData.deleteComment(101, theirs.id)).rejects.toBeInstanceOf(CommentNotFound);
+    await expect(mockData.deleteComment(101, 'nope')).rejects.toMatchObject({ status: 404, message: 'Comment not found' });
+    expect((await mockData.getAssignmentDetail(101))!.comments.some((c) => c.id === theirs.id)).toBe(true);
   });
 });

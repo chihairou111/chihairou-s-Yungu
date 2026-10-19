@@ -53,4 +53,15 @@ describe('POST submit', () => {
     expect(await gone.json()).toEqual({ error: 'Assignment not found' });
     spy.mockRestore();
   });
+  it('submits without loading the assignment detail first (the data layer knows unknown ids)', async () => {
+    const f = await data.uploadFile('a.txt', 'text/plain', new Uint8Array([1]));
+    const spy = vi.spyOn(data, 'getAssignmentDetail');
+    try {
+      expect((await POST(json({ fileIds: [f.id] }, 'POST'), ctx({ id: '101' }))).status).toBe(200);
+      expect((await POST(json({ fileIds: [f.id] }, 'POST'), ctx({ id: '999999' }))).status).toBe(404);
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });

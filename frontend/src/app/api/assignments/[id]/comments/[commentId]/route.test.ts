@@ -49,4 +49,17 @@ describe('DELETE comment', () => {
     expect(await res.json()).toEqual({ error: 'Assignment not found' });
     spy.mockRestore();
   });
+  it('deletes without loading the assignment detail first (the data layer checks the comment is mine)', async () => {
+    const c = await data.addComment(101, 'mine');
+    const theirs = (await data.getAssignmentDetail(101))!.comments.find((x) => !x.mine)!;
+    const spy = vi.spyOn(data, 'getAssignmentDetail');
+    try {
+      expect((await DELETE(req(), ctx({ id: '101', commentId: c.id }))).status).toBe(200);
+      expect((await DELETE(req(), ctx({ id: '101', commentId: theirs.id }))).status).toBe(404);
+      expect((await DELETE(req(), ctx({ id: '999999', commentId: 'x' }))).status).toBe(404);
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });

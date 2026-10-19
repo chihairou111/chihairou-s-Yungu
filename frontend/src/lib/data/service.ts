@@ -3,7 +3,7 @@ import { cookies, headers } from 'next/headers';
 import { sanitizeInstructions } from '../sanitize';
 import { SESSION_COOKIE, decodeSession } from '../session-cookie';
 import type { Assignment, AssignmentDetail, ClassEvent, Comment, Course, FileRef } from '../types';
-import { AssignmentNotFound, ServiceError, SessionEnded, YunguUnavailable } from './errors';
+import { AssignmentNotFound, CommentNotFound, ServiceError, SessionEnded, YunguUnavailable } from './errors';
 import type { SignInResult, StoredFile, YunguData } from './index';
 
 /** Set to `1` on a request (cookie, or the `X-Refresh: 1` header) to have the service skip its read cache. */
@@ -11,6 +11,8 @@ export const REFRESH_COOKIE = 'yl_refresh';
 const REFRESH_HEADER = 'x-refresh';
 const DEFAULT_URL = 'http://127.0.0.1:8100';
 const GENERIC_ERROR = 'Something went wrong. Try again.';
+/** The service's 404 message when a comment to delete is not the student's own (`COMMENT_NOT_FOUND` in api/service/app.py). */
+const SERVICE_COMMENT_NOT_FOUND = 'Comment not found.';
 
 /**
  * How long one call to the service may take, body included, before it counts as "Can't reach Yungu"
@@ -134,7 +136,13 @@ export const serviceData: YunguData = {
     return body<Comment>(await write(`/assignments/${id}/comments`, jsonInit('POST', { text })));
   },
   async deleteComment(id, commentId) {
-    await write(`/assignments/${id}/comments/${encodeURIComponent(commentId)}`, { method: 'DELETE' });
+    try {
+      await write(`/assignments/${id}/comments/${encodeURIComponent(commentId)}`, { method: 'DELETE' });
+    } catch (error) {
+      // Both 404s arrive as AssignmentNotFound; the service's message tells the comment one apart.
+      if (error instanceof AssignmentNotFound && error.message === SERVICE_COMMENT_NOT_FOUND) throw new CommentNotFound();
+      throw error;
+    }
   },
   async refresh() {
     await authed('/refresh', { method: 'POST' });

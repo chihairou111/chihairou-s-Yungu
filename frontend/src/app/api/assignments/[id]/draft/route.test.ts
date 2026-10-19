@@ -38,4 +38,14 @@ describe('PUT draft', () => {
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: 'Assignment not found' });
   });
+  it('saves without loading the assignment detail first (the data layer knows unknown ids)', async () => {
+    const spy = vi.spyOn(data, 'getAssignmentDetail');
+    try {
+      expect((await PUT(json({ fileIds: [] }, 'PUT'), ctx({ id: '101' }))).status).toBe(200);
+      expect((await PUT(json({ fileIds: [] }, 'PUT'), ctx({ id: '999999' }))).status).toBe(404);
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });

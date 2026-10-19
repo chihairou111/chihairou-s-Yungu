@@ -2,7 +2,7 @@
 
 JSON everywhere; `Authorization: Bearer <token>` on everything except POST /session; errors are
 `{"error": str}`. Reads are cached 60 s per endpoint + params (`X-Refresh: 1` bypasses); any write
-or POST /refresh clears the cache. Run: `uvicorn service.app:app --host 127.0.0.1 --port 8100`
+(draft, submit, comment) or POST /refresh clears the cache; an upload changes no read and leaves it. Run: `uvicorn service.app:app --host 127.0.0.1 --port 8100`
 from api/, with YUNGU_STATE_DIR (default /var/lib/yungu-lms).
 """
 import logging
@@ -42,6 +42,10 @@ UNKNOWN_TASK = 1035          # Yungu's answer (HTTP 200, JSON code 1035) for a t
 # login is five calls under the login lock other requests wait on. The OSS upload keeps its own
 # max(timeout, 300) s. Next gives up on the whole service call well before these add up (service.ts).
 YUNGU_TIMEOUT_SECONDS = 15
+# getAllTasks page size. Yungu honours 50 (checked live, read-only: 90 Submitted items, total 90, the same
+# ids as with 10), so a cold Submitted list is 2 calls instead of 9.
+LIST_PAGE_SIZE = 50
+COMMENT_NOT_FOUND = "Comment not found."
 
 
 class NotFound(ServiceError):
@@ -187,7 +191,7 @@ class Service:
 
     # -------------------------------------------------------------- reads
     def _assignments(self, status: int) -> List[dict]:
-        rows = self.yungu.call(lambda c: list(c.iter_tasks(status)))
+        rows = self.yungu.call(lambda c: list(c.iter_tasks(status, page_size=LIST_PAGE_SIZE)))
         now, seen, out = self.now_ms(), set(), []
         for raw in rows:                  # items can shift between pages: keep the first of each id
             if raw["taskPublishId"] not in seen:
@@ -251,10 +255,8 @@ class Service:
         return achievement["taskUserRelationId"]
 
     def upload(self, name: str, mime: str, data: bytes) -> dict:
-        try:
-            up = self.yungu.call(lambda c: c.upload_bytes(name, mime, data))
-        finally:
-            self.cache.clear()
+        # No cache clear: an upload attaches the file to nothing, so no read changes until a draft save.
+        up = self.yungu.call(lambda c: c.upload_bytes(name, mime, data))
         ref = mapping.file_ref({**(up.raw or {}), "fileId": up.file_id, "fileName": name, "fileSizeByte": len(data)})
         if not ref["createdAt"]:
             ref["createdAt"] = self.now_ms()
@@ -293,14 +295,14 @@ class Service:
         return mapping.comment(max(same or mine, key=lambda r: r["feedbackId"]), me)
 
     def delete_comment(self, aid: int, comment_id: str) -> None:
-        """Only the student's own comments on this assignment; anything else is left alone."""
-        if not comment_id.isdigit():
-            return
+        """Only the student's own comments on this assignment; anything else is left alone and is a 404
+        "Comment not found." (an unknown assignment stays the plain 404 "Not found.")."""
         try:
             rows = self.yungu.call(lambda c: _known(lambda: c.comments(aid)))
             me = self.yungu.call(lambda c: c.user_id)
-            if any(str(r.get("feedbackId")) == comment_id and r.get("userId") == me for r in rows or []):
-                self.yungu.call(lambda c: c.delete_comment(int(comment_id)))
+            if not any(str(r.get("feedbackId")) == comment_id and r.get("userId") == me for r in rows or []):
+                raise NotFound(COMMENT_NOT_FOUND)
+            self.yungu.call(lambda c: c.delete_comment(int(comment_id)))
         finally:
             self.cache.clear()
 

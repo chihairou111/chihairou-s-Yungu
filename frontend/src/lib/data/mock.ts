@@ -3,6 +3,7 @@ import { weekStartOf } from '../time';
 import type { ClassEvent } from '../types';
 import type { YunguData } from './index';
 import { TIMETABLE, buildCourses } from './fixtures';
+import { AssignmentNotFound, CommentNotFound } from './errors';
 import { BLANK_CREDENTIALS_ERROR } from './messages';
 import { getDetail, listSubmitted, listTodo, loadFile, markSubmitted, putComment, removeComment, setFiles, storeFile } from './store';
 
@@ -11,6 +12,13 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 
 export const MOCK_DISPLAY_NAME = 'Bruce Zheng';
+
+/** Writes on an id the fixtures do not hold fail as the service's do (its 404 becomes AssignmentNotFound). */
+function known(id: number, now: number) {
+  const detail = getDetail(id, now);
+  if (!detail) throw new AssignmentNotFound();
+  return detail;
+}
 
 /** "HH:MM" China wall-clock to ms since midnight. */
 function clockToMs(hhmm: string): number {
@@ -51,21 +59,26 @@ export const mockData: YunguData = {
     return loadFile(id);
   },
   async saveDraft(id, fileIds) {
-    setFiles(id, fileIds, Date.now());
+    const now = Date.now();
+    known(id, now);
+    setFiles(id, fileIds, now);
   },
   async submit(id, fileIds) {
     const now = Date.now();
-    if (!setFiles(id, fileIds, now)) throw new Error(`Unknown assignment ${id}`);
+    known(id, now);
+    setFiles(id, fileIds, now);
     markSubmitted(id, now);
     return { submittedAt: now };
   },
   async addComment(id, text) {
-    const c = putComment(id, text, Date.now());
-    if (!c) throw new Error(`Unknown assignment ${id}`);
-    return c;
+    const now = Date.now();
+    known(id, now);
+    return putComment(id, text, now)!;
   },
   async deleteComment(id, commentId) {
-    removeComment(id, commentId, Date.now());
+    const now = Date.now();
+    if (!known(id, now).comments.some((c) => c.id === commentId && c.mine)) throw new CommentNotFound();
+    removeComment(id, commentId, now);
   },
   async refresh() {
     // Nothing is cached: every read is already fresh.

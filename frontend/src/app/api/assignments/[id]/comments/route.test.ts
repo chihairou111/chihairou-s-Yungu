@@ -17,6 +17,7 @@ beforeEach(() => {
 
 import { POST } from './route';
 import { MAX_COMMENT } from '@/lib/limits';
+import { data } from '@/lib/data';
 
 describe('POST comments', () => {
   it('401s without a session', async () => {
@@ -48,5 +49,15 @@ describe('POST comments', () => {
     expect(res.status).toBe(200);
     const c = await res.json();
     expect(c).toMatchObject({ text: 'hello', mine: true });
+  });
+  it('comments without loading the assignment detail first (the data layer knows unknown ids)', async () => {
+    const spy = vi.spyOn(data, 'getAssignmentDetail');
+    try {
+      expect((await POST(json({ text: 'hi' }, 'POST'), ctx({ id: '101' }))).status).toBe(200);
+      expect((await POST(json({ text: 'hi' }, 'POST'), ctx({ id: '999999' }))).status).toBe(404);
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
