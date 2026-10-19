@@ -44,8 +44,8 @@ test('sign in, browse assignments and calendar, sign out', async ({ page }) => {
   const todayPanel = page.getByRole('complementary', { name: "Today's classes" });
   // The real clock decides whether today has classes; the panel shows either its items or its empty state.
   await expect(todayPanel.getByText('No classes today').or(todayPanel.getByRole('listitem').first())).toBeVisible();
-  // No title row or close button of its own: hovering the panel reveals the edge button on its left edge.
-  await expect(todayPanel.getByRole('heading', { name: "Today's classes" })).toHaveCount(0);
+  // The title sits inside the panel (no separate title bar); hovering the panel reveals the edge button on its left edge.
+  await expect(todayPanel.getByRole('heading', { name: "Today's classes" })).toBeVisible();
   await page.mouse.move(viewport.width - 100, viewport.height / 2);
   await expect(todayButton).toHaveCSS('opacity', '1');
   await todayButton.click();
@@ -339,7 +339,7 @@ test.describe("docked today's classes panel", () => {
     await context.addCookies([{ name: 'yl_today_panel', value: 'open', url: baseURL! }]);
     await page.route('**/*.js', (route) => route.abort());
     await page.goto('/assignments');
-    const aside = page.locator('aside[aria-label="Today\'s classes"]');
+    const aside = page.locator('aside#today-panel');
     await expect(aside).toBeVisible();
     const box = (await aside.boundingBox())!;
     expect(Math.round(box.x)).toBe(1280 - 344);

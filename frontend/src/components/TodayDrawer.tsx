@@ -20,6 +20,7 @@ import { useNow } from './useNow';
 const DRAWER_ID = 'today-drawer';
 const TITLE_ID = 'today-drawer-title';
 const PANEL_ID = 'today-panel';
+const PANEL_TITLE_ID = 'today-panel-title';
 /** From this width the classes dock as a panel beside the content; below it they open in a drawer. */
 export const DOCK_QUERY = '(min-width: 900px)';
 const DOCKED_MEDIA = `@media ${DOCK_QUERY}`;
@@ -230,7 +231,7 @@ export default function TodayDrawer({ events, now: serverNow, courses, initialPa
       <Box
         component="aside"
         id={PANEL_ID}
-        aria-label="Today's classes"
+        aria-labelledby={PANEL_TITLE_ID}
         {...{ [TODAY_PANEL_ATTR]: '' }}
         data-open={panelOpen}
         inert={!panelOpen}
@@ -265,8 +266,19 @@ export default function TodayDrawer({ events, now: serverNow, courses, initialPa
           };
         }}
       >
-        {/* No title row: the cards start at the top, level with the page's first row of content. */}
-        <Box sx={{ flexGrow: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', px: 2, pt: 3, pb: 2 }}>
+        {/* The title scrolls with the cards: no separate title bar; it sits level with the page's column headings. */}
+        <Box
+          data-today-panel-body=""
+          sx={{ flexGrow: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', px: 2, pt: 3, pb: 2 }}
+        >
+          <Stack direction="row" sx={{ alignItems: 'baseline', gap: 1, mb: 1.5, minHeight: 28 }}>
+            <Typography id={PANEL_TITLE_ID} variant="h3" component="h2">
+              Today&apos;s classes
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {chinaShortDate(now)}
+            </Typography>
+          </Stack>
           {panelBody && <TodayClasses events={events} now={now} courses={courses} />}
         </Box>
       </Box>

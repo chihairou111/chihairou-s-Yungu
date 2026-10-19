@@ -214,11 +214,13 @@ describe('TodayDrawer docked panel (900px and up)', () => {
     expect(region).toBe(panel());
     expect(region).toHaveAttribute('data-open', 'true');
     expect(region).not.toHaveAttribute('inert');
-    // No title row: the cards start at the top; the region keeps its accessible name.
-    expect(within(region).queryByRole('heading', { name: "Today's classes" })).not.toBeInTheDocument();
-    expect(within(region).queryByText('Mon, Oct 19')).not.toBeInTheDocument();
+    // The title and date live inside the panel's scrolling body, above the cards (no separate title bar).
+    const heading = within(region).getByRole('heading', { name: "Today's classes" });
+    expect(region).toHaveAttribute('aria-labelledby', heading.id);
+    expect(within(region).getByText('Mon, Oct 19')).toBeInTheDocument();
     expect(within(region).queryByRole('button')).not.toBeInTheDocument();
-    expect(region.firstElementChild?.firstElementChild?.tagName).toBe('OL');
+    expect(heading.closest('[data-today-panel-body]')).not.toBeNull();
+    expect(within(region).getByRole('list').closest('[data-today-panel-body]')).toBe(heading.closest('[data-today-panel-body]'));
     expect(within(region).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
       'Chinese I08:00–08:40 · D419',
       'NextH Physics I12:30–13:10 · D508',
