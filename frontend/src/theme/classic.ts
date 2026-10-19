@@ -21,7 +21,7 @@ const theme = createTheme({
   // MD2 small corners everywhere (cards, buttons, chips, menus, inputs); avatars and FABs stay round.
   shape: { borderRadius: 4 },
   typography: {
-    fontFamily: 'var(--font-geist-sans), system-ui, sans-serif',
+    fontFamily: 'var(--font-geist-sans), "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif',
     h1: { fontSize: '1.375rem', fontWeight: 600, letterSpacing: '-0.01em', lineHeight: 1.3 },
     h2: { fontSize: '1.125rem', fontWeight: 600, letterSpacing: '-0.005em', lineHeight: 1.35 },
     h3: { fontSize: '1rem', fontWeight: 600, lineHeight: 1.4 },

@@ -47,4 +47,16 @@ describe('getTheme', () => {
     expect(contrastRatio(c.onSecondaryContainer, c.secondaryContainer)).toBeGreaterThanOrEqual(4.5);
     expect(contrastRatio(c.onPrimaryContainer, c.primaryContainer)).toBeGreaterThanOrEqual(4.5);
   });
+
+  it('expressive card and list titles are 600, since the CJK fallback has no 500', () => {
+    const { typography } = getTheme('expressive');
+    expect(Number(typography.h3.fontWeight)).toBeGreaterThanOrEqual(600);
+  });
+
+  it('both styles list CJK families with real weights after Geist', () => {
+    for (const style of ['classic', 'expressive'] as const) {
+      const family = getTheme(style).typography.fontFamily as string;
+      expect(family).toMatch(/var\(--font-geist-sans\).*"PingFang SC".*"Noto Sans SC".*"Microsoft YaHei"/);
+    }
+  });
 });

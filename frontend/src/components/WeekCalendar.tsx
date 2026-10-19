@@ -112,6 +112,8 @@ export default function WeekCalendar({ weekStart, events, courses, now: serverNo
     .map((d) => ({ d, placed: layoutDay(classes.filter((e) => dayIndex(e.start, weekStart) === d)) }))
     .filter(({ d, placed }) => d < 5 || placed.length > 0);
   const today = dayIndex(now, weekStart);
+  // The header range runs Monday to the last shown column.
+  const shownDays = days[days.length - 1].d + 1;
 
   const firstHour = Math.floor(Math.min(...classes.map((e) => minuteOfDay(e.start, weekStart))) / 60);
   const lastHour = Math.ceil(Math.max(...classes.map((e) => minuteOfDay(e.end, weekStart))) / 60);
@@ -152,10 +154,10 @@ export default function WeekCalendar({ weekStart, events, courses, now: serverNo
           sx={{ whiteSpace: 'nowrap', py: 1, [theme.breakpoints.down('sm')]: { ml: 'auto', fontSize: '1rem', lineHeight: '24px', fontWeight: 500 } }}
         >
           <Box component="span" sx={{ [theme.breakpoints.down('sm')]: VISUALLY_HIDDEN }}>
-            {weekRangeLabel(weekStart)}
+            {weekRangeLabel(weekStart, shownDays)}
           </Box>
           <Box component="span" aria-hidden="true" sx={{ display: { xs: 'inline', sm: 'none' } }}>
-            {weekRangeShortLabel(weekStart)}
+            {weekRangeShortLabel(weekStart, shownDays)}
           </Box>
         </Typography>
       </PageHeader>

@@ -1,7 +1,7 @@
 import { act, render, screen } from '../test-render';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import Instructions, { COLLAPSED_PX, nestHeadings } from './Instructions';
+import Instructions, { COLLAPSED_PX, nestHeadings, stripTitle } from './Instructions';
 
 function mockScrollHeight(px: number) {
   vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(px);
@@ -59,5 +59,26 @@ describe('Instructions', () => {
     expect(screen.getByRole('button', { name: 'Show more' })).toBeInTheDocument();
     act(() => screen.getByRole('link', { name: 'Reference' }).focus());
     expect(screen.getByRole('button', { name: 'Show less' })).toHaveAttribute('aria-expanded', 'true');
+  });
+});
+
+describe('stripTitle', () => {
+  it('drops a leading block that repeats the title, across whitespace and punctuation width', () => {
+    expect(stripTitle('<h2>第3单元： 观察  报告</h2><p>Do it.</p>', '第3单元:观察 报告')).toBe('<p>Do it.</p>');
+    expect(stripTitle('<p><strong>Lab (draft)</strong></p><p>Body</p>', 'Lab （draft）')).toBe('<p>Body</p>');
+    expect(stripTitle('<h4>Essay</h4>', 'Essay')).toBe('');
+  });
+  it('keeps a different first block or one that only starts like the title', () => {
+    expect(stripTitle('<h2>Materials</h2><p>Paper</p>', 'Essay')).toBe('<h2>Materials</h2><p>Paper</p>');
+    expect(stripTitle('<p>Essay draft due</p>', 'Essay')).toBe('<p>Essay draft due</p>');
+  });
+  it('keeps a first block holding images or lists, and only strips the first block', () => {
+    expect(stripTitle('<p>Essay<img src="a.png"></p>', 'Essay')).toBe('<p>Essay<img src="a.png"></p>');
+    expect(stripTitle('<p>Intro</p><h2>Essay</h2>', 'Essay')).toBe('<p>Intro</p><h2>Essay</h2>');
+  });
+  it('is not rendered by the component', () => {
+    render(<Instructions html="<h2>Essay</h2><p>Write it.</p>" title="Essay" />);
+    expect(screen.queryByRole('heading', { name: 'Essay' })).not.toBeInTheDocument();
+    expect(screen.getByText('Write it.')).toBeInTheDocument();
   });
 });

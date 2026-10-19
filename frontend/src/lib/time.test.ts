@@ -57,6 +57,16 @@ describe('china time', () => {
     expect(weekRangeLabel(weekStartOf(Date.UTC(2026, 8, 28, 0, 0)))).toBe('Sep 28 – Oct 4, 2026');
     expect(weekRangeLabel(weekStartOf(Date.UTC(2026, 11, 28, 0, 0)))).toBe('Dec 28, 2026 – Jan 3, 2027');
   });
+  it('weekRangeLabel covers only the shown days', () => {
+    const oct19 = weekStartOf(Date.UTC(2026, 9, 19, 4, 0));
+    expect(weekRangeLabel(oct19, 5)).toBe('Oct 19 – 23, 2026');
+    expect(weekRangeLabel(oct19, 6)).toBe('Oct 19 – 24, 2026');
+    expect(weekRangeLabel(oct19)).toBe('Oct 19 – 25, 2026');
+    expect(weekRangeLabel(weekStartOf(Date.UTC(2026, 9, 26, 4, 0)), 5)).toBe('Oct 26 – 30, 2026');
+    expect(weekRangeLabel(weekStartOf(Date.UTC(2026, 9, 26, 4, 0)), 7)).toBe('Oct 26 – Nov 1, 2026');
+    expect(weekRangeLabel(weekStartOf(Date.UTC(2026, 11, 28, 4, 0)), 5)).toBe('Dec 28, 2026 – Jan 1, 2027');
+    expect(weekRangeLabel(weekStartOf(Date.UTC(2026, 11, 28, 4, 0)), 4)).toBe('Dec 28 – 31, 2026');
+  });
   it('dayIndex Friday -> 4', () => {
     expect(dayIndex(Date.UTC(2026, 9, 16, 1, 0), oct12)).toBe(4);
   });
@@ -81,6 +91,15 @@ describe('weekRangeShortLabel', () => {
   it('names both months across a month or a year', () => {
     expect(weekRangeShortLabel(weekOf(2026, 9, 26))).toBe('Oct 26–Nov 1');
     expect(weekRangeShortLabel(weekOf(2026, 11, 28))).toBe('Dec 28–Jan 3');
+  });
+});
+
+describe('weekRangeShortLabel with shown days', () => {
+  const weekOf = (y: number, m: number, d: number) => weekStartOf(Date.UTC(y, m, d, 4, 0));
+  it('ends on the last shown day', () => {
+    expect(weekRangeShortLabel(weekOf(2026, 9, 19), 5)).toBe('Oct 19–23');
+    expect(weekRangeShortLabel(weekOf(2026, 9, 26), 5)).toBe('Oct 26–30');
+    expect(weekRangeShortLabel(weekOf(2026, 9, 26), 7)).toBe('Oct 26–Nov 1');
   });
 });
 

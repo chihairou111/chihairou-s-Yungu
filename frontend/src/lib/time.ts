@@ -69,9 +69,10 @@ export function formatWeekParam(weekStart: number): string {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
 }
 
-export function weekRangeLabel(weekStart: number): string {
+/** "Oct 19 – 23, 2026" for the first `days` days of the week (7 = the whole week). */
+export function weekRangeLabel(weekStart: number, days = 7): string {
   const s = chinaFields(weekStart);
-  const e = chinaFields(weekStart + 6 * DAY);
+  const e = chinaFields(weekStart + (days - 1) * DAY);
   const sy = s.getUTCFullYear();
   const ey = e.getUTCFullYear();
   const sm = MONTHS[s.getUTCMonth()];
@@ -87,9 +88,9 @@ export function dayIndex(ms: number, weekStart: number): number {
 }
 
 /** Compact range for narrow screens: "Oct 19–25", "Oct 26–Nov 1", "Dec 28–Jan 3". */
-export function weekRangeShortLabel(weekStart: number): string {
+export function weekRangeShortLabel(weekStart: number, days = 7): string {
   const s = chinaFields(weekStart);
-  const e = chinaFields(weekStart + 6 * DAY);
+  const e = chinaFields(weekStart + (days - 1) * DAY);
   const sm = MONTHS[s.getUTCMonth()];
   const em = MONTHS[e.getUTCMonth()];
   return sm === em ? `${sm} ${s.getUTCDate()}–${e.getUTCDate()}` : `${sm} ${s.getUTCDate()}–${em} ${e.getUTCDate()}`;

@@ -366,7 +366,7 @@ function DetailView({ detail, now, titleId, onClose, onWrite, workFocus }: Detai
       <Body
         content={
           <>
-            <Instructions html={detail.instructionsHtml} />
+            <Instructions html={detail.instructionsHtml} title={detail.title} />
             <AttachmentsSection files={detail.attachments} />
           </>
         }

@@ -21,12 +21,44 @@ export function nestHeadings(html: string): string {
   return html.replace(/<(\/?)h([1-6])\b/gi, (_, slash: string, level: string) => `<${slash}h${Math.min(Number(level) + shift, 6)}`);
 }
 
+const ENTITIES: Record<string, string> = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+
+/** Text for comparing a heading with the title: no tags or entities, NFKC (full-width → half-width), no spaces, lower case. */
+function comparable(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, '')
+    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
+      if (e[0] === '#') {
+        const code = e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : Number(e.slice(1));
+        return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : m;
+      }
+      return ENTITIES[e.toLowerCase()] ?? m;
+    })
+    .normalize('NFKC')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+}
+
+/**
+ * Drops the instructions' first block (h1–h6 or p, text and inline formatting only) when it only
+ * repeats the assignment title, which the dialog already shows above. Later blocks are never touched.
+ */
+export function stripTitle(html: string, title: string): string {
+  const first = /^\s*<(h[1-6]|p)\b[^>]*>([\s\S]*?)<\/\1>/i.exec(html);
+  if (!first) return html;
+  const inner = first[2];
+  if (/<(?!\/?(?:strong|em|b|i|u|span|br|mark)\b)/i.test(inner)) return html;
+  const text = comparable(inner);
+  return text !== '' && text === comparable(title) ? html.slice(first[0].length).replace(/^\s+/, '') : html;
+}
+
 /**
  * The teacher's instructions (HTML, sanitised on the server) set for reading: a comfortable measure,
  * images and tables kept to the text width, links in the primary colour. Long text collapses to
  * 240px behind "Show more", with the last lines fading out so the cut reads as intentional.
  */
-export default function Instructions({ html }: { html: string }) {
+export default function Instructions({ html: rawHtml, title }: { html: string; /** The assignment title; a leading heading that repeats it is not shown again. */ title?: string }) {
+  const html = title ? stripTitle(rawHtml, title) : rawHtml;
   const bodyId = useId();
   const bodyRef = useRef<HTMLDivElement>(null);
   const [tall, setTall] = useState(false);
@@ -82,7 +114,7 @@ export default function Instructions({ html }: { html: string }) {
                 '& li + li': { mt: 0.5 },
                 // The teacher's own headings sit under the section label ("Instructions"), never above it:
                 // a touch smaller than it, medium weight (the label is 500–600), lower levels in the muted colour.
-                '& h4, & h5, & h6': { fontSize: '0.9375rem', fontWeight: 500, lineHeight: 1.5, letterSpacing: '0.01em', mt: 2.5, mb: 0.5 },
+                '& h4, & h5, & h6': { fontSize: '0.9375rem', fontWeight: 600, lineHeight: 1.5, letterSpacing: '0.01em', mt: 2.5, mb: 0.5 },
                 '& h5, & h6': { color: 'text.secondary' },
                 '& a': {
                   color: 'primary.main',

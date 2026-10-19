@@ -81,7 +81,12 @@ describe('WeekCalendar', () => {
 
   it('shows the visible range', () => {
     render(<WeekCalendar weekStart={WEEK} courses={[]} events={[]} now={NOW} />);
-    expect(screen.getByRole('heading', { name: 'Oct 12 – 18, 2026' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Oct 12 – 16, 2026' })).toBeInTheDocument();
+  });
+
+  it('stretches the range to a weekend day that has a class', () => {
+    render(<WeekCalendar weekStart={WEEK} courses={[]} events={[cls('Make-up Lab', 5, 9 * 60, 10 * 60)]} now={NOW} />);
+    expect(screen.getByRole('heading', { level: 2 })).toHaveAccessibleName('Oct 12 – 17, 2026');
   });
 
   it("marks today's column header", async () => {
@@ -94,7 +99,7 @@ describe('WeekCalendar', () => {
 
   it('nests day headings under the range heading', async () => {
     await renderFixtureWeek();
-    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('Oct 12 – 18, 2026');
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('Oct 12 – 16, 2026');
     expect(screen.getByRole('heading', { level: 3, name: 'Mon 12' })).toBeInTheDocument();
   });
 
@@ -205,8 +210,8 @@ describe('WeekCalendar phone layout', () => {
   it('shows a short range for phones while the heading keeps the full range', () => {
     render(<WeekCalendar weekStart={WEEK} courses={[]} events={[]} now={NOW} />);
     const heading = screen.getByRole('heading', { level: 2 });
-    expect(heading).toHaveAccessibleName('Oct 12 – 18, 2026');
-    expect(within(heading).getByText('Oct 12–18')).toHaveAttribute('aria-hidden', 'true');
+    expect(heading).toHaveAccessibleName('Oct 12 – 16, 2026');
+    expect(within(heading).getByText('Oct 12–16')).toHaveAttribute('aria-hidden', 'true');
   });
 
   it('marks classes too short for a second line at the narrow grid size', () => {

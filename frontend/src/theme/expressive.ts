@@ -83,10 +83,10 @@ const theme = createTheme({
   shape: { borderRadius: shape.medium },
   // M3 type scale on the current font: h1/h2 = title-large, h3 = title-medium, overline = title-small.
   typography: {
-    fontFamily: 'var(--font-geist-sans), system-ui, sans-serif',
+    fontFamily: 'var(--font-geist-sans), "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif',
     h1: { fontSize: '1.375rem', fontWeight: 400, letterSpacing: 0, lineHeight: 28 / 22 },
     h2: { fontSize: '1.375rem', fontWeight: 400, letterSpacing: 0, lineHeight: 28 / 22 },
-    h3: { fontSize: '1rem', fontWeight: 500, letterSpacing: '0.009375em', lineHeight: 1.5 },
+    h3: { fontSize: '1rem', fontWeight: 600, letterSpacing: '0.009375em', lineHeight: 1.5 },
     body1: { letterSpacing: '0.03125em', lineHeight: 1.5 },
     body2: { letterSpacing: '0.0178571em', lineHeight: 20 / 14 },
     button: { textTransform: 'none', fontWeight: 500, letterSpacing: '0.00714em' },
