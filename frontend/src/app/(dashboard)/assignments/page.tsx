@@ -1,7 +1,9 @@
 import type { Metadata } from 'next';
 import { io } from 'next/cache';
 import AssignmentsView from '@/components/AssignmentsView';
-import { data } from '@/lib/data';
+import ServiceUnavailable from '@/components/ServiceUnavailable';
+import { YunguUnavailable, data } from '@/lib/data';
+import { loadPageData } from '@/lib/page-data';
 
 export const metadata: Metadata = { title: 'Assignments' };
 
@@ -14,6 +16,8 @@ async function loadAssignments() {
 }
 
 export default async function AssignmentsPage() {
-  const { now, todo, submitted } = await loadAssignments();
+  const loaded = await loadPageData(loadAssignments);
+  if (loaded instanceof YunguUnavailable) return <ServiceUnavailable message={loaded.message} />;
+  const { now, todo, submitted } = loaded;
   return <AssignmentsView todo={todo} submitted={submitted} now={now} />;
 }

@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { NOT_FOUND_ASSIGNMENT, parseId, requireSession } from '@/lib/api-auth';
+import { NOT_FOUND_ASSIGNMENT, parseId, requireSession, withServiceErrors } from '@/lib/api-auth';
 import { data } from '@/lib/data';
 
-export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string; commentId: string }> }) {
+export const DELETE = withServiceErrors(async (request: Request, { params }: { params: Promise<{ id: string; commentId: string }> }) => {
   const denied = await requireSession();
   if (denied) return denied;
   const { id: rawId, commentId } = await params;
@@ -15,4 +15,4 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   }
   await data.deleteComment(id, commentId);
   return NextResponse.json({ ok: true });
-}
+});

@@ -13,5 +13,7 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./vitest.setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
+    // Tests never reach the Yungu service: the data layer is the in-memory mock.
+    env: { DATA_SOURCE: 'mock' },
   },
 });

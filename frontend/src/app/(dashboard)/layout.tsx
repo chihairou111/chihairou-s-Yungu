@@ -3,7 +3,8 @@ import { io } from 'next/cache';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth';
-import { data } from '@/lib/data';
+import { YunguUnavailable, data } from '@/lib/data';
+import { loadPageData } from '@/lib/page-data';
 import { loadPanelClasses } from '@/lib/schedule';
 import { TODAY_PANEL_COOKIE, parseTodayPanel } from '@/lib/today-panel';
 import AppShell from '@/components/AppShell';
@@ -25,7 +26,7 @@ async function loadToday() {
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
   const session = await getSession();
   if (!session) redirect('/login');
-  const [{ now, courses, events }, cookieStore] = await Promise.all([loadToday(), cookies()]);
+  const [today, cookieStore] = await Promise.all([loadPageData(loadToday), cookies()]);
   // Read on the server, so a reload paints the panel in its stored state with no flash or slide.
   // The layout persists across pages, so moving between them never re-animates the panel. The panel
   // itself leaves out the calendar (from the pathname, also on the server), keeping this state.
@@ -37,7 +38,12 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       <NavRail />
       <AppShell
         userName={session.name}
-        panel={<TodayDrawer events={events} now={now} courses={courses} initialPanelOpen={panelOpen} />}
+        // Yungu unreachable: no panel (the page itself says so) rather than a wrong "No classes today".
+        panel={
+          today instanceof YunguUnavailable ? undefined : (
+            <TodayDrawer events={today.events} now={today.now} courses={today.courses} initialPanelOpen={panelOpen} />
+          )
+        }
       >
         {children}
       </AppShell>

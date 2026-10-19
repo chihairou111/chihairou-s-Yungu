@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { NOT_FOUND_ASSIGNMENT, parseId, readJson, requireSession, toFileIds } from '@/lib/api-auth';
+import { NOT_FOUND_ASSIGNMENT, parseId, readJson, requireSession, toFileIds, withServiceErrors } from '@/lib/api-auth';
 import { data } from '@/lib/data';
 
-export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
+export const PUT = withServiceErrors(async (request: Request, { params }: { params: Promise<{ id: string }> }) => {
   const denied = await requireSession();
   if (denied) return denied;
   const id = parseId((await params).id);
@@ -12,4 +12,4 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   if (!(await data.getAssignmentDetail(id))) return NextResponse.json({ error: NOT_FOUND_ASSIGNMENT }, { status: 404 });
   await data.saveDraft(id, fileIds);
   return NextResponse.json({ ok: true });
-}
+});

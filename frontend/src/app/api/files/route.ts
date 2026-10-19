@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireSession } from '@/lib/api-auth';
+import { requireSession, withServiceErrors } from '@/lib/api-auth';
 import { data } from '@/lib/data';
 
 const MAX_BYTES = 50 * 1024 * 1024;
@@ -13,7 +13,7 @@ function baseMime(type: string): string {
   return /^[A-Za-z0-9]+\/[A-Za-z0-9+.-]+$/.test(base) ? base : 'application/octet-stream';
 }
 
-export async function POST(request: Request) {
+export const POST = withServiceErrors(async (request: Request) => {
   const denied = await requireSession();
   if (denied) return denied;
   // Refuse an oversized body before buffering it; a body without a length is still checked after parsing.
@@ -31,4 +31,4 @@ export async function POST(request: Request) {
   if (file.size > MAX_BYTES) return NextResponse.json({ error: TOO_LARGE }, { status: 413 });
   const bytes = new Uint8Array(await file.arrayBuffer());
   return NextResponse.json(await data.uploadFile(file.name, baseMime(file.type), bytes));
-}
+});

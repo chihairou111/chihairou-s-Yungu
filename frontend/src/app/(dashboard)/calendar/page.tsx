@@ -1,7 +1,9 @@
 import type { Metadata } from 'next';
 import { io } from 'next/cache';
+import ServiceUnavailable from '@/components/ServiceUnavailable';
 import WeekCalendar from '@/components/WeekCalendar';
-import { data } from '@/lib/data';
+import { YunguUnavailable, data } from '@/lib/data';
+import { loadPageData } from '@/lib/page-data';
 import { parseWeekParam } from '@/lib/time';
 
 export const metadata: Metadata = { title: 'Calendar' };
@@ -17,6 +19,8 @@ async function loadWeek(weekParam: string | undefined) {
 
 export default async function CalendarPage({ searchParams }: { searchParams: Promise<{ week?: string | string[] }> }) {
   const { week } = await searchParams;
-  const { now, weekStart, events, courses } = await loadWeek(typeof week === 'string' ? week : undefined);
+  const loaded = await loadPageData(() => loadWeek(typeof week === 'string' ? week : undefined));
+  if (loaded instanceof YunguUnavailable) return <ServiceUnavailable message={loaded.message} />;
+  const { now, weekStart, events, courses } = loaded;
   return <WeekCalendar weekStart={weekStart} events={events} courses={courses} now={now} />;
 }

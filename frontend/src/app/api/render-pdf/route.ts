@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { readJson, requireSession } from '@/lib/api-auth';
+import { readJson, requireSession, serviceErrorResponse } from '@/lib/api-auth';
 import { data } from '@/lib/data';
 import { renderPdf } from '@/lib/pdf';
 import { sanitizeEditorHtml } from '@/lib/sanitize';
@@ -25,11 +25,17 @@ export async function POST(request: Request) {
   const html = sanitizeEditorHtml(rawHtml);
   if (html.replace(/<[^>]*>|&nbsp;|\s/g, '') === '') return NextResponse.json({ error: 'Nothing to export yet.' }, { status: 400 });
   const title = fileSafe(typeof body.title === 'string' ? body.title : '') || 'Writing';
+  let bytes: Uint8Array;
   try {
-    const bytes = await renderPdf(title, html);
-    return NextResponse.json(await data.uploadFile(`${title}.pdf`, 'application/pdf', bytes));
+    bytes = await renderPdf(title, html);
   } catch (error) {
     console.error('render-pdf: rendering failed', error);
     return NextResponse.json({ error: 'Could not create the PDF. Try again.' }, { status: 500 });
+  }
+  try {
+    return NextResponse.json(await data.uploadFile(`${title}.pdf`, 'application/pdf', bytes));
+  } catch (error) {
+    // Storing it is the service's part: its 401 / 413 / 502 reach the editor as they are.
+    return serviceErrorResponse(error, request);
   }
 }

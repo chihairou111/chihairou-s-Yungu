@@ -46,4 +46,32 @@ describe('LoginForm', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/connection/i);
     expect(nav.replace).not.toHaveBeenCalled();
   });
+
+  it("shows Yungu being unreachable as a sign-in error", async () => {
+    stubFetch(401, { error: "Can't reach Yungu right now. Try again." });
+    render(<LoginForm />);
+    await userEvent.type(screen.getByLabelText('Student ID'), 's123');
+    await userEvent.type(screen.getByLabelText('Password'), 'pw');
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent("Can't reach Yungu right now. Try again.");
+    expect(nav.replace).not.toHaveBeenCalled();
+  });
+
+  it('shows why the last session ended, without marking the empty fields as wrong', () => {
+    render(<LoginForm notice="Sign in again — your Yungu password may have changed." />);
+    expect(screen.getByRole('alert')).toHaveTextContent('Sign in again — your Yungu password may have changed.');
+    expect(screen.getByLabelText('Student ID')).toHaveAttribute('aria-invalid', 'false');
+    expect(screen.getByLabelText('Password')).toHaveAttribute('aria-invalid', 'false');
+  });
+
+  it('replaces the notice with the outcome of the next attempt', async () => {
+    stubFetch(401, { error: 'Wrong student ID or password.' });
+    render(<LoginForm notice="Sign in again." />);
+    await userEvent.type(screen.getByLabelText('Student ID'), 's123');
+    await userEvent.type(screen.getByLabelText('Password'), 'pw');
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await vi.waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Wrong student ID or password.'));
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(screen.queryByText('Sign in again.')).toBeNull();
+  });
 });

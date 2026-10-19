@@ -11,7 +11,8 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: 'npm run build && npx next start -p 3100',
+    // The end-to-end run never reaches the Yungu service: the data layer is the in-memory mock.
+    command: 'export DATA_SOURCE=mock && npm run build && npx next start -p 3100',
     url: 'http://127.0.0.1:3100',
     reuseExistingServer: false,
     timeout: 180000,

@@ -47,6 +47,7 @@ export const mockData: YunguData = {
     return storeFile(name, mime, bytes, Date.now());
   },
   async getFile(id) {
+    // The mock keeps bytes, which serve both downloading and viewing, so `preview` changes nothing.
     return loadFile(id);
   },
   async saveDraft(id, fileIds) {
@@ -65,6 +66,9 @@ export const mockData: YunguData = {
   },
   async deleteComment(id, commentId) {
     removeComment(id, commentId, Date.now());
+  },
+  async refresh() {
+    // Nothing is cached: every read is already fresh.
   },
   async signIn(loginId, password) {
     if (!loginId.trim() || !password.trim()) return { ok: false, error: BLANK_CREDENTIALS_ERROR };

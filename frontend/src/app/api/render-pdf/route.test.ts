@@ -15,6 +15,7 @@ beforeEach(() => {
 });
 
 import { POST } from './route';
+import { ServiceError, SessionEnded, data } from '@/lib/data';
 
 const post = (body: unknown) =>
   new Request('http://localhost/api/render-pdf', { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body) });
@@ -78,5 +79,18 @@ describe('POST /api/render-pdf', () => {
     } finally {
       log.mockRestore();
     }
+  });
+  it("passes the service's upload failures on instead of blaming the PDF", async () => {
+    const spy = vi
+      .spyOn(data, 'uploadFile')
+      .mockRejectedValueOnce(new ServiceError(413, 'Files up to 50 MB.'))
+      .mockRejectedValueOnce(new SessionEnded());
+    const big = await POST(post({ title: 'a', html: '<p>x</p>' }));
+    expect(big.status).toBe(413);
+    expect(await big.json()).toEqual({ error: 'Files up to 50 MB.' });
+    const ended = await POST(post({ title: 'a', html: '<p>x</p>' }));
+    expect(ended.status).toBe(401);
+    expect(await ended.json()).toEqual({ error: 'Sign in again.' });
+    spy.mockRestore();
   });
 });

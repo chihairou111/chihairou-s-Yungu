@@ -1,4 +1,6 @@
 // Cookie format helpers with no next/headers import, so the proxy can use them too.
+import type { NextResponse } from 'next/server';
+import { PASSWORD_CHANGED, SIGN_IN_AGAIN } from './data/errors';
 
 export const SESSION_COOKIE = 'yl_session';
 export const SESSION_MAX_AGE = 60 * 60 * 24 * 30;
@@ -50,4 +52,37 @@ export function sessionCookieOptions(request: Request, maxAge: number) {
     maxAge,
     secure: isHttps(request),
   };
+}
+
+/**
+ * Why the last session ended, for the sign-in page to say. The service tells only the request that hit
+ * the rejected re-login that the password may have changed, so that answer is kept here for the page
+ * that follows. The cookie holds a reason code, never text, so a link cannot put words on the sign-in page.
+ */
+export const SIGN_IN_NOTICE_COOKIE = 'yl_signin_notice';
+const NOTICE_MAX_AGE = 5 * 60;
+const NOTICES = { password: PASSWORD_CHANGED, ended: SIGN_IN_AGAIN } as const;
+type NoticeReason = keyof typeof NOTICES;
+
+const reasonFor = (message: string): NoticeReason => (message === PASSWORD_CHANGED ? 'password' : 'ended');
+
+/** The message for a notice cookie value; null when there is none (or it is not one of ours). */
+export function signInNotice(value: string | undefined): string | null {
+  return value !== undefined && Object.hasOwn(NOTICES, value) ? NOTICES[value as NoticeReason] : null;
+}
+
+/** On a response: our session is over (the service answered 401 with `message`); clear it and keep the reason. */
+export function endSession(response: NextResponse, request: Request, message: string): void {
+  response.cookies.set(SESSION_COOKIE, '', sessionCookieOptions(request, 0));
+  response.cookies.set(SIGN_IN_NOTICE_COOKIE, reasonFor(message), sessionCookieOptions(request, NOTICE_MAX_AGE));
+}
+
+/** Where a page sends the browser when the service ended the session: clears the cookie, then signs in. */
+export function endedSessionPath(message: string): string {
+  return `/api/session/ended?reason=${reasonFor(message)}`;
+}
+
+/** The ended-session route: the message for a `reason` query value, the plain one for anything else. */
+export function endedSessionMessage(reason: string | null): string {
+  return reason === 'password' ? PASSWORD_CHANGED : SIGN_IN_AGAIN;
 }

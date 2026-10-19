@@ -14,6 +14,7 @@ beforeEach(() => {
 });
 
 import { GET } from './route';
+import { SessionEnded, YunguUnavailable, data } from '@/lib/data';
 
 describe('GET /api/assignments/[id]', () => {
   it('401s without a session', async () => {
@@ -37,5 +38,22 @@ describe('GET /api/assignments/[id]', () => {
   it('400s for a non-numeric id', async () => {
     const res = await GET(new Request('http://localhost/x'), ctx({ id: 'abc' }));
     expect(res.status).toBe(400);
+  });
+  it("502s with the service's message when Yungu is down", async () => {
+    const spy = vi.spyOn(data, 'getAssignmentDetail').mockRejectedValueOnce(new YunguUnavailable());
+    const res = await GET(new Request('http://localhost/x'), ctx({ id: '101' }));
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: "Can't reach Yungu right now. Try again." });
+    spy.mockRestore();
+  });
+  it('401s with the service message, clears the session and leaves the notice for the sign-in page', async () => {
+    const spy = vi.spyOn(data, 'getAssignmentDetail').mockRejectedValueOnce(new SessionEnded('Sign in again — your Yungu password may have changed.'));
+    const res = await GET(new Request('http://localhost/x'), ctx({ id: '101' }));
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: 'Sign in again — your Yungu password may have changed.' });
+    const cookies = res.headers.getSetCookie();
+    expect(cookies.find((c) => c.startsWith('yl_session='))).toMatch(/Max-Age=0/);
+    expect(cookies.find((c) => c.startsWith('yl_signin_notice='))).toMatch(/^yl_signin_notice=password;/);
+    spy.mockRestore();
   });
 });

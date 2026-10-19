@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import { BLANK_CREDENTIALS_ERROR, data } from '@/lib/data';
+import { BLANK_CREDENTIALS_ERROR, YunguUnavailable, data } from '@/lib/data';
 import { SESSION_COOKIE, decodeSession, encodeSession } from '@/lib/session-cookie';
 import { DELETE, POST } from './route';
 
@@ -95,5 +95,28 @@ describe('/api/session', () => {
     await del();
     await del('garbage');
     expect(signOut).not.toHaveBeenCalled();
+  });
+
+  it('clears a left-over sign-in notice once signed in', async () => {
+    const notice = (res: Response) => res.headers.getSetCookie().find((c) => c.startsWith('yl_signin_notice='));
+    const res = await post({ loginId: 's123', password: 'pw' }, undefined, { cookie: 'yl_signin_notice=password' });
+    expect(notice(res)).toMatch(/Max-Age=0/);
+    expect(notice(await post({ loginId: 's123', password: 'pw' }))).toBeUndefined();
+  });
+
+  it("shows Yungu being down as a sign-in error", async () => {
+    vi.spyOn(data, 'signIn').mockResolvedValue({ ok: false, error: "Can't reach Yungu right now. Try again." });
+    const res = await post({ loginId: 's123', password: 'pw' });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "Can't reach Yungu right now. Try again." });
+    expect(res.headers.get('set-cookie')).toBeNull();
+  });
+
+  it('DELETE keeps the cookie and 502s when the service cannot forget the session', async () => {
+    vi.spyOn(data, 'signOut').mockRejectedValue(new YunguUnavailable());
+    const res = await del(encodeSession('Ada', 'service-token-3'));
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: "Can't reach Yungu right now. Try again." });
+    expect(res.headers.get('set-cookie')).toBeNull();
   });
 });

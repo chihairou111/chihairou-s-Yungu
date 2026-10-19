@@ -14,7 +14,7 @@ beforeEach(() => {
 });
 
 import { GET } from './route';
-import { data } from '@/lib/data';
+import { YunguUnavailable, data } from '@/lib/data';
 
 describe('GET /api/files/[id]', () => {
   it('401s without a session', async () => {
@@ -69,15 +69,37 @@ describe('GET /api/files/[id]', () => {
     const ref = { id: '11128597', name: 'a.pdf', kind: 'pdf' as const, mime: 'application/pdf', size: 9, url: '/api/files/11128597', createdAt: 0 };
 
     it('302s to the signed link, with nosniff and no caching, ranges left to the store', async () => {
-      const spy = vi.spyOn(data, 'getFile').mockResolvedValueOnce({ ref, redirect: SIGNED });
+      const spy = vi.spyOn(data, 'getFile').mockResolvedValueOnce({ redirect: SIGNED });
       try {
         const res = await GET(new Request('http://localhost/x', { headers: { range: 'bytes=0-1' } }), ctx({ id: ref.id }));
-        expect(spy).toHaveBeenCalledWith('11128597');
+        expect(spy).toHaveBeenCalledWith('11128597', { preview: false });
         expect(res.status).toBe(302);
         expect(res.headers.get('location')).toBe(SIGNED);
         expect(res.headers.get('x-content-type-options')).toBe('nosniff');
         expect(res.headers.get('cache-control')).toBe('private, no-store');
         expect(await res.text()).toBe('');
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('asks for the preview link with ?preview=1', async () => {
+      const spy = vi.spyOn(data, 'getFile').mockResolvedValueOnce({ redirect: SIGNED });
+      try {
+        const res = await GET(new Request('http://localhost/x?preview=1'), ctx({ id: ref.id }));
+        expect(spy).toHaveBeenCalledWith('11128597', { preview: true });
+        expect(res.status).toBe(302);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it("502s with the service's message when Yungu is down", async () => {
+      const spy = vi.spyOn(data, 'getFile').mockRejectedValueOnce(new YunguUnavailable());
+      try {
+        const res = await GET(new Request('http://localhost/x'), ctx({ id: ref.id }));
+        expect(res.status).toBe(502);
+        expect(await res.json()).toEqual({ error: "Can't reach Yungu right now. Try again." });
       } finally {
         spy.mockRestore();
       }

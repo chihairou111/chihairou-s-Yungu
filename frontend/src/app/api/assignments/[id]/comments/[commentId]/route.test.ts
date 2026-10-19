@@ -14,7 +14,7 @@ beforeEach(() => {
 });
 
 import { DELETE } from './route';
-import { data } from '@/lib/data';
+import { AssignmentNotFound, data } from '@/lib/data';
 
 const req = () => new Request('http://localhost/x', { method: 'DELETE' });
 
@@ -40,5 +40,13 @@ describe('DELETE comment', () => {
     }
     expect((await DELETE(req(), ctx({ id: '999999', commentId: 'x' }))).status).toBe(404);
     expect((await DELETE(req(), ctx({ id: 'abc', commentId: 'x' }))).status).toBe(400);
+  });
+  it('404s like an unknown assignment when the service no longer knows the id', async () => {
+    const c = await data.addComment(101, 'mine');
+    const spy = vi.spyOn(data, 'deleteComment').mockRejectedValueOnce(new AssignmentNotFound());
+    const res = await DELETE(req(), ctx({ id: '101', commentId: c.id }));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'Assignment not found' });
+    spy.mockRestore();
   });
 });

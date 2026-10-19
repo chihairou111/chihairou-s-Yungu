@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireSession } from '@/lib/api-auth';
+import { requireSession, withServiceErrors } from '@/lib/api-auth';
 import { data } from '@/lib/data';
 
 const ACTIVE_TYPES = new Set([
@@ -12,10 +12,11 @@ const ACTIVE_TYPES = new Set([
   'text/javascript',
 ]);
 
-export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+export const GET = withServiceErrors(async (request: Request, { params }: { params: Promise<{ id: string }> }) => {
   const denied = await requireSession();
   if (denied) return denied;
-  const file = await data.getFile((await params).id);
+  const preview = new URL(request.url).searchParams.get('preview') === '1';
+  const file = await data.getFile((await params).id, { preview });
   if (!file) return NextResponse.json({ error: 'File not found' }, { status: 404 });
   if ('redirect' in file) {
     // The real service hands back a short-lived signed OSS link; the browser fetches (and ranges) from there.
@@ -49,7 +50,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     });
   }
   return new Response(file.bytes as BodyInit, { headers: { ...headers, 'Content-Length': String(size) } });
-}
+});
 
 /**
  * A single `bytes=` range (`start-end`, `start-`, `-suffix`) clamped to the file, as inclusive offsets.

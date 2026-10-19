@@ -27,7 +27,7 @@ describe('mock store', () => {
     expect(ref.url).toBe(`/api/files/${ref.id}`);
     expect(ref.id).toMatch(/^[0-9a-f-]{36}$/);
     const got = await data.getFile(ref.id);
-    expect(got?.ref).toEqual(ref);
+    expect(got && 'bytes' in got ? got.ref : null).toEqual(ref);
     expect(got && 'bytes' in got ? Array.from(got.bytes) : null).toEqual(Array.from(b));
     expect(await data.getFile('missing')).toBeNull();
   });

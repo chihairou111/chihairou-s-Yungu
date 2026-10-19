@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { NOT_FOUND_ASSIGNMENT, parseId, requireSession } from '@/lib/api-auth';
+import { NOT_FOUND_ASSIGNMENT, parseId, requireSession, withServiceErrors } from '@/lib/api-auth';
 import { data } from '@/lib/data';
 
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+export const GET = withServiceErrors(async (request: Request, { params }: { params: Promise<{ id: string }> }) => {
   const denied = await requireSession();
   if (denied) return denied;
   const id = parseId((await params).id);
@@ -10,4 +10,4 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const detail = await data.getAssignmentDetail(id);
   if (!detail) return NextResponse.json({ error: NOT_FOUND_ASSIGNMENT }, { status: 404 });
   return NextResponse.json(detail);
-}
+});

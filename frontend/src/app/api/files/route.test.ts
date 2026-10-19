@@ -14,6 +14,7 @@ beforeEach(() => {
 });
 
 import { POST } from './route';
+import { ServiceError, data } from '@/lib/data';
 
 const upload = (file: File | null) => {
   const form = new FormData();
@@ -73,5 +74,13 @@ describe('POST /api/files', () => {
     const res = await POST(upload(new File(['x'], 'a.txt', { type: 'text/plain\r\nX: y' })));
     expect(res.status).toBe(200);
     expect((await res.json()).mime).toBe('application/octet-stream');
+  });
+  it("passes the service's 413 through, with the name sent verbatim", async () => {
+    const spy = vi.spyOn(data, 'uploadFile').mockRejectedValueOnce(new ServiceError(413, 'Files up to 50 MB.'));
+    const res = await POST(upload(new File(['hello'], '作业 一（终稿）.pdf', { type: 'application/pdf' })));
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'Files up to 50 MB.' });
+    expect(spy).toHaveBeenCalledWith('作业 一（终稿）.pdf', 'application/pdf', new TextEncoder().encode('hello'));
+    spy.mockRestore();
   });
 });

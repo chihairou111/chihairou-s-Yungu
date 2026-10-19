@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { SESSION_COOKIE, SESSION_MAX_AGE, decodeSession, encodeSession, sessionCookieOptions } from './session-cookie';
+import { NextResponse } from 'next/server';
+import {
+  SESSION_COOKIE,
+  SESSION_MAX_AGE,
+  SIGN_IN_NOTICE_COOKIE,
+  decodeSession,
+  encodeSession,
+  endSession,
+  endedSessionPath,
+  sessionCookieOptions,
+  signInNotice,
+} from './session-cookie';
 
 describe('session cookie helpers', () => {
   it('exposes the cookie constants', () => {
@@ -46,5 +57,36 @@ describe('sessionCookieOptions', () => {
   it('is secure when a proxy reports x-forwarded-proto https', () => {
     expect(sessionCookieOptions(req('http://127.0.0.1/api/session', { 'x-forwarded-proto': 'https' }), 0).secure).toBe(true);
     expect(sessionCookieOptions(req('http://127.0.0.1/api/session', { 'x-forwarded-proto': 'http' }), 0).secure).toBe(false);
+  });
+});
+
+describe('ending a session the service refused', () => {
+  const PASSWORD_CHANGED = 'Sign in again — your Yungu password may have changed.';
+
+  it('clears the session cookie and leaves a short-lived notice naming the reason', () => {
+    const res = NextResponse.json({});
+    endSession(res, new Request('https://example.com/x'), PASSWORD_CHANGED);
+    expect(SIGN_IN_NOTICE_COOKIE).toBe('yl_signin_notice');
+    const session = res.cookies.get(SESSION_COOKIE);
+    expect(session).toMatchObject({ value: '', maxAge: 0, httpOnly: true, secure: true, path: '/' });
+    expect(res.cookies.get(SIGN_IN_NOTICE_COOKIE)).toMatchObject({ value: 'password', maxAge: 300, httpOnly: true, path: '/' });
+
+    const plain = NextResponse.json({});
+    endSession(plain, new Request('http://localhost/x'), 'Sign in again.');
+    expect(plain.cookies.get(SIGN_IN_NOTICE_COOKIE)?.value).toBe('ended');
+  });
+
+  it('names the reason, never the message itself, in the sign-out path', () => {
+    expect(endedSessionPath(PASSWORD_CHANGED)).toBe('/api/session/ended?reason=password');
+    expect(endedSessionPath('Sign in again.')).toBe('/api/session/ended?reason=ended');
+    expect(endedSessionPath('<b>anything else</b>')).toBe('/api/session/ended?reason=ended');
+  });
+
+  it('turns a notice back into its message, ignoring anything unknown', () => {
+    expect(signInNotice('password')).toBe(PASSWORD_CHANGED);
+    expect(signInNotice('ended')).toBe('Sign in again.');
+    expect(signInNotice('toString')).toBeNull();
+    expect(signInNotice('Call 123 now')).toBeNull();
+    expect(signInNotice(undefined)).toBeNull();
   });
 });

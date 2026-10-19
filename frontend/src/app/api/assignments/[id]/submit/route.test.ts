@@ -16,7 +16,7 @@ beforeEach(() => {
 });
 
 import { POST } from './route';
-import { data } from '@/lib/data';
+import { AssignmentNotFound, YunguUnavailable, data } from '@/lib/data';
 
 describe('POST submit', () => {
   it('401s without a session', async () => {
@@ -41,5 +41,16 @@ describe('POST submit', () => {
     expect(res.status).toBe(200);
     expect(typeof (await res.json()).submittedAt).toBe('number');
     expect((await data.getAssignmentDetail(101))?.submitted).toBe(true);
+  });
+  it('passes service failures on: 502, and 404 for an id the service does not know', async () => {
+    const f = await data.uploadFile('a.txt', 'text/plain', new Uint8Array([1]));
+    const spy = vi.spyOn(data, 'submit').mockRejectedValueOnce(new YunguUnavailable()).mockRejectedValueOnce(new AssignmentNotFound());
+    const down = await POST(json({ fileIds: [f.id] }, 'POST'), ctx({ id: '101' }));
+    expect(down.status).toBe(502);
+    expect(await down.json()).toEqual({ error: "Can't reach Yungu right now. Try again." });
+    const gone = await POST(json({ fileIds: [f.id] }, 'POST'), ctx({ id: '101' }));
+    expect(gone.status).toBe(404);
+    expect(await gone.json()).toEqual({ error: 'Assignment not found' });
+    spy.mockRestore();
   });
 });

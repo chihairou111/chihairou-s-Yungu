@@ -9,18 +9,23 @@ import TextField from '@mui/material/TextField';
 const NETWORK_ERROR = "Couldn't reach the server. Check your connection and try again.";
 const GENERIC_ERROR = 'Sign-in failed. Try again.';
 
-/** Student ID + password form; the server sets the session cookie. */
-export default function LoginForm() {
+/**
+ * Student ID + password form; the server sets the session cookie. `notice` says why the last session
+ * ended (the service signed it out); it gives way to the outcome of the next attempt.
+ */
+export default function LoginForm({ notice }: { notice?: string }) {
   const router = useRouter();
   const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [showNotice, setShowNotice] = useState(notice !== undefined);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPending(true);
     setError(null);
+    setShowNotice(false);
     try {
       const res = await fetch('/api/session', {
         method: 'POST',
@@ -62,6 +67,7 @@ export default function LoginForm() {
         fullWidth
       />
       {error && <Alert severity="error">{error}</Alert>}
+      {!error && showNotice && <Alert severity="warning">{notice}</Alert>}
       <Button type="submit" variant="contained" size="large" disabled={pending} fullWidth sx={{ minHeight: { xs: 48, sm: 40 } }}>
         {pending ? 'Signing in…' : 'Sign in'}
       </Button>

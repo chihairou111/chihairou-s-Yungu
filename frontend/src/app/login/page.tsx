@@ -1,12 +1,22 @@
 import type { Metadata } from 'next';
+import { io } from 'next/cache';
+import { cookies } from 'next/headers';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import LoginCard from '@/components/LoginCard';
 import LoginForm from '@/components/LoginForm';
+import { SIGN_IN_NOTICE_COOKIE, signInNotice } from '@/lib/session-cookie';
 
 export const metadata: Metadata = { title: 'Sign in' };
 
-export default function LoginPage() {
+export default async function LoginPage() {
+  // Set when the service ended the last session: why, e.g. the saved Yungu password stopped working.
+  const notice = signInNotice((await cookies()).get(SIGN_IN_NOTICE_COOKIE)?.value);
+  // The router keeps a page it has left mounted (hidden) and shows that same instance on the next visit,
+  // so the form would come back as it was left: "Signing in…" after a sign-in, without the notice. A key
+  // that is new on every visit makes it a fresh form instead.
+  await io();
+  const visit = crypto.randomUUID();
   return (
     <Box
       component="main"
@@ -20,7 +30,7 @@ export default function LoginPage() {
         <Typography color="text.secondary" sx={{ mt: 0.5, mb: 3 }}>
           Sign in with your Yungu account
         </Typography>
-        <LoginForm />
+        <LoginForm key={visit} notice={notice ?? undefined} />
       </LoginCard>
     </Box>
   );
