@@ -56,6 +56,11 @@ export default function CameraDialog({ open, onClose, onAdd }: CameraDialogProps
   // The preview reports its frame size once it plays; until then there is nothing to photograph.
   const [frame, setFrame] = useState<{ stream: MediaStream; width: number; height: number } | null>(null);
   const [flashes, setFlashes] = useState(0);
+  // Photos still being encoded; Add waits for them.
+  const [pending, setPending] = useState(0);
+  // Bumped on every close, so an encode finishing after it is not added to the next opening.
+  const session = useRef(0);
+  const greeted = useRef(false);
 
   useEffect(() => {
     if (video.current) video.current.srcObject = stream;
@@ -71,6 +76,13 @@ export default function CameraDialog({ open, onClose, onAdd }: CameraDialogProps
   const mirrored = facing !== 'environment';
   const live = stream !== null && frame?.stream === stream;
 
+  // The shutter takes focus once the preview is live, once per opening.
+  useEffect(() => {
+    if (!live || greeted.current) return;
+    greeted.current = true;
+    shutter.current?.focus();
+  }, [live]);
+
   const take = () => {
     const el = video.current;
     if (!el || !live) return;
@@ -79,10 +91,14 @@ export default function CameraDialog({ open, onClose, onAdd }: CameraDialogProps
     canvas.height = el.videoHeight;
     canvas.getContext('2d')?.drawImage(el, 0, 0, canvas.width, canvas.height);
     const takenAt = Date.now();
+    const opening = session.current;
+    setPending((n) => n + 1);
     // Each tap draws its own frame at once; encoding finishes in the background, so quick taps all count.
     setFlashes((n) => n + 1);
     canvas.toBlob(
       (blob) => {
+        if (opening !== session.current) return;
+        setPending((n) => n - 1);
         if (!blob) return;
         setPhotos((taken) => [
           ...taken,
@@ -116,6 +132,9 @@ export default function CameraDialog({ open, onClose, onAdd }: CameraDialogProps
       discardPrompt={count > 0 ? `Discard ${plural(count)}?` : null}
       onClose={onClose}
       onExited={() => {
+        session.current++;
+        greeted.current = false;
+        setPending(0);
         setPhotos([]);
         setFrame(null);
         setFlashes(0);
@@ -123,7 +142,7 @@ export default function CameraDialog({ open, onClose, onAdd }: CameraDialogProps
       actions={
         <Button
           variant="contained"
-          disabled={count === 0}
+          disabled={count === 0 || pending > 0}
           onClick={() => {
             onAdd(photos.map((p) => p.file));
             onClose();

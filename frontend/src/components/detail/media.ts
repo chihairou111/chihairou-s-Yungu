@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { chinaFileStamp } from '@/lib/time';
 
-/** What the camera and recorder say when the browser will not give them a device (plain HTTP, no API, refused). */
+/** What the camera and recorder say when the browser offers no devices at all (plain HTTP, no API). */
 export const MEDIA_UNAVAILABLE = 'Camera and microphone need HTTPS — available once the app is served securely.';
 
 /** Camera and microphone exist only in a secure context (HTTPS or localhost) with `getUserMedia`. */
@@ -50,9 +50,9 @@ export type MediaAccess =
   | { status: 'off' }
   | { status: 'starting' }
   | { status: 'ready'; stream: MediaStream }
-  /** Insecure context, no API, or permission refused: the HTTPS message. */
+  /** Insecure context or no API: the HTTPS message. */
   | { status: 'unavailable' }
-  /** The device is missing or busy. */
+  /** Refused, missing, busy or disconnected: says which. */
   | { status: 'failed'; message: string };
 
 const CONSTRAINTS: Record<MediaDevice, MediaStreamConstraints> = {
@@ -64,16 +64,21 @@ const CONSTRAINTS: Record<MediaDevice, MediaStreamConstraints> = {
 function accessFailure(error: unknown, device: MediaDevice): MediaAccess {
   const name = error instanceof DOMException || error instanceof Error ? error.name : '';
   const noun = device === 'camera' ? 'camera' : 'microphone';
+  if (name === 'NotAllowedError' || name === 'SecurityError') {
+    const Noun = device === 'camera' ? 'Camera' : 'Microphone';
+    return { status: 'failed', message: `${Noun} access is blocked. Allow it in your browser’s site settings, then try again.` };
+  }
   if (name === 'NotFoundError' || name === 'OverconstrainedError') return { status: 'failed', message: `No ${noun} found on this device.` };
   if (name === 'NotReadableError' || name === 'AbortError') {
     return { status: 'failed', message: `Couldn’t start the ${noun}. Another app may be using it — close it and try again.` };
   }
-  return { status: 'unavailable' };
+  return { status: 'failed', message: `Couldn’t start the ${noun}.` };
 }
 
 /**
  * Asks for the camera or microphone while `active`, and stops every track as soon as it is not (the
- * dialog closed, or unmounted) — also a stream the browser grants only after that.
+ * dialog closed, or unmounted) — also a stream the browser grants only after that. A track that ends on
+ * its own (device unplugged) turns the result into a failure.
  */
 export function useMediaStream(device: MediaDevice, active: boolean): MediaAccess {
   const [result, setResult] = useState<{ request: object; access: MediaAccess } | null>(null);
@@ -86,11 +91,16 @@ export function useMediaStream(device: MediaDevice, active: boolean): MediaAcces
     if (!request || !mediaAvailable()) return;
     let cancelled = false;
     let granted: MediaStream | null = null;
+    const onEnded = () => {
+      if (!cancelled) setResult({ request, access: { status: 'failed', message: `The ${device} was disconnected.` } });
+    };
     navigator.mediaDevices.getUserMedia(CONSTRAINTS[device]).then(
       (stream) => {
         if (cancelled) return stopStream(stream);
         granted = stream;
         setResult({ request, access: { status: 'ready', stream } });
+        // Unplugged, or revoked from the browser's own controls: say so instead of a frozen preview.
+        for (const track of stream.getTracks()) track.addEventListener('ended', onEnded);
       },
       (error: unknown) => {
         if (!cancelled) setResult({ request, access: accessFailure(error, device) });
@@ -98,7 +108,9 @@ export function useMediaStream(device: MediaDevice, active: boolean): MediaAcces
     );
     return () => {
       cancelled = true;
-      if (granted) stopStream(granted);
+      if (!granted) return;
+      for (const track of granted.getTracks()) track.removeEventListener('ended', onEnded);
+      stopStream(granted);
     };
   }, [device, request]);
 

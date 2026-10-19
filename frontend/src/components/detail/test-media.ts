@@ -6,10 +6,22 @@ export interface FakeTrack {
   kind: 'audio' | 'video';
   stop: ReturnType<typeof vi.fn>;
   getSettings: () => MediaTrackSettings;
+  addEventListener: (type: string, listener: () => void) => void;
+  removeEventListener: (type: string, listener: () => void) => void;
+  /** The device going away (fires 'ended'). */
+  end: () => void;
 }
 
 export function fakeStream(kind: 'audio' | 'video', settings: MediaTrackSettings = {}) {
-  const track: FakeTrack = { kind, stop: vi.fn(), getSettings: () => settings };
+  const ended = new Set<() => void>();
+  const track: FakeTrack = {
+    kind,
+    stop: vi.fn(),
+    getSettings: () => settings,
+    addEventListener: (type, listener) => type === 'ended' && ended.add(listener),
+    removeEventListener: (type, listener) => ended.delete(listener),
+    end: () => ended.forEach((listener) => listener()),
+  };
   const stream = {
     getTracks: () => [track],
     getVideoTracks: () => (kind === 'video' ? [track] : []),
@@ -34,9 +46,19 @@ export function denied(): Promise<MediaStream> {
   return Promise.reject(new DOMException('Permission denied', 'NotAllowedError'));
 }
 
-/** A MediaRecorder that hands back one chunk of its own type when stopped. */
+/**
+ * A MediaRecorder that hands back one chunk of its own type when stopped. Like a browser, it is
+ * `inactive` at once but delivers the data and `stop` later: on the next task, or when the test calls
+ * `finishStop()` if `holdStop` is set.
+ */
 export class FakeMediaRecorder {
   static supported = true;
+  static holdStop = false;
+  /** Make start() throw, as a browser that cannot record this stream does. */
+  static failStart = false;
+  /** Deliver no data on stop. */
+  static empty = false;
+  finishStop: (() => void) | null = null;
   static instances: FakeMediaRecorder[] = [];
   static isTypeSupported = (type: string) => FakeMediaRecorder.supported && type === 'audio/webm';
   /** What the browser picks when no type is asked for. */
@@ -56,6 +78,7 @@ export class FakeMediaRecorder {
   }
 
   start() {
+    if (FakeMediaRecorder.failStart) throw new DOMException('Not supported', 'NotSupportedError');
     this.state = 'recording';
   }
   pause() {
@@ -67,14 +90,21 @@ export class FakeMediaRecorder {
   stop() {
     if (this.state === 'inactive') return;
     this.state = 'inactive';
-    this.ondataavailable?.({ data: new Blob(['audio-bytes'], { type: this.mimeType }) } as BlobEvent);
-    this.onstop?.();
+    this.finishStop = () => {
+      this.finishStop = null;
+      if (!FakeMediaRecorder.empty) this.ondataavailable?.({ data: new Blob(['audio-bytes'], { type: this.mimeType }) } as BlobEvent);
+      this.onstop?.();
+    };
+    if (!FakeMediaRecorder.holdStop) setTimeout(() => this.finishStop?.(), 0);
   }
 }
 
 export function installRecorder() {
   FakeMediaRecorder.instances = [];
   FakeMediaRecorder.supported = true;
+  FakeMediaRecorder.holdStop = false;
+  FakeMediaRecorder.failStart = false;
+  FakeMediaRecorder.empty = false;
   vi.stubGlobal('MediaRecorder', FakeMediaRecorder);
 }
 

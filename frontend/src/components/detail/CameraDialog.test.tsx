@@ -59,11 +59,66 @@ describe('CameraDialog', () => {
     expect(screen.getByText(MEDIA_UNAVAILABLE)).toBeInTheDocument();
   });
 
-  it('shows the HTTPS message when permission is refused', async () => {
+  it('says the camera is blocked (not the HTTPS message) when permission is refused', async () => {
     installMedia(denied);
     renderCamera();
-    expect(await screen.findByText(MEDIA_UNAVAILABLE)).toBeInTheDocument();
+    expect(await screen.findByText('Camera access is blocked. Allow it in your browser’s site settings, then try again.')).toBeInTheDocument();
+    expect(screen.queryByText(MEDIA_UNAVAILABLE)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Take photo' })).not.toBeInTheDocument();
+  });
+
+  it('names an unexpected failure plainly', async () => {
+    installMedia(() => Promise.reject(new Error('boom')));
+    renderCamera();
+    expect(await screen.findByText('Couldn’t start the camera.')).toBeInTheDocument();
+  });
+
+  it('says so when the camera is unplugged', async () => {
+    const { stream, track } = fakeStream('video');
+    installMedia(() => Promise.resolve(stream));
+    renderCamera();
+    await previewReady();
+    act(() => track.end());
+    expect(await screen.findByText('The camera was disconnected.')).toBeInTheDocument();
+  });
+
+  it('puts focus on the shutter once the preview is live', async () => {
+    installMedia(() => Promise.resolve(fakeStream('video').stream));
+    renderCamera();
+    await previewReady();
+    expect(screen.getByRole('button', { name: 'Take photo' })).toHaveFocus();
+  });
+
+  it('keeps Add disabled while a photo is still being saved, and drops one that finishes after closing', async () => {
+    const user = userEvent.setup();
+    const encodes: (() => void)[] = [];
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(function (cb: BlobCallback, type?: string) {
+      encodes.push(() => cb(new Blob(['jpeg-bytes'], { type })));
+    });
+    installMedia(() => Promise.resolve(fakeStream('video').stream));
+    const { onAdd, setOpen } = renderCamera();
+    await previewReady();
+    const shutter = screen.getByRole('button', { name: 'Take photo' });
+    await user.click(shutter);
+    act(() => encodes.shift()!());
+    await user.click(shutter);
+    expect(screen.getByRole('button', { name: 'Add 1 photo' })).toBeDisabled();
+    act(() => encodes.shift()!());
+    await user.click(screen.getByRole('button', { name: 'Add 2 photos' }));
+    expect(onAdd.mock.calls[0][0]).toHaveLength(2);
+
+    // A photo still encoding when the dialog closes does not appear in the next opening.
+    setOpen(false);
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    setOpen(true);
+    await previewReady();
+    await user.click(screen.getByRole('button', { name: 'Take photo' }));
+    setOpen(false);
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    setOpen(true);
+    act(() => encodes.shift()!());
+    expect(await screen.findByRole('button', { name: 'Add photos' })).toBeDisabled();
+    expect(screen.queryByRole('list', { name: 'Photos taken' })).not.toBeInTheDocument();
   });
 
   it('asks for the rear camera where there is one', async () => {

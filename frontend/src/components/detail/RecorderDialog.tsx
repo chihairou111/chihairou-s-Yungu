@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
@@ -22,13 +22,14 @@ interface RecorderDialogProps {
   onAdd: (file: File) => void;
 }
 
-type Phase = 'ready' | 'recording' | 'paused' | 'done';
+/** `stopping`: Stop was pressed and the recorder is still handing over its data; the clock is frozen. */
+type Phase = 'ready' | 'recording' | 'paused' | 'stopping' | 'done';
 
 /** Asked for first; a browser that cannot record it uses its own format (and the file name follows). */
 const PREFERRED_TYPE = 'audio/webm';
 const TICK_MS = 250;
 
-const STATUS: Record<Phase, string> = { ready: 'Ready', recording: 'Recording', paused: 'Paused', done: 'Recorded' };
+const STATUS: Record<Phase, string> = { ready: 'Ready', recording: 'Recording', paused: 'Paused', stopping: 'Finishing…', done: 'Recorded' };
 
 /**
  * The built-in recorder: Record, Pause / Resume, Stop, then play the take back and add it as one audio
@@ -41,11 +42,31 @@ export default function RecorderDialog({ open, onClose, onAdd }: RecorderDialogP
   const [phase, setPhase] = useState<Phase>('ready');
   const [elapsed, setElapsed] = useState(0);
   const [take, setTake] = useState<File | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
   // Recorded time before the current stretch, and when the current stretch began.
   const clock = useRef({ before: 0, since: 0 });
   const meter = useRef<HTMLDivElement>(null);
   const startedAt = useRef(0);
+  const recordButton = useRef<HTMLButtonElement>(null);
+  const toggleButton = useRef<HTMLButtonElement>(null);
+  const addButton = useRef<HTMLButtonElement>(null);
+  // The control that takes focus once the next phase has rendered (the one pressed may be gone or disabled).
+  const focusNext = useRef<RefObject<HTMLButtonElement | null> | null>(null);
+  // Record takes focus once the microphone is ready, once per opening.
+  const greeted = useRef(false);
+
+  useEffect(() => {
+    const target = focusNext.current;
+    focusNext.current = null;
+    target?.current?.focus();
+  }, [phase]);
+
+  useEffect(() => {
+    if (!stream || greeted.current) return;
+    greeted.current = true;
+    recordButton.current?.focus();
+  }, [stream]);
 
   // Closing (or losing the stream) throws away a recording in progress.
   useEffect(() => {
@@ -53,6 +74,7 @@ export default function RecorderDialog({ open, onClose, onAdd }: RecorderDialogP
       const current = recorder.current;
       recorder.current = null;
       if (current && current.state !== 'inactive') {
+        current.ondataavailable = null;
         current.onstop = null;
         current.stop();
       }
@@ -66,7 +88,7 @@ export default function RecorderDialog({ open, onClose, onAdd }: RecorderDialogP
   }, [phase]);
 
   // Level meter: the loudness of the microphone, drawn straight onto the bar without re-rendering.
-  const listening = stream !== null && phase !== 'done';
+  const listening = stream !== null && (phase === 'ready' || phase === 'recording' || phase === 'paused');
   useEffect(() => {
     if (!listening || !stream || typeof AudioContext === 'undefined') return;
     const context = new AudioContext();
@@ -94,53 +116,74 @@ export default function RecorderDialog({ open, onClose, onAdd }: RecorderDialogP
   const record = () => {
     if (!stream) return;
     const chunks: Blob[] = [];
-    const next =
-      typeof MediaRecorder.isTypeSupported === 'function' && MediaRecorder.isTypeSupported(PREFERRED_TYPE)
-        ? new MediaRecorder(stream, { mimeType: PREFERRED_TYPE })
-        : new MediaRecorder(stream);
-    next.ondataavailable = (e) => {
-      if (e.data.size > 0) chunks.push(e.data);
-    };
-    next.onstop = () => {
-      const { type, extension } = audioFileType(next.mimeType || chunks[0]?.type || '');
-      setTake(new File(chunks, recordingName(startedAt.current, extension), { type }));
-      setPhase('done');
-    };
+    let next: MediaRecorder;
+    try {
+      next =
+        typeof MediaRecorder.isTypeSupported === 'function' && MediaRecorder.isTypeSupported(PREFERRED_TYPE)
+          ? new MediaRecorder(stream, { mimeType: PREFERRED_TYPE })
+          : new MediaRecorder(stream);
+      next.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+      next.onstop = () => {
+        // The clock was frozen at Stop; the data arrives only now.
+        setElapsed(clock.current.before);
+        if (chunks.length === 0) {
+          setProblem('Nothing was recorded. Try again.');
+          focusNext.current = recordButton;
+          setPhase('ready');
+          return;
+        }
+        const { type, extension } = audioFileType(next.mimeType || chunks[0].type || '');
+        setTake(new File(chunks, recordingName(startedAt.current, extension), { type }));
+        focusNext.current = addButton;
+        setPhase('done');
+      };
+      next.start(1000);
+    } catch {
+      setProblem('Couldn’t start recording in this browser.');
+      return;
+    }
     recorder.current = next;
     startedAt.current = Date.now();
     clock.current = { before: 0, since: Date.now() };
+    setProblem(null);
     setElapsed(0);
-    next.start(1000);
+    focusNext.current = toggleButton;
     setPhase('recording');
   };
 
-  const pause = () => {
-    recorder.current?.pause();
-    clock.current.before += Date.now() - clock.current.since;
-    setElapsed(clock.current.before);
-    setPhase('paused');
-  };
-
-  const resume = () => {
-    recorder.current?.resume();
-    clock.current.since = Date.now();
-    setPhase('recording');
+  const togglePause = () => {
+    if (phase === 'recording') {
+      recorder.current?.pause();
+      clock.current.before += Date.now() - clock.current.since;
+      setElapsed(clock.current.before);
+      setPhase('paused');
+    } else if (phase === 'paused') {
+      recorder.current?.resume();
+      clock.current.since = Date.now();
+      setPhase('recording');
+    }
   };
 
   const stop = () => {
+    if (phase !== 'recording' && phase !== 'paused') return;
     if (phase === 'recording') clock.current.before += Date.now() - clock.current.since;
     setElapsed(clock.current.before);
+    setPhase('stopping');
     recorder.current?.stop();
     recorder.current = null;
   };
 
   const reset = () => {
     setTake(null);
+    setProblem(null);
     setElapsed(0);
     setPhase('ready');
   };
 
   const dirty = phase !== 'ready';
+  const running = phase === 'recording' || phase === 'paused' || phase === 'stopping';
 
   return (
     <MediaDialog
@@ -151,9 +194,13 @@ export default function RecorderDialog({ open, onClose, onAdd }: RecorderDialogP
       access={access}
       discardPrompt={dirty ? 'Discard this recording?' : null}
       onClose={onClose}
-      onExited={reset}
+      onExited={() => {
+        greeted.current = false;
+        reset();
+      }}
       actions={
         <Button
+          ref={addButton}
           variant="contained"
           disabled={take === null}
           onClick={() => {
@@ -218,9 +265,16 @@ export default function RecorderDialog({ open, onClose, onAdd }: RecorderDialogP
           </Box>
         )}
 
+        {problem && (
+          <Typography role="alert" variant="body2" sx={{ color: 'error.dark', textAlign: 'center' }}>
+            {problem}
+          </Typography>
+        )}
+
         <Stack direction="row" sx={{ gap: 1, flexWrap: 'wrap', justifyContent: 'center', minHeight: 40 }}>
           {phase === 'ready' && (
             <Button
+              ref={recordButton}
               variant="contained"
               color="error"
               size="large"
@@ -231,23 +285,32 @@ export default function RecorderDialog({ open, onClose, onAdd }: RecorderDialogP
               Record
             </Button>
           )}
-          {phase === 'recording' && (
-            <Button variant="outlined" size="large" startIcon={<PauseRounded />} onClick={pause}>
-              Pause
-            </Button>
-          )}
-          {phase === 'paused' && (
-            <Button variant="outlined" size="large" startIcon={<PlayArrow />} onClick={resume}>
-              Resume
-            </Button>
-          )}
-          {(phase === 'recording' || phase === 'paused') && (
-            <Button variant="contained" size="large" startIcon={<StopRounded />} onClick={stop}>
-              Stop
-            </Button>
+          {running && (
+            <>
+              {/* One element for Pause and Resume, so focus stays on it as it flips. */}
+              <Button
+                ref={toggleButton}
+                variant="outlined"
+                size="large"
+                startIcon={phase === 'paused' ? <PlayArrow /> : <PauseRounded />}
+                onClick={togglePause}
+                disabled={phase === 'stopping'}
+              >
+                {phase === 'paused' ? 'Resume' : 'Pause'}
+              </Button>
+              <Button variant="contained" size="large" startIcon={<StopRounded />} onClick={stop} disabled={phase === 'stopping'}>
+                Stop
+              </Button>
+            </>
           )}
           {phase === 'done' && (
-            <Button startIcon={<Replay />} onClick={reset}>
+            <Button
+              startIcon={<Replay />}
+              onClick={() => {
+                focusNext.current = recordButton;
+                reset();
+              }}
+            >
               Record again
             </Button>
           )}

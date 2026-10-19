@@ -25,6 +25,14 @@ function renderRecorder() {
   return { ...view, onClose, onAdd, close: () => view.rerender(<RecorderDialog open={false} onClose={onClose} onAdd={onAdd} />) };
 }
 
+async function addEnabled() {
+  return waitFor(() => {
+    const button = screen.getByRole('button', { name: 'Add recording' });
+    expect(button).toBeEnabled();
+    return button;
+  });
+}
+
 async function ready() {
   return waitFor(() => {
     const button = screen.getByRole('button', { name: 'Record' });
@@ -44,10 +52,21 @@ describe('RecorderDialog', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('shows the HTTPS message when the microphone is refused', async () => {
+  it('says the microphone is blocked (not the HTTPS message) when access is refused', async () => {
     installMedia(denied);
     renderRecorder();
-    expect(await screen.findByText(MEDIA_UNAVAILABLE)).toBeInTheDocument();
+    expect(await screen.findByText('Microphone access is blocked. Allow it in your browser’s site settings, then try again.')).toBeInTheDocument();
+    expect(screen.queryByText(MEDIA_UNAVAILABLE)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
+  });
+
+  it('says so when the microphone is unplugged', async () => {
+    const { stream, track } = fakeStream('audio');
+    installMedia(() => Promise.resolve(stream));
+    renderRecorder();
+    await ready();
+    act(() => track.end());
+    expect(await screen.findByText('The microphone was disconnected.')).toBeInTheDocument();
   });
 
   it('records, pauses, resumes, stops, plays back and adds one audio/webm file', async () => {
@@ -68,8 +87,8 @@ describe('RecorderDialog', () => {
     expect(recorder.state).toBe('recording');
     await user.click(screen.getByRole('button', { name: 'Stop' }));
 
-    expect(document.querySelector('audio[controls]')).toHaveAttribute('src');
-    await user.click(screen.getByRole('button', { name: 'Add recording' }));
+    await waitFor(() => expect(document.querySelector('audio[controls]')).toHaveAttribute('src'));
+    await user.click(await addEnabled());
     expect(onAdd).toHaveBeenCalledOnce();
     const file: File = onAdd.mock.calls[0][0];
     expect(file).toBeInstanceOf(File);
@@ -100,7 +119,7 @@ describe('RecorderDialog', () => {
     const { onAdd } = renderRecorder();
     await user.click(await ready());
     await user.click(screen.getByRole('button', { name: 'Stop' }));
-    await user.click(screen.getByRole('button', { name: 'Add recording' }));
+    await user.click(await addEnabled());
     const file: File = onAdd.mock.calls[0][0];
     expect(file.type).toBe('audio/ogg');
     expect(file.name).toMatch(/\.ogg$/);
@@ -112,7 +131,7 @@ describe('RecorderDialog', () => {
     renderRecorder();
     await user.click(await ready());
     await user.click(screen.getByRole('button', { name: 'Stop' }));
-    await user.click(screen.getByRole('button', { name: 'Record again' }));
+    await user.click(await screen.findByRole('button', { name: 'Record again' }));
     expect(document.querySelector('audio')).toBeNull();
     expect(screen.getByRole('button', { name: 'Add recording' })).toBeDisabled();
     expect(await ready()).toBeInTheDocument();
@@ -150,5 +169,76 @@ describe('RecorderDialog', () => {
     close();
     await act(async () => grant(stream));
     expect(track.stop).toHaveBeenCalled();
+  });
+
+  it('freezes the clock at Stop while the recorder hands over its data, and ignores a second Stop', async () => {
+    const user = userEvent.setup();
+    let now = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    installMedia(() => Promise.resolve(fakeStream('audio').stream));
+    FakeMediaRecorder.holdStop = true;
+    renderRecorder();
+    await user.click(await ready());
+    now += 5_000;
+    await screen.findByText('00:05', undefined, { timeout: 2000 });
+    const stopButton = screen.getByRole('button', { name: 'Stop' });
+    await user.click(stopButton);
+    expect(screen.getByText('Finishing…')).toBeInTheDocument();
+    expect(stopButton).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeDisabled();
+    now += 3_000;
+    await act(() => new Promise((r) => setTimeout(r, 400)));
+    expect(screen.getByText('00:05')).toBeInTheDocument();
+    await act(async () => FakeMediaRecorder.instances[0].finishStop?.());
+    expect(screen.getByText('00:05')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add recording' })).toBeEnabled();
+  });
+
+  it('keyboard: focus starts on Record and follows Record → Pause → Resume → Stop → Add, and Record again', async () => {
+    const user = userEvent.setup();
+    installMedia(() => Promise.resolve(fakeStream('audio').stream));
+    renderRecorder();
+    const recordButton = await ready();
+    await waitFor(() => expect(recordButton).toHaveFocus());
+
+    await user.keyboard('{Enter}');
+    const toggle = screen.getByRole('button', { name: 'Pause' });
+    expect(toggle).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByRole('button', { name: 'Resume' })).toBe(toggle);
+    expect(toggle).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(toggle).toHaveAccessibleName('Pause');
+    expect(toggle).toHaveFocus();
+
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Stop' })).toHaveFocus();
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add recording' })).toHaveFocus());
+
+    await user.click(screen.getByRole('button', { name: 'Record again' }));
+    expect(screen.getByRole('button', { name: 'Record' })).toHaveFocus();
+  });
+
+  it('says so when the browser cannot start recording', async () => {
+    const user = userEvent.setup();
+    installMedia(() => Promise.resolve(fakeStream('audio').stream));
+    FakeMediaRecorder.failStart = true;
+    renderRecorder();
+    await user.click(await ready());
+    expect(screen.getByRole('alert')).toHaveTextContent('Couldn’t start recording in this browser.');
+    expect(screen.getByRole('button', { name: 'Record' })).toBeInTheDocument();
+  });
+
+  it('adds nothing when the recorder delivered no data', async () => {
+    const user = userEvent.setup();
+    installMedia(() => Promise.resolve(fakeStream('audio').stream));
+    FakeMediaRecorder.empty = true;
+    renderRecorder();
+    await user.click(await ready());
+    await user.click(screen.getByRole('button', { name: 'Stop' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Nothing was recorded. Try again.');
+    expect(screen.getByRole('button', { name: 'Add recording' })).toBeDisabled();
+    expect(document.querySelector('audio')).toBeNull();
   });
 });
