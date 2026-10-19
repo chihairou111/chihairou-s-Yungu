@@ -41,4 +41,19 @@ describe('GET /api/files/[id]', () => {
     const res = await GET(new Request('http://localhost/x?download=1'), ctx({ id: f.id }));
     expect(res.headers.get('content-disposition')).toMatch(/^attachment; filename\*=UTF-8/);
   });
+  it('serves an html upload as a sandboxed octet-stream attachment', async () => {
+    const f = await data.uploadFile('x.html', 'text/html', new TextEncoder().encode('<script>1</script>'));
+    const res = await GET(new Request('http://localhost/x'), ctx({ id: f.id }));
+    expect(res.headers.get('content-type')).toBe('application/octet-stream');
+    expect(res.headers.get('content-disposition')).toMatch(/^attachment;/);
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res.headers.get('content-security-policy')).toContain('sandbox');
+  });
+  it('still serves a pdf inline with nosniff', async () => {
+    const f = await data.uploadFile('a.pdf', 'application/pdf', new Uint8Array([1]));
+    const res = await GET(new Request('http://localhost/x'), ctx({ id: f.id }));
+    expect(res.headers.get('content-type')).toBe('application/pdf');
+    expect(res.headers.get('content-disposition')).toMatch(/^inline;/);
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+  });
 });

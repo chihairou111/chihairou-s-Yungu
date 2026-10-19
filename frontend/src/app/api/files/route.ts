@@ -17,5 +17,5 @@ export async function POST(request: Request) {
   if (file.size === 0) return NextResponse.json({ error: 'That file is empty.' }, { status: 400 });
   if (file.size > MAX_BYTES) return NextResponse.json({ error: 'Files up to 50 MB.' }, { status: 413 });
   const bytes = new Uint8Array(await file.arrayBuffer());
-  return NextResponse.json(await data.uploadFile(file.name, file.type || 'application/octet-stream', bytes));
+  return NextResponse.json(await data.uploadFile(file.name, /^[A-Za-z0-9]+\/[A-Za-z0-9+.-]+$/.test(file.type) ? file.type : 'application/octet-stream', bytes));
 }

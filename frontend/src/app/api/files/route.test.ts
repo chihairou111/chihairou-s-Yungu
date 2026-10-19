@@ -46,4 +46,9 @@ describe('POST /api/files', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ name: '作业.txt', mime: 'text/plain', size: 5 });
   });
+  it('stores an invalid MIME type as application/octet-stream', async () => {
+    const res = await POST(upload(new File(['x'], 'a.txt', { type: 'text/plain\r\nX: y' })));
+    expect(res.status).toBe(200);
+    expect((await res.json()).mime).toBe('application/octet-stream');
+  });
 });
