@@ -1,0 +1,21 @@
+[Unit]
+Description=Yungu LMS API service (FastAPI, local only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/yungu-lms/api
+Environment=YUNGU_STATE_DIR=/var/lib/yungu-lms
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/root/yungu-lms/api/.venv/bin/uvicorn service.app:app --host 127.0.0.1 --port 8100
+Restart=on-failure
+RestartSec=3
+UMask=0077
+StateDirectory=yungu-lms
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
