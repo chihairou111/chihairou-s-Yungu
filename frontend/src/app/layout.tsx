@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { cookies } from "next/headers";
 import { AppRouterCacheProvider } from "@mui/material-nextjs/v16-appRouter";
-import CssBaseline from "@mui/material/CssBaseline";
-import { ThemeProvider } from "@mui/material/styles";
-import theme from "@/theme";
+import StyleProvider from "@/components/StyleProvider";
+import { STYLE_COOKIE, parseStyle } from "@/lib/style";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -21,15 +21,17 @@ export const metadata: Metadata = {
   description: "Assignments and timetable from task.yungu.org.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+// The theme follows the `yl_style` cookie, so every page renders per request with the stored
+// style already applied (no flash of the other style on reload).
+export const instant = false;
+
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  const style = parseStyle((await cookies()).get(STYLE_COOKIE)?.value);
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body>
         <AppRouterCacheProvider>
-          <ThemeProvider theme={theme}>
-            <CssBaseline />
-            {children}
-          </ThemeProvider>
+          <StyleProvider initialStyle={style}>{children}</StyleProvider>
         </AppRouterCacheProvider>
       </body>
     </html>

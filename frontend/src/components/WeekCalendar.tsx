@@ -198,16 +198,16 @@ export default function WeekCalendar({ weekStart, events, courses, now }: WeekCa
                   </Box>{' '}
                   <Box
                     component="span"
-                    sx={{
+                    sx={(theme) => ({
                       minWidth: 30,
                       height: 30,
                       px: 0.5,
-                      borderRadius: 1,
+                      borderRadius: `${theme.yungu.shape.full}px`,
                       display: 'inline-flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       ...(isToday && { bgcolor: 'primary.main', color: 'primary.contrastText' }),
-                    }}
+                    })}
                   >
                     {date}
                   </Box>
@@ -296,10 +296,10 @@ function ClassBlock({ placed: { event, lane, lanes }, color, weekStart, firstHou
       component="li"
       title={`${event.name}\n${meta}`}
       style={geometry}
-      sx={{
+      sx={(theme) => ({
         bgcolor: 'var(--course-bg)',
         color: 'var(--course-fg)',
-        borderRadius: 1,
+        borderRadius: `${theme.yungu.shape.small}px`,
         [MD_DOWN]: { px: 2, py: 1.25 },
         [MD_UP]: {
           position: 'absolute',
@@ -312,7 +312,7 @@ function ClassBlock({ placed: { event, lane, lanes }, color, weekStart, firstHou
           overflow: 'hidden',
           '& > *': { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
         },
-      }}
+      })}
     >
       <Typography
         variant="body2"

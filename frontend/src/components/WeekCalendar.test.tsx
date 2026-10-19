@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within } from './test-render';
 import { describe, expect, it, vi } from 'vitest';
 import { COURSE_COLORS } from '@/lib/colors';
 import { data } from '@/lib/data';

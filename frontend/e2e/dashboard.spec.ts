@@ -122,3 +122,49 @@ test.describe('phone width', () => {
     await expectNoHorizontalScroll(page);
   });
 });
+
+test.describe('style switcher', () => {
+  const radius = (page: Page, name: string) =>
+    page.getByRole('article', { name }).evaluate((el) => getComputedStyle(el).borderTopLeftRadius);
+
+  async function chooseStyle(page: Page, label: string) {
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByRole('menuitemradio', { name: label }).click();
+  }
+
+  test('the gear switches between rounded and classic at once, and the choice survives a reload', async ({ page }) => {
+    await signIn(page);
+    await page.goto('/assignments?view=course');
+    // A new visitor gets the rounded Material 3 style: 12px course cards.
+    await expect.poll(() => radius(page, 'Chinese I')).toBe('12px');
+
+    await chooseStyle(page, 'Classic (Material 2)');
+    await expect.poll(() => radius(page, 'Chinese I')).toBe('4px');
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await expect(page.getByRole('menuitemradio', { name: 'Classic (Material 2)' })).toHaveAttribute('aria-checked', 'true');
+    await page.keyboard.press('Escape');
+
+    await page.reload();
+    await expect(page.getByRole('article', { name: 'Chinese I' })).toBeVisible();
+    expect(await radius(page, 'Chinese I')).toBe('4px');
+    const cookie = (await page.context().cookies()).find((c) => c.name === 'yl_style');
+    expect(cookie?.value).toBe('classic');
+
+    await chooseStyle(page, 'Rounded (Material 3)');
+    await expect.poll(() => radius(page, 'Chinese I')).toBe('12px');
+    await page.reload();
+    await expect(page.getByRole('article', { name: 'Chinese I' })).toBeVisible();
+    expect(await radius(page, 'Chinese I')).toBe('12px');
+  });
+
+  test('the sign-in page renders in the stored style on first paint', async ({ page, context, baseURL }) => {
+    const card = () => page.locator('main .MuiPaper-root').first();
+    // JavaScript off: what the server rendered is what shows, so the style cannot come from a client-side switch.
+    await page.route('**/*.js', (route) => route.abort());
+    await page.goto('/login');
+    expect(await card().evaluate((el) => getComputedStyle(el).borderTopLeftRadius)).toBe('28px');
+    await context.addCookies([{ name: 'yl_style', value: 'classic', url: baseURL! }]);
+    await page.goto('/login');
+    expect(await card().evaluate((el) => getComputedStyle(el).borderTopLeftRadius)).toBe('4px');
+  });
+});

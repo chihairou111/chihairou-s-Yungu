@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen } from './test-render';
 import { describe, expect, it } from 'vitest';
 import SubmittedList from './SubmittedList';
 import { DAY, NOW, submitted } from './test-fixtures';

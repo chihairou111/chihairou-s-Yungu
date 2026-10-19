@@ -1,7 +1,8 @@
 'use client';
 import { createTheme } from '@mui/material/styles';
+import type { YunguTokens } from './tokens';
 
-// Light Material theme with a blue accent. Every main color passes WCAG AA
+// Classic style: the Material 2 look. Light Material theme with a blue accent. Every main color passes WCAG AA
 // (>= 4.5:1) as text on both white surfaces and the page background.
 // The three assignment priorities map to error (Overdue), warning (Nearly
 // overdue) and primary (Upcoming).
@@ -60,5 +61,49 @@ const theme = createTheme({
     },
   },
 });
+
+const tokens: YunguTokens = {
+  style: 'classic',
+  // MD2 has one small corner for everything; the M3 names keep components style-agnostic.
+  shape: { extraSmall: 4, small: 4, medium: 4, large: 4, extraLarge: 4, full: 4 },
+  // Nearest classic equivalents of the M3 roles (white surfaces on a cool grey page).
+  color: {
+    surface: '#f5f7fa',
+    surfaceContainerLowest: '#ffffff',
+    surfaceContainerLow: '#ffffff',
+    surfaceContainer: '#ffffff',
+    surfaceContainerHigh: '#ffffff',
+    surfaceContainerHighest: '#ffffff',
+    onSurface: '#1b2330',
+    onSurfaceVariant: '#5f6b7a',
+    outline: '#5f6b7a',
+    outlineVariant: '#e3e8ef',
+    primaryContainer: '#e8f0fb',
+    onPrimaryContainer: '#0d4a94',
+    secondaryContainer: '#e8f0fb',
+    onSecondaryContainer: '#0d4a94',
+  },
+  // Floating, elevated rail; the active item is filled with the primary colour.
+  rail: {
+    width: 56,
+    gap: 16,
+    expandedWidth: 188,
+    pad: 6,
+    itemHeight: 44,
+    bg: 'background.paper',
+    shadow: theme.shadows[3],
+    expandedShadow: theme.shadows[8],
+    fg: 'text.secondary',
+    hoverBg: 'primary.light',
+    hoverFg: 'primary.main',
+    activeBg: 'primary.main',
+    activeFg: 'primary.contrastText',
+    activeHoverBg: 'primary.dark',
+    activeFocus: { outlineColor: theme.palette.primary.contrastText, outlineOffset: -4 },
+  },
+  segmentedCheck: false,
+  loginCard: { radius: 4, shadow: '0 1px 2px rgba(16, 24, 40, 0.04), 0 12px 32px rgba(16, 24, 40, 0.06)' },
+};
+theme.yungu = tokens;
 
 export default theme;

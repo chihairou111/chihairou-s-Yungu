@@ -12,12 +12,16 @@ import MenuList from '@mui/material/MenuList';
 import Popover from '@mui/material/Popover';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
+import type { Theme } from '@mui/material/styles';
 import Logout from '@mui/icons-material/Logout';
 import { sectionFor } from './nav-items';
-import { RAIL_GAP, RAIL_WIDTH } from './NavRail';
+import { RAIL_EDGE_XS } from './NavRail';
+import SettingsMenu from './SettingsMenu';
 
 /** Left inset that keeps content and the title clear of the collapsed nav rail. */
-const CONTENT_INSET = { xs: `${8 + RAIL_WIDTH + 12}px`, sm: `${RAIL_GAP + RAIL_WIDTH + 24}px` };
+function contentInset({ yungu: { rail } }: Theme) {
+  return { xs: `${RAIL_EDGE_XS + rail.width + 12}px`, sm: `${rail.gap + rail.width + 24}px` };
+}
 
 /** "Bruce Zheng" -> "BZ"; "郑博" -> "郑"; blank -> "?". */
 export function initials(name: string): string {
@@ -33,7 +37,7 @@ interface AppShellProps {
   children: ReactNode;
 }
 
-/** White Material app bar (section title + account menu) over the page content. */
+/** Material app bar (section title, settings and account menus) over the page content. */
 export default function AppShell({ userName, children }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -59,10 +63,11 @@ export default function AppShell({ userName, children }: AppShellProps) {
   return (
     <Box sx={{ minHeight: '100dvh', bgcolor: 'background.default' }}>
       <AppBar position="sticky">
-        <Toolbar sx={{ pl: CONTENT_INSET, pr: { xs: 2, sm: 3 } }}>
+        <Toolbar sx={(theme) => ({ pl: contentInset(theme), pr: { xs: 2, sm: 3 } })}>
           <Typography variant="h1" sx={{ flexGrow: 1, minWidth: 0 }} noWrap>
             {title}
           </Typography>
+          <SettingsMenu />
           <IconButton
             id="account-button"
             aria-label={`Account: ${userName}`}
@@ -117,7 +122,7 @@ export default function AppShell({ userName, children }: AppShellProps) {
           </Popover>
         </Toolbar>
       </AppBar>
-      <Box component="main" sx={{ pl: CONTENT_INSET, pr: { xs: 2, sm: 3 }, pt: 2, pb: 3 }}>
+      <Box component="main" sx={(theme) => ({ pl: contentInset(theme), pr: { xs: 2, sm: 3 }, pt: 2, pb: 3 })}>
         {children}
       </Box>
     </Box>

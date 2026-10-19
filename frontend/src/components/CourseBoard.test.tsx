@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within } from './test-render';
 import { describe, expect, it } from 'vitest';
 import type { Course } from '@/lib/types';
 import CourseBoard from './CourseBoard';

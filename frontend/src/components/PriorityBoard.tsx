@@ -47,11 +47,11 @@ export default function PriorityBoard({ items, now }: PriorityBoardProps) {
               </Typography>
               <Box
                 component="span"
-                sx={{
+                sx={(theme) => ({
                   minWidth: 24,
                   height: 22,
                   px: 0.75,
-                  borderRadius: 1,
+                  borderRadius: `${theme.yungu.shape.full}px`,
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -59,7 +59,7 @@ export default function PriorityBoard({ items, now }: PriorityBoardProps) {
                   fontWeight: 600,
                   bgcolor: `${tone}.light`,
                   color: `${tone}.dark`,
-                }}
+                })}
               >
                 {list.length}
               </Box>

@@ -5,6 +5,8 @@ import Tab from '@mui/material/Tab';
 import Tabs from '@mui/material/Tabs';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
+import { useTheme } from '@mui/material/styles';
+import Check from '@mui/icons-material/Check';
 import type { Assignment, ClassEvent, Course } from '@/lib/types';
 import CourseBoard from './CourseBoard';
 import PriorityBoard from './PriorityBoard';
@@ -32,6 +34,9 @@ export default function AssignmentsView({ todo, submitted, courses, todayClasses
   const params = useSearchParams();
   const tab: TabKey = params.get('tab') === 'submitted' ? 'submitted' : 'todo';
   const view: ViewKey = params.get('view') === 'course' ? 'course' : 'priority';
+  // Material 3 segmented buttons mark the selected segment with a check.
+  const { segmentedCheck } = useTheme().yungu;
+  const check = (value: ViewKey) => (segmentedCheck && view === value ? <Check aria-hidden sx={{ fontSize: 18, mr: 1 }} /> : null);
 
   function go(nextTab: TabKey, nextView: ViewKey) {
     const query = new URLSearchParams();
@@ -73,9 +78,11 @@ export default function AssignmentsView({ todo, submitted, courses, todayClasses
               sx={{ mb: 3 }}
             >
               <ToggleButton value="priority" sx={{ px: 2 }}>
+                {check('priority')}
                 By priority
               </ToggleButton>
               <ToggleButton value="course" sx={{ px: 2 }}>
+                {check('course')}
                 By course
               </ToggleButton>
             </ToggleButtonGroup>

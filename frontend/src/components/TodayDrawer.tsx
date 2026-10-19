@@ -131,7 +131,7 @@ export default function TodayDrawer({ events }: TodayDrawerProps) {
             role: 'dialog',
             'aria-modal': true,
             'aria-labelledby': TITLE_ID,
-            sx: { width: 320, maxWidth: '100%', borderRadius: 0 },
+            sx: { width: 320, maxWidth: '100%' },
           },
         }}
       >
