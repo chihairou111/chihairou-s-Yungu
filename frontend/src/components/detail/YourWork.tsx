@@ -20,16 +20,14 @@ import PhotoCameraOutlined from '@mui/icons-material/PhotoCameraOutlined';
 import ScheduleOutlined from '@mui/icons-material/ScheduleOutlined';
 import { chinaDueLabel } from '@/lib/time';
 import type { FileRef } from '@/lib/types';
+import CameraDialog from './CameraDialog';
 import { FileKindIcon, fileCaption, formatBytes } from './FileThumb';
 import FileViewer from './FileViewer';
+import RecorderDialog from './RecorderDialog';
 import type { PendingUpload, WorkStatus } from './useWork';
 import { useWorkContext } from './WorkContext';
 
 interface YourWorkProps {
-  /** Opens the recorder (Task 8). */
-  onRecord?: () => void;
-  /** Opens the camera (Task 8). */
-  onCamera?: () => void;
   /** Switches the pop-up to the writing view. */
   onWrite: () => void;
   /** Where focus lands when the panel mounts (back from the writer): its Write button, or a new file's row. */
@@ -38,15 +36,14 @@ interface YourWorkProps {
 
 export type WorkFocus = { kind: 'write' } | { kind: 'file'; id: string };
 
-const noop = () => {};
-
 /**
  * The student's side of the assignment: status, the files added so far (each opens in the viewer and
  * can be removed), the four ways to add work (Record, Camera, Write, Upload) and Submit, which reads
- * Update once the work has been handed in. Files can also be dropped anywhere on the panel. The work
+ * Update once the work has been handed in. Record and Camera open their own small dialogs on top of the
+ * pop-up, which add what they made like an upload. Files can also be dropped anywhere on the panel. The work
  * itself lives in the `WorkProvider` above, so it survives a trip to the writer.
  */
-export default function YourWork({ onRecord = noop, onCamera = noop, onWrite, focusOnMount = null }: YourWorkProps) {
+export default function YourWork({ onWrite, focusOnMount = null }: YourWorkProps) {
   const work = useWorkContext();
   const input = useRef<HTMLInputElement>(null);
   const uploadButton = useRef<HTMLButtonElement>(null);
@@ -75,6 +72,7 @@ export default function YourWork({ onRecord = noop, onCamera = noop, onWrite, fo
   const [viewing, setViewing] = useState<number | null>(null);
   const [lastViewed, setLastViewed] = useState(0);
   const [dragging, setDragging] = useState(false);
+  const [capture, setCapture] = useState<'camera' | 'recorder' | null>(null);
 
   const open = (index: number) => {
     setViewing(index);
@@ -193,10 +191,10 @@ export default function YourWork({ onRecord = noop, onCamera = noop, onWrite, fo
       )}
 
       <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1, mt: 2.5 }}>
-        <AddButton icon={<MicNoneOutlined />} onClick={onRecord} disabled={work.submitting}>
+        <AddButton icon={<MicNoneOutlined />} onClick={() => setCapture('recorder')} disabled={work.submitting}>
           Record
         </AddButton>
-        <AddButton icon={<PhotoCameraOutlined />} onClick={onCamera} disabled={work.submitting}>
+        <AddButton icon={<PhotoCameraOutlined />} onClick={() => setCapture('camera')} disabled={work.submitting}>
           Camera
         </AddButton>
         <AddButton icon={<EditNoteOutlined />} onClick={onWrite} disabled={work.submitting} buttonRef={writeButton}>
@@ -238,6 +236,9 @@ export default function YourWork({ onRecord = noop, onCamera = noop, onWrite, fo
       >
         {work.submitting ? (submitted ? 'Updating…' : 'Submitting…') : submitted ? 'Update' : 'Submit'}
       </Button>
+
+      <CameraDialog open={capture === 'camera'} onClose={() => setCapture(null)} onAdd={(photos) => void work.addFiles(photos)} />
+      <RecorderDialog open={capture === 'recorder'} onClose={() => setCapture(null)} onAdd={(file) => void work.addFiles([file])} />
 
       <FileViewer
         files={work.files}

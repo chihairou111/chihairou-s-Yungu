@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AssignmentDetail, FileRef } from '@/lib/types';
 import { HOUR, NOW, todo } from '../test-fixtures';
 import { ApiError } from './api';
+import { MEDIA_UNAVAILABLE } from './media';
+import { fakeStream, installCanvas, installMedia, installObjectUrls, removeMedia } from './test-media';
 import { DetailContext } from './DetailContext';
 import { useWorkContext, WorkProvider } from './WorkContext';
 import YourWork from './YourWork';
@@ -38,7 +40,7 @@ function detail(extra: Partial<AssignmentDetail> = {}): AssignmentDetail {
   };
 }
 
-const handlers = { onWrite: vi.fn(), onRecord: vi.fn(), onCamera: vi.fn() };
+const handlers = { onWrite: vi.fn() };
 
 /** A stand-in for the writer: Your work is unmounted meanwhile; it adds its PDF through the context. */
 function Writer() {
@@ -96,15 +98,56 @@ describe('YourWork', () => {
     expect(screen.getByRole('button', { name: 'Write' })).toHaveFocus();
   });
 
-  it('wires Record, Camera and Write to their handlers', async () => {
+  it('Write calls its handler', async () => {
     const user = userEvent.setup();
     setup(detail());
-    await user.click(screen.getByRole('button', { name: 'Record' }));
-    await user.click(screen.getByRole('button', { name: 'Camera' }));
     await user.click(screen.getByRole('button', { name: 'Write' }));
-    expect(handlers.onRecord).toHaveBeenCalledOnce();
-    expect(handlers.onCamera).toHaveBeenCalledOnce();
     expect(handlers.onWrite).toHaveBeenCalledOnce();
+  });
+
+  it('Record and Camera open their dialogs, which say so on plain HTTP and hand focus back on close', async () => {
+    const user = userEvent.setup();
+    setup(detail());
+    for (const [button, title] of [
+      ['Record', 'Record audio'],
+      ['Camera', 'Camera'],
+    ]) {
+      await user.click(screen.getByRole('button', { name: button }));
+      const dialog = await screen.findByRole('dialog', { name: title });
+      expect(within(dialog).getByText(MEDIA_UNAVAILABLE)).toBeInTheDocument();
+      await user.click(within(dialog).getByRole('button', { name: 'Close' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(screen.getByRole('button', { name: button })).toHaveFocus();
+    }
+  });
+
+  it('photos from the camera are uploaded as separate files', async () => {
+    const user = userEvent.setup();
+    installCanvas();
+    installObjectUrls();
+    installMedia(() => Promise.resolve(fakeStream('video').stream));
+    api.uploadFile.mockImplementation(async (file: File) => ref(file.name, file.name));
+    api.saveDraft.mockResolvedValue(undefined);
+    try {
+      setup(detail());
+      await user.click(screen.getByRole('button', { name: 'Camera' }));
+      const dialog = await screen.findByRole('dialog', { name: 'Camera' });
+      const video = dialog.querySelector('video')!;
+      await waitFor(() => expect(video.srcObject).toBeTruthy());
+      fireEvent.loadedMetadata(video);
+      const shutter = within(dialog).getByRole('button', { name: 'Take photo' });
+      await waitFor(() => expect(shutter).toBeEnabled());
+      await user.click(shutter);
+      await user.click(shutter);
+      await user.click(await within(dialog).findByRole('button', { name: 'Add 2 photos' }));
+      await waitFor(() => expect(api.uploadFile).toHaveBeenCalledTimes(2));
+      for (const [file] of api.uploadFile.mock.calls) expect((file as File).type).toBe('image/jpeg');
+      expect(await screen.findAllByRole('button', { name: /^Photo .*\.jpg/ })).toHaveLength(2);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+      removeMedia();
+    }
   });
 
   it('uploads two files, lists both and saves both as the draft', async () => {

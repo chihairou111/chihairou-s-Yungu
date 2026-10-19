@@ -550,3 +550,34 @@ test('write: format text, keep the draft across a reload, Done adds a PDF to You
   await dialog.getByRole('region', { name: 'Your work' }).getByRole('button', { name: 'Write' }).click();
   await expect(doc).toHaveText('');
 });
+
+// Chromium's fake camera and microphone (flags in playwright.config.ts); 127.0.0.1 is a secure context.
+test.describe('camera and recorder (fake devices)', () => {
+  test('two photos and a recording land in Your work as separate files', async ({ page }) => {
+    await signIn(page);
+    await page.goto('/assignments?task=103');
+    const work = page.getByRole('dialog').getByRole('region', { name: 'Your work' });
+
+    await work.getByRole('button', { name: 'Camera' }).click();
+    const camera = page.getByRole('dialog', { name: 'Camera' });
+    const shutter = camera.getByRole('button', { name: 'Take photo' });
+    await expect(shutter).toBeEnabled();
+    await shutter.click();
+    await shutter.click();
+    await camera.getByRole('button', { name: 'Add 2 photos' }).click();
+    await expect(camera).toBeHidden();
+    await expect(work.getByRole('button', { name: 'Camera' })).toBeFocused();
+    await expect(work.getByRole('button', { name: /^Photo \d{4}-\d{2}-\d{2} [\d.]+( \(2\))?\.jpg, Image/ })).toHaveCount(2);
+
+    await work.getByRole('button', { name: 'Record' }).click();
+    const recorder = page.getByRole('dialog', { name: 'Record audio' });
+    await recorder.getByRole('button', { name: 'Record', exact: true }).click();
+    await expect(recorder.getByText('00:01')).toBeVisible();
+    await recorder.getByRole('button', { name: 'Stop' }).click();
+    await expect(recorder.locator('audio[controls]')).toBeVisible();
+    await recorder.getByRole('button', { name: 'Add recording' }).click();
+    await expect(work.getByRole('button', { name: /^Recording .*\.webm, Audio/ })).toBeVisible();
+    // Nothing is left holding the camera or the microphone.
+    await expect(page.locator('video')).toHaveCount(0);
+  });
+});

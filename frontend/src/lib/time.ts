@@ -100,3 +100,10 @@ export function chinaMonthDay(ms: number): string {
   const d = chinaFields(ms);
   return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
 }
+
+/** "2026-10-19 14.03.09" in China time, for file names (dots, not colons, which some systems refuse). */
+export function chinaFileStamp(ms: number): string {
+  const d = chinaFields(ms);
+  const date = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  return `${date} ${pad(d.getUTCHours())}.${pad(d.getUTCMinutes())}.${pad(d.getUTCSeconds())}`;
+}

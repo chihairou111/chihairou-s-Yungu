@@ -6,7 +6,8 @@ export default defineConfig({
     baseURL: 'http://127.0.0.1:3100',
     launchOptions: {
       executablePath: '/root/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome',
-      args: ['--no-sandbox'],
+      // A fake camera and microphone, granted without a prompt, for the Camera and Record dialogs.
+      args: ['--no-sandbox', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
     },
   },
   webServer: {
