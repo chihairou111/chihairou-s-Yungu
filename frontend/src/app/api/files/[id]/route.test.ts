@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getSession } from '@/lib/auth';
 import { resetMockStore } from '@/lib/data/store';
 
@@ -92,6 +92,123 @@ describe('GET /api/files/[id]', () => {
       } finally {
         spy.mockRestore();
       }
+    });
+
+    describe('?view=pdf (the viewer\'s PDF frame): OSS serves every file as multipart/form-data, so Chrome would download it', () => {
+      const upstream = (body: string, init: ResponseInit) => vi.fn<typeof fetch>(async () => new Response(body, init));
+      afterEach(() => vi.unstubAllGlobals());
+
+      it('streams the signed link back as an inline PDF, keeping the name', async () => {
+        const name = 'W6D1-1.8-Guided Notes 讲义.pdf';
+        const fetchMock = upstream('%PDF-1.7 body', {
+          status: 200,
+          headers: {
+            'content-type': 'multipart/form-data',
+            'content-length': '13',
+            // OSS sends the raw UTF-8 bytes; fetch exposes them as latin1 code units.
+            'content-disposition': `filename=${Buffer.from(name, 'utf8').toString('latin1')}`,
+          },
+        });
+        vi.stubGlobal('fetch', fetchMock);
+        const spy = vi.spyOn(data, 'getFile').mockResolvedValueOnce({ redirect: SIGNED });
+        try {
+          const res = await GET(new Request('http://localhost/x?view=pdf'), ctx({ id: ref.id }));
+          expect(spy).toHaveBeenCalledWith('11128597', { preview: false });
+          expect(fetchMock).toHaveBeenCalledTimes(1);
+          expect(fetchMock.mock.calls[0][0]).toBe(SIGNED);
+          expect(res.status).toBe(200);
+          expect(res.headers.get('content-type')).toBe('application/pdf');
+          expect(res.headers.get('content-disposition')).toBe(`inline; filename*=UTF-8''${encodeURIComponent(name)}`);
+          expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+          expect(res.headers.get('cache-control')).toBe('private, no-store');
+          expect(res.headers.get('accept-ranges')).toBe('bytes');
+          expect(res.headers.get('content-length')).toBe('13');
+          // Chrome will not show a PDF under a sandbox CSP.
+          expect(res.headers.get('content-security-policy')).toBeNull();
+          expect(await res.text()).toBe('%PDF-1.7 body');
+        } finally {
+          spy.mockRestore();
+        }
+      });
+
+      it("passes the viewer's byte range through and answers 206", async () => {
+        const fetchMock = upstream('PDF', { status: 206, headers: { 'content-range': 'bytes 0-2/100', 'content-length': '3' } });
+        vi.stubGlobal('fetch', fetchMock);
+        const spy = vi.spyOn(data, 'getFile').mockResolvedValueOnce({ redirect: SIGNED });
+        try {
+          const res = await GET(new Request('http://localhost/x?view=pdf', { headers: { range: 'bytes=0-2' } }), ctx({ id: ref.id }));
+          const init = fetchMock.mock.calls[0][1] as RequestInit;
+          expect(new Headers(init.headers).get('range')).toBe('bytes=0-2');
+          expect(res.status).toBe(206);
+          expect(res.headers.get('content-range')).toBe('bytes 0-2/100');
+          expect(res.headers.get('content-type')).toBe('application/pdf');
+          expect(res.headers.get('content-disposition')).toBe('inline');
+        } finally {
+          spy.mockRestore();
+        }
+      });
+
+      it('works for the PDF rendition of an Office file (?preview=1&view=pdf)', async () => {
+        vi.stubGlobal('fetch', upstream('%PDF', { status: 200, headers: { 'content-type': 'application/pdf' } }));
+        const spy = vi.spyOn(data, 'getFile').mockResolvedValueOnce({ redirect: SIGNED });
+        try {
+          const res = await GET(new Request('http://localhost/x?preview=1&view=pdf'), ctx({ id: ref.id }));
+          expect(spy).toHaveBeenCalledWith('11128597', { preview: true });
+          expect(res.status).toBe(200);
+          expect(res.headers.get('content-type')).toBe('application/pdf');
+        } finally {
+          spy.mockRestore();
+        }
+      });
+
+      it("502s with the service's message when the store refuses (an expired link)", async () => {
+        vi.stubGlobal('fetch', upstream('<Error/>', { status: 403, headers: { 'content-type': 'application/xml' } }));
+        const spy = vi.spyOn(data, 'getFile').mockResolvedValueOnce({ redirect: SIGNED });
+        try {
+          const res = await GET(new Request('http://localhost/x?view=pdf'), ctx({ id: ref.id }));
+          expect(res.status).toBe(502);
+          expect(await res.json()).toEqual({ error: "Can't reach Yungu right now. Try again." });
+        } finally {
+          spy.mockRestore();
+        }
+      });
+
+      it('502s when the store cannot be reached', async () => {
+        vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => { throw new TypeError('fetch failed'); }));
+        const spy = vi.spyOn(data, 'getFile').mockResolvedValueOnce({ redirect: SIGNED });
+        try {
+          const res = await GET(new Request('http://localhost/x?view=pdf'), ctx({ id: ref.id }));
+          expect(res.status).toBe(502);
+        } finally {
+          spy.mockRestore();
+        }
+      });
+
+      it('never fetches a link that is not https', async () => {
+        const fetchMock = upstream('x', { status: 200 });
+        vi.stubGlobal('fetch', fetchMock);
+        const spy = vi.spyOn(data, 'getFile').mockResolvedValueOnce({ redirect: 'http://169.254.169.254/latest' });
+        try {
+          const res = await GET(new Request('http://localhost/x?view=pdf'), ctx({ id: ref.id }));
+          expect(fetchMock).not.toHaveBeenCalled();
+          expect(res.status).toBe(502);
+        } finally {
+          spy.mockRestore();
+        }
+      });
+
+      it('leaves a download alone: ?download=1 still redirects', async () => {
+        const fetchMock = upstream('x', { status: 200 });
+        vi.stubGlobal('fetch', fetchMock);
+        const spy = vi.spyOn(data, 'getFile').mockResolvedValueOnce({ redirect: SIGNED });
+        try {
+          const res = await GET(new Request('http://localhost/x?view=pdf&download=1'), ctx({ id: ref.id }));
+          expect(fetchMock).not.toHaveBeenCalled();
+          expect(res.status).toBe(302);
+        } finally {
+          spy.mockRestore();
+        }
+      });
     });
 
     it("502s with the service's message when Yungu is down", async () => {

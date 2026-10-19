@@ -37,10 +37,11 @@ describe('FileViewer', () => {
   it('shows a PDF in the browser viewer, with Download and Open in new tab', () => {
     render(<Harness />);
     expect(title()).toHaveTextContent('Slides.pdf');
-    expect(viewer().querySelector('iframe')).toHaveAttribute('src', '/api/files/a');
+    // ?view=pdf: the file route hands the bytes back as an inline PDF (Yungu's store mislabels every file).
+    expect(viewer().querySelector('iframe')).toHaveAttribute('src', '/api/files/a?view=pdf');
     expect(within(viewer()).getByRole('link', { name: 'Download' })).toHaveAttribute('href', '/api/files/a?download=1');
     const open = within(viewer()).getByRole('link', { name: 'Open in new tab' });
-    expect(open).toHaveAttribute('href', '/api/files/a');
+    expect(open).toHaveAttribute('href', '/api/files/a?view=pdf');
     expect(open).toHaveAttribute('target', '_blank');
   });
 
@@ -68,9 +69,11 @@ describe('FileViewer', () => {
 
   it("shows an Office file's PDF rendition, and downloads the original", () => {
     render(<Harness start={3} />);
-    expect(viewer().querySelector('iframe')).toHaveAttribute('src', '/api/files/d-pdf');
+    expect(viewer().querySelector('iframe')).toHaveAttribute('src', '/api/files/d-pdf?view=pdf');
     expect(within(viewer()).getByRole('link', { name: 'Download' })).toHaveAttribute('href', '/api/files/d?download=1');
+    expect(within(viewer()).getByRole('link', { name: 'Open in new tab' })).toHaveAttribute('href', '/api/files/d-pdf?view=pdf');
   });
+
 
   it('plays audio with controls, and offers a download for files it cannot show', async () => {
     render(<Harness start={4} />);

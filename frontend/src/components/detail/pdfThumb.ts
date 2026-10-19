@@ -85,6 +85,17 @@ async function cropStart(page: PdfPage, unscaled: Viewport): Promise<{ x: number
 export const PREVIEW_ASPECT = 4 / 3;
 
 /**
+ * A PDF link for the browser's viewer and for pdf.js: `?view=pdf` makes the file route stream the bytes
+ * back same-origin as an inline PDF that answers byte ranges. Yungu's store labels every file
+ * `multipart/form-data` (Chrome then downloads it instead of showing it) and hides `Accept-Ranges` from
+ * cross-origin reads (pdf.js then downloads a file whole). Links outside the route stay as they are.
+ */
+export function pdfViewUrl(url: string): string {
+  if (!url.startsWith('/api/files/')) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}view=pdf`;
+}
+
+/**
  * Draws the top of the first page of the PDF at `url` into `canvas`, cut to a `width` × ¾`width` CSS-pixel
  * tile (sharp on high-density screens): the page is `PREVIEW_ZOOM` times the tile's width, cut from just
  * above and left of its text (skipping at most `PREVIEW_MARGIN` of blank margin), so a title and the
@@ -101,7 +112,8 @@ export async function renderFirstPage(
   if (signal?.aborted) throw abortError();
   const { lib, worker } = await loadPdfJs();
   if (signal?.aborted) throw abortError();
-  const task = lib.getDocument({ url, worker, ...ASSETS });
+  // Ranges only, no background fetch of the rest: a thumbnail needs page 1, not the whole file.
+  const task = lib.getDocument({ url: pdfViewUrl(url), worker, disableAutoFetch: true, disableStream: true, ...ASSETS });
   let renderTask: { cancel(): void } | null = null;
   const onAbort = () => {
     renderTask?.cancel();

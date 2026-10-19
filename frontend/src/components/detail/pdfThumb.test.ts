@@ -10,7 +10,7 @@ vi.mock('pdfjs-dist', () => ({
   getDocument: (...args: unknown[]) => getDocument(...args),
 }));
 
-import { PREVIEW_CACHE_SIZE, PREVIEW_MARGIN, PREVIEW_ZOOM, cachedPreview, isAbort, loadPreview, renderFirstPage } from './pdfThumb';
+import { PREVIEW_CACHE_SIZE, PREVIEW_MARGIN, PREVIEW_ZOOM, cachedPreview, isAbort, loadPreview, pdfViewUrl, renderFirstPage } from './pdfThumb';
 
 /** Page 1's text: by default a title whose top-left sits 60pt from the left and 40pt from the top. */
 const getTextContent = vi.fn();
@@ -54,6 +54,22 @@ describe('renderFirstPage', () => {
     );
     expect(canvas.width).toBe(240 * dpr());
     expect(destroy).toHaveBeenCalled();
+  });
+
+  it('reads a file-route PDF same-origin, in ranges, fetching only what page 1 needs', async () => {
+    // Yungu's store hides Accept-Ranges from cross-origin reads, so pdf.js would download a 93 MB file whole.
+    await renderFirstPage('/api/files/9', document.createElement('canvas'), 240);
+    expect(getDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ url: '/api/files/9?view=pdf', disableAutoFetch: true, disableStream: true }),
+    );
+    await renderFirstPage('/api/files/9?preview=1', document.createElement('canvas'), 240);
+    expect(getDocument).toHaveBeenLastCalledWith(expect.objectContaining({ url: '/api/files/9?preview=1&view=pdf' }));
+  });
+
+  it('pdfViewUrl adds view=pdf to file-route links only', () => {
+    expect(pdfViewUrl('/api/files/9')).toBe('/api/files/9?view=pdf');
+    expect(pdfViewUrl('/api/files/9?preview=1')).toBe('/api/files/9?preview=1&view=pdf');
+    expect(pdfViewUrl('/mock/sample.pdf')).toBe('/mock/sample.pdf');
   });
 
   it('reports the page count', async () => {

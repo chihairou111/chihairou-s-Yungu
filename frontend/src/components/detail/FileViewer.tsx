@@ -15,6 +15,7 @@ import DownloadOutlined from '@mui/icons-material/DownloadOutlined';
 import OpenInNew from '@mui/icons-material/OpenInNew';
 import type { FileRef } from '@/lib/types';
 import { FileKindIcon, fileCaption, previewPdf } from './FileThumb';
+import { pdfViewUrl } from './pdfThumb';
 
 /**
  * The viewer is a dark room in both styles, so the file is the brightest thing on screen. Text and
@@ -36,9 +37,15 @@ export function downloadUrl(url: string): string {
   return `${url}${url.includes('?') ? '&' : '?'}download=1`;
 }
 
+/** The PDF the stage and "Open in new tab" show (an Office file's PDF rendition), or null. */
+function viewPdf(file: FileRef): string | null {
+  const pdf = previewPdf(file);
+  return pdf === null ? null : pdfViewUrl(pdf);
+}
+
 /** What "Open in new tab" opens: the browser can show a PDF rendition of an Office file, not the file. */
 function viewUrl(file: FileRef): string {
-  return previewPdf(file) ?? file.url;
+  return viewPdf(file) ?? file.url;
 }
 
 interface FileViewerProps {
@@ -321,7 +328,7 @@ function FileList({ files, at, onPick }: { files: FileRef[]; at: number; onPick:
 
 /** The current file, as large as the stage allows. */
 function Stage({ file }: { file: FileRef }) {
-  const pdf = previewPdf(file);
+  const pdf = viewPdf(file);
   const fill = { flex: 1, minWidth: 0, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' } as const;
 
   if (pdf) {
