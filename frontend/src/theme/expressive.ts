@@ -1,6 +1,7 @@
 'use client';
 import { createTheme } from '@mui/material/styles';
 import type { ColorRoles, ShapeScale, YunguTokens } from './tokens';
+import { MuiAlert } from './alert';
 
 // Expressive style: Material 3 (Material You), rounded. Tonal roles are the M3 light scheme for the
 // existing blue primary (#1565c0): a faintly blue-tinted surface, cards and containers separated by
@@ -92,6 +93,7 @@ const theme = createTheme({
     overline: { textTransform: 'none', fontSize: '0.875rem', fontWeight: 500, letterSpacing: '0.00714em' },
   },
   components: {
+    MuiAlert,
     // M3 top app bar: flat, one tonal band with the page header below it.
     MuiAppBar: {
       defaultProps: { elevation: 0, color: 'inherit' },

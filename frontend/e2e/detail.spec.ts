@@ -90,9 +90,8 @@ test.describe('phone', () => {
     await page.goto('/assignments?task=102');
     const dialog = page.getByRole('dialog', { name: 'Task 3：开始第一次观察' });
     await expect(dialog.getByRole('heading', { name: 'Attachments (4)' })).toBeVisible();
-    // The dialog's paper is the element carrying the accessible name.
-    const box = await dialog.boundingBox();
-    expect(box).toEqual({ x: 0, y: 0, width: 390, height: 844 });
+    // The dialog's paper is the element carrying the accessible name; it settles from a slight scale-up.
+    await expect.poll(() => dialog.boundingBox()).toEqual({ x: 0, y: 0, width: 390, height: 844 });
     const overflow = await page.evaluate(() => {
       const scroller = (el: Element) => el.scrollWidth - el.clientWidth;
       const paper = document.querySelector('[role="dialog"]')!;

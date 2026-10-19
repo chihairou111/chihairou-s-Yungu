@@ -80,8 +80,10 @@ export default function Instructions({ html }: { html: string }) {
                 '& p, & ul, & ol, & blockquote': { my: 1.25 },
                 '& ul, & ol': { pl: 3 },
                 '& li + li': { mt: 0.5 },
-                // The teacher's own headings: heavier than the text, one step under the section heading.
-                '& h4, & h5, & h6': { fontSize: '1rem', fontWeight: 600, lineHeight: 1.5, letterSpacing: 0, mt: 2.5, mb: 0.75 },
+                // The teacher's own headings sit under the section label ("Instructions"), never above it:
+                // a touch smaller than it, medium weight (the label is 500–600), lower levels in the muted colour.
+                '& h4, & h5, & h6': { fontSize: '0.9375rem', fontWeight: 500, lineHeight: 1.5, letterSpacing: '0.01em', mt: 2.5, mb: 0.5 },
+                '& h5, & h6': { color: 'text.secondary' },
                 '& a': {
                   color: 'primary.main',
                   textDecorationThickness: '1px',

@@ -16,16 +16,23 @@ const paperOf = (node: HTMLElement) => node.querySelector<HTMLElement>('.MuiDial
 
 /**
  * Transition callbacks for an MUI Dialog that add a small scale-up to its fade, so it arrives from
- * where it will sit rather than only materialising. Leaving stays a plain fade (quick and quiet).
- * With reduced motion asked for there is no scale at all: the fade alone remains.
+ * where it will sit rather than only materialising. The paper's own transitions (the pop-up's size
+ * morph from skeleton to a short message) keep running alongside: the scale is appended to them, not
+ * swapped in. Leaving stays a plain fade (quick and quiet). With reduced motion asked for there is no
+ * scale at all: the fade alone remains.
  */
 export function popIn(reduceMotion: boolean): Pick<TransitionProps, 'onEnter' | 'onEntering' | 'onEntered'> {
   if (reduceMotion) return {};
+  // The paper's transitions as styled, and its inline value to restore afterwards.
+  let own = '';
+  let inline = '';
   return {
     onEnter: (node: HTMLElement) => {
       const paper = paperOf(node);
       if (!paper) return;
-      paper.style.transition = 'none';
+      inline = paper.style.transition;
+      own = getComputedStyle(paper).transition;
+      // `scale` is not among the paper's transitions yet, so this applies at once.
       paper.style.scale = POP_FROM;
       // Commit the starting size, so the change below animates.
       void paper.offsetHeight;
@@ -33,13 +40,14 @@ export function popIn(reduceMotion: boolean): Pick<TransitionProps, 'onEnter' | 
     onEntering: (node: HTMLElement) => {
       const paper = paperOf(node);
       if (!paper) return;
-      paper.style.transition = `scale ${POP_MS}ms ${EASE_OUT}`;
+      const scale = `scale ${POP_MS}ms ${EASE_OUT}`;
+      // No transitions of its own computes to `all 0s …` (or `none`), which cannot head a list.
+      paper.style.transition = own && !/^(all|none)( 0s|$)/.test(own) ? `${own}, ${scale}` : scale;
       paper.style.scale = '';
     },
     onEntered: (node: HTMLElement) => {
       const paper = paperOf(node);
-      // Hand the paper back to its own transitions (the pop-up's size morph).
-      if (paper) paper.style.transition = '';
+      if (paper) paper.style.transition = inline;
     },
   };
 }

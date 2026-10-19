@@ -167,6 +167,32 @@ describe('AssignmentDialog', () => {
     expect(param.closeWriter).toHaveBeenCalled();
   });
 
+  it('fades the loaded detail in once, and then each switch between it and the writer', async () => {
+    api.fetchDetail.mockResolvedValue(detail());
+    openTask(94616);
+    const { rerender } = render(<AssignmentDialog now={NOW} />);
+    const fades = (el: Element) => {
+      const list: Element[] = [];
+      for (let n: Element | null = el; n; n = n.parentElement) if (n.hasAttribute('data-view-fade')) list.push(n);
+      return list; // innermost first
+    };
+    // Loaded: only the outer view fades; the detail inside it does not fade a second time.
+    const [inner, outer] = fades(await screen.findByRole('heading', { level: 2, name: 'Task 3：开始第一次观察' }));
+    expect(inner).toHaveAttribute('data-view-fade', 'still');
+    expect(outer).toHaveAttribute('data-view-fade', 'in');
+
+    // A switch fades the new view alone; the outer one stays as it was (not replayed).
+    param.writing = true;
+    rerender(<AssignmentDialog now={NOW} />);
+    const [writer, outerAgain] = fades(await screen.findByRole('button', { name: 'Back to assignment' }));
+    expect(writer).toHaveAttribute('data-view-fade', 'in');
+    expect(outerAgain).toBe(outer);
+
+    param.writing = false;
+    rerender(<AssignmentDialog now={NOW} />);
+    expect(fades(screen.getByRole('heading', { level: 2, name: 'Task 3：开始第一次观察' }))[0]).toHaveAttribute('data-view-fade', 'in');
+  });
+
   it('keeps the work (files added) across a trip to the writer and back', async () => {
     api.fetchDetail.mockResolvedValue(detail());
     api.saveDraft.mockResolvedValue(undefined);

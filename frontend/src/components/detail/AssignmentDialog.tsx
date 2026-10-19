@@ -168,7 +168,7 @@ export default function AssignmentDialog({ now }: { now: number }) {
             {/* Above the view switch, so the work (and anything still uploading) outlives a trip to the writer. */}
             <WorkProvider key={loaded.detail.id} detail={loaded.detail}>
               {/* The writer and the assignment fade into each other, the work staying put above them. */}
-              <ViewFade key={view.writing ? 'write' : 'detail'}>
+              <ViewSwitchFade view={view.writing ? 'write' : 'detail'}>
                 {view.writing ? (
                   <WriteView
                     detail={loaded.detail}
@@ -193,7 +193,7 @@ export default function AssignmentDialog({ now }: { now: number }) {
                     workFocus={workFocus}
                   />
                 )}
-              </ViewFade>
+              </ViewSwitchFade>
             </WorkProvider>
           </DetailContext.Provider>
         ) : loaded.kind === 'not-found' ? (
@@ -250,22 +250,38 @@ export default function AssignmentDialog({ now }: { now: number }) {
 
 /**
  * Fills the paper like the view it holds and fades that view in: opacity only, so it reads the same with
- * reduced motion, and nothing waits for it (focus and typing work from the first frame).
+ * reduced motion, and nothing waits for it (focus and typing work from the first frame). `still` holds
+ * a view that is already fading in with its parent, so the two do not multiply.
  */
-function ViewFade({ children }: { children: ReactNode }) {
+function ViewFade({ children, still = false }: { children: ReactNode; still?: boolean }) {
   return (
     <Box
+      data-view-fade={still ? 'still' : 'in'}
       sx={{
         flex: 1,
         minHeight: 0,
         display: 'flex',
         flexDirection: 'column',
-        animation: `yl-view-in ${FADE_MS}ms ${EASE_OUT}`,
-        '@keyframes yl-view-in': { from: { opacity: 0 } },
+        ...(!still && { animation: `yl-view-in ${FADE_MS}ms ${EASE_OUT}`, '@keyframes yl-view-in': { from: { opacity: 0 } } }),
       }}
     >
       {children}
     </Box>
+  );
+}
+
+/**
+ * The writer and the assignment fading into each other. The first view shown arrives with the loaded
+ * detail's own fade; only a switch after that fades on its own.
+ */
+function ViewSwitchFade({ view, children }: { view: string; children: ReactNode }) {
+  const [first] = useState(view);
+  const [switched, setSwitched] = useState(false);
+  if (!switched && view !== first) setSwitched(true);
+  return (
+    <ViewFade key={view} still={!switched && view === first}>
+      {children}
+    </ViewFade>
   );
 }
 

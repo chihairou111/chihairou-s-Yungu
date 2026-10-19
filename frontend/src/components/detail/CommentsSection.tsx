@@ -282,7 +282,7 @@ export default function CommentsSection({ taskId, comments: incoming }: { taskId
                   </Button>
                 ) : undefined
               }
-              sx={{ mb: 2, bgcolor: 'error.light', color: 'error.dark', '& .MuiAlert-icon': { color: 'error.main' } }}
+              sx={{ mb: 2 }}
             >
               {error.message}
             </Alert>

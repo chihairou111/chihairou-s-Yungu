@@ -274,12 +274,7 @@ export default function WriteView({ detail, titleId, onBack, onDone }: WriteView
                   </Button>
                 ) : undefined
               }
-              sx={{
-                mb: 3,
-                cursor: 'auto',
-                // The same red as the pop-up's other errors (the default derives a greyish one from error.light).
-                ...(failure.tone === 'error' && { bgcolor: 'error.light', color: 'error.dark', '& .MuiAlert-icon': { color: 'error.main' } }),
-              }}
+              sx={{ mb: 3, cursor: 'auto' }}
             >
               {failure.message}
             </Alert>

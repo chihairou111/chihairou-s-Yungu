@@ -1,6 +1,7 @@
 'use client';
 import { createTheme } from '@mui/material/styles';
 import type { YunguTokens } from './tokens';
+import { MuiAlert } from './alert';
 
 // Classic style: the Material 2 look. Light Material theme with a blue accent. Every main color passes WCAG AA
 // (>= 4.5:1) as text on both white surfaces and the page background.
@@ -27,6 +28,7 @@ const theme = createTheme({
     button: { textTransform: 'none', fontWeight: 600 },
   },
   components: {
+    MuiAlert,
     MuiAppBar: {
       defaultProps: { elevation: 0, color: 'inherit' },
       styleOverrides: {

@@ -61,12 +61,7 @@ export default function LoginForm() {
         error={error !== null && !password.trim()}
         fullWidth
       />
-      {error && (
-        // The theme's error.light is already a tint; MUI would lighten it again to near-white.
-        <Alert severity="error" sx={{ bgcolor: 'error.light', color: 'error.dark', '& .MuiAlert-icon': { color: 'error.main' } }}>
-          {error}
-        </Alert>
-      )}
+      {error && <Alert severity="error">{error}</Alert>}
       <Button type="submit" variant="contained" size="large" disabled={pending} fullWidth sx={{ minHeight: { xs: 48, sm: 40 } }}>
         {pending ? 'Signing in…' : 'Sign in'}
       </Button>

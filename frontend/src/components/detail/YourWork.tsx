@@ -181,7 +181,7 @@ export default function YourWork({ onWrite, focusOnMount = null }: YourWorkProps
               </Button>
             ) : undefined
           }
-          sx={{ mt: 2, bgcolor: 'error.light', color: 'error.dark', '& .MuiAlert-icon': { color: 'error.main' } }}
+          sx={{ mt: 2 }}
         >
           {work.errors.length === 1 ? (
             work.errors[0]
