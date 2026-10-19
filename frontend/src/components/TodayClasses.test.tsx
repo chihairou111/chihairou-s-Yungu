@@ -42,6 +42,15 @@ describe('TodayClasses', () => {
     expect(line.textContent).not.toContain(' · ');
   });
 
+  it('renders each class as its own card, with no divider lines between them', () => {
+    render(<TodayClasses events={classes} now={EARLY} courses={COURSES} />);
+    const items = within(screen.getByRole('list')).getAllByRole('listitem');
+    for (const li of items) expect(li).toHaveClass('MuiCard-root');
+    expect(screen.queryAllByRole('separator')).toHaveLength(0);
+    // The old list drew a top border on every row after the first.
+    expect(getComputedStyle(items[1]).borderTopColor).toBe(getComputedStyle(items[0]).borderTopColor);
+  });
+
   it('shows an empty state when there are no classes', () => {
     render(<TodayClasses events={[]} now={EARLY} courses={COURSES} />);
     expect(screen.getByText('No classes today')).toBeInTheDocument();

@@ -80,6 +80,14 @@ describe('shouldRevealEdgeButton', () => {
     expect(shouldRevealEdgeButton(1440 - 57, 400, 1440, 64)).toBe(false);
     expect(shouldRevealEdgeButton(1430, 63, 1440, 64)).toBe(false); // over the app bar (account button)
   });
+
+  it('with the panel open, reveals over the panel and just left of its edge, below the page header', () => {
+    const reach = 344 + 28;
+    expect(shouldRevealEdgeButton(1440 - 344 - 20, 400, 1440, 112, reach)).toBe(true);
+    expect(shouldRevealEdgeButton(1430, 400, 1440, 112, reach)).toBe(true);
+    expect(shouldRevealEdgeButton(1440 - 344 - 40, 400, 1440, 112, reach)).toBe(false); // the content
+    expect(shouldRevealEdgeButton(1300, 100, 1440, 112, reach)).toBe(false); // the header band
+  });
 });
 
 describe('TodayDrawer edge reveal', () => {
@@ -206,8 +214,11 @@ describe('TodayDrawer docked panel (900px and up)', () => {
     expect(region).toBe(panel());
     expect(region).toHaveAttribute('data-open', 'true');
     expect(region).not.toHaveAttribute('inert');
-    expect(within(region).getByRole('heading', { name: "Today's classes" })).toBeInTheDocument();
-    expect(within(region).getByText('Mon, Oct 19')).toBeInTheDocument();
+    // No title row: the cards start at the top; the region keeps its accessible name.
+    expect(within(region).queryByRole('heading', { name: "Today's classes" })).not.toBeInTheDocument();
+    expect(within(region).queryByText('Mon, Oct 19')).not.toBeInTheDocument();
+    expect(within(region).queryByRole('button')).not.toBeInTheDocument();
+    expect(region.firstElementChild?.firstElementChild?.tagName).toBe('OL');
     expect(within(region).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
       'Chinese I08:00–08:40 · D419',
       'NextH Physics I12:30–13:10 · D508',
@@ -249,14 +260,21 @@ describe('TodayDrawer docked panel (900px and up)', () => {
     expect(document.cookie).toContain('yl_today_panel=closed');
   });
 
-  it("closes with the panel's own close button", async () => {
+  it('hovering the open panel reveals the edge button on its left edge, which closes it', async () => {
+    Object.defineProperty(document.documentElement, 'clientWidth', { value: 1440, configurable: true });
     render(<TodayDrawer events={classes} now={NOW} courses={COURSES} initialPanelOpen />);
-    await userEvent.click(within(panel()).getByRole('button', { name: "Close today's classes" }));
+    expect(toggle()).toHaveAttribute('data-revealed', 'false');
+    fireEvent.pointerMove(window, { clientX: 1300, clientY: 400 });
+    await act(() => new Promise((r) => requestAnimationFrame(() => r(undefined))));
+    expect(toggle()).toHaveAttribute('data-revealed', 'true');
+    await userEvent.click(toggle());
     expect(panel()).toHaveAttribute('data-open', 'false');
     expect(panel()).toHaveAttribute('inert');
     expect(toggle()).toHaveAttribute('aria-expanded', 'false');
     expect(document.cookie).toContain('yl_today_panel=closed');
+    delete (document.documentElement as { clientWidth?: number }).clientWidth;
   });
+
 });
 
 describe('TodayDrawer below 900px', () => {

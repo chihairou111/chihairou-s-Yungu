@@ -3,37 +3,25 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Tab from '@mui/material/Tab';
 import Tabs from '@mui/material/Tabs';
-import type { Assignment, ClassEvent, Course } from '@/lib/types';
+import type { Assignment } from '@/lib/types';
 import PageHeader from './PageHeader';
 import PriorityBoard from './PriorityBoard';
 import SubmittedList from './SubmittedList';
-import TodayDrawer, { BOTTOM_FAB_MEDIA } from './TodayDrawer';
 
 type TabKey = 'todo' | 'submitted';
 
 interface AssignmentsViewProps {
   todo: Assignment[];
   submitted: Assignment[];
-  courses: Course[];
-  todayClasses: ClassEvent[];
   /** Server time, shared by every card so relative times agree. */
   now: number;
-  /** Whether the docked Today's classes panel was left open (the `yl_today_panel` cookie). */
-  initialPanelOpen?: boolean;
 }
 
 /**
  * To-do | Submitted tabs attached to the app bar. To-do shows the work in priority columns. The tab
  * lives in the URL (`?tab=submitted`) so it survives reloads.
  */
-export default function AssignmentsView({
-  todo,
-  submitted,
-  courses,
-  todayClasses,
-  now,
-  initialPanelOpen = false,
-}: AssignmentsViewProps) {
+export default function AssignmentsView({ todo, submitted, now }: AssignmentsViewProps) {
   const pathname = usePathname();
   const params = useSearchParams();
   const tab: TabKey = params.get('tab') === 'submitted' ? 'submitted' : 'todo';
@@ -57,18 +45,12 @@ export default function AssignmentsView({
           />
         </Tabs>
       </PageHeader>
-      {/* Room below the last card for the bottom-right button (40px + 16px inset + margin). */}
       <Box
         role="tabpanel"
         id={`panel-${tab}`}
         aria-labelledby={`tab-${tab}`}
-        // Phones already clear the bottom nav and the button with the shell's bottom padding.
         // A size container, so the columns follow the space left beside the docked panel.
-        sx={(theme) => ({
-          containerType: 'inline-size',
-          [BOTTOM_FAB_MEDIA]: { pb: 9 },
-          [theme.breakpoints.down('sm')]: { pb: 0 },
-        })}
+        sx={{ containerType: 'inline-size' }}
       >
         {tab === 'todo' ? (
           <PriorityBoard items={todo} now={now} />
@@ -76,7 +58,6 @@ export default function AssignmentsView({
           <SubmittedList items={submitted} now={now} />
         )}
       </Box>
-      <TodayDrawer events={todayClasses} now={now} courses={courses} initialPanelOpen={initialPanelOpen} />
     </>
   );
 }

@@ -1,22 +1,46 @@
 import type { ReactNode } from 'react';
+import { io } from 'next/cache';
+import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth';
+import { data } from '@/lib/data';
+import { todaysClasses } from '@/lib/schedule';
+import { weekStartOf } from '@/lib/time';
+import { TODAY_PANEL_COOKIE, parseTodayPanel } from '@/lib/today-panel';
 import AppShell from '@/components/AppShell';
 import NavRail from '@/components/NavRail';
+import TodayDrawer from '@/components/TodayDrawer';
 
 // The session gate reads the request cookie, so this segment renders per
 // request and may block navigation into it (reading a cookie is instant).
 export const instant = false;
 
+/** Today's classes for the shell's panel; the clock is read once per request. */
+async function loadToday() {
+  await io();
+  const now = Date.now();
+  const [courses, week] = await Promise.all([data.getCourses(), data.getWeek(weekStartOf(now))]);
+  return { now, courses, events: todaysClasses(week, now) };
+}
+
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
   const session = await getSession();
   if (!session) redirect('/login');
+  const [{ now, courses, events }, cookieStore] = await Promise.all([loadToday(), cookies()]);
+  // Read on the server, so a reload paints the panel in its stored state with no flash or slide.
+  // The layout persists across pages, so moving between them never re-animates the panel.
+  const panelOpen = parseTodayPanel(cookieStore.get(TODAY_PANEL_COOKIE)?.value);
 
   return (
     <>
       {/* Nav first in DOM order so keyboard users reach it before the page content. */}
       <NavRail />
-      <AppShell userName={session.name}>{children}</AppShell>
+      <AppShell
+        userName={session.name}
+        panel={<TodayDrawer events={events} now={now} courses={courses} initialPanelOpen={panelOpen} />}
+      >
+        {children}
+      </AppShell>
     </>
   );
 }

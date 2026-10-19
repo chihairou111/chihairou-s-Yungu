@@ -30,11 +30,17 @@ const HEADER_PX = 56;
 const TOP_PAD = 8;
 /** A block shorter than this (px, in the narrow grid) shows its name only. */
 const TWO_LINES_PX = 40;
-/** The grid needs 720px; below it the same markup reads as a per-day list. */
-const LIST_QUERY = '(max-width: 719.95px)';
-const GRID = '@media (min-width: 720px)';
-const LIST = `@media ${LIST_QUERY}`;
-const NARROW_GRID = '@media (min-width: 720px) and (max-width: 899.95px)';
+/**
+ * The grid needs 592px of content width (a 720px window beside the rail); below it the same markup
+ * reads as a per-day list. Up to 772px (a 900px window) the grid is the narrow one. These are
+ * container queries on the content column, so the grid also reflows when the docked Today's classes
+ * panel takes its space.
+ */
+const GRID_MIN_PX = 592;
+const WIDE_GRID_MIN_PX = 772;
+const GRID = `@container (min-width: ${GRID_MIN_PX}px)`;
+const LIST = `@container (max-width: ${GRID_MIN_PX - 0.05}px)`;
+const NARROW_GRID = `@container (min-width: ${GRID_MIN_PX}px) and (max-width: ${WIDE_GRID_MIN_PX - 0.05}px)`;
 /** Google Calendar's default event color, for a class whose course is unknown. */
 const DEFAULT_COLOR = 'Peacock';
 
@@ -91,14 +97,16 @@ interface WeekCalendarProps {
 
 /**
  * One week of classes (China time): days across, time down, with a current-time line on today's
- * column. Mon–Fri always show, Sat/Sun only when they have classes. Below 720px the same markup
- * reflows into a per-day list that opens at today.
+ * column. Mon–Fri always show, Sat/Sun only when they have classes. In a content column under 592px
+ * (a phone, or a narrow window beside the docked panel) the same markup reflows into a per-day list
+ * that opens at today.
  */
 export default function WeekCalendar({ weekStart, events, courses, now: serverNow }: WeekCalendarProps) {
   const now = useNow(serverNow);
   const theme = useTheme();
   const surface = theme.palette.background.paper;
   const todayRef = useRef<HTMLElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const classes = events.filter((e) => e.isClass && dayIndex(e.start, weekStart) >= 0 && dayIndex(e.start, weekStart) < 7);
   const days = [0, 1, 2, 3, 4, 5, 6]
     .map((d) => ({ d, placed: layoutDay(classes.filter((e) => dayIndex(e.start, weekStart) === d)) }))
@@ -116,9 +124,10 @@ export default function WeekCalendar({ weekStart, events, courses, now: serverNo
   const nowLine = classes.length > 0 ? nowLineHours(now, weekStart, firstHour, hours.length) : null;
   const scrollToToday = days.some(({ d }) => d === today) && days[0].d !== today;
 
-  // On a phone the list opens at today (once, on arrival), so a Thursday does not start on Monday.
+  // The list opens at today (once, on arrival), so a Thursday does not start on Monday.
   useEffect(() => {
-    if (scrollToToday && window.matchMedia?.(LIST_QUERY).matches) todayRef.current?.scrollIntoView?.({ block: 'start' });
+    const width = bodyRef.current?.clientWidth ?? 0;
+    if (scrollToToday && width > 0 && width < GRID_MIN_PX) todayRef.current?.scrollIntoView?.({ block: 'start' });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only on arrival, not on every clock tick
   }, [weekStart]);
 
@@ -151,159 +160,162 @@ export default function WeekCalendar({ weekStart, events, courses, now: serverNo
         </Typography>
       </PageHeader>
 
-      {classes.length === 0 ? (
-        <Typography
-          variant="body2"
-          color="text.secondary"
-          sx={{ px: 2, py: 2.5, border: 1, borderStyle: 'dashed', borderColor: 'divider', borderRadius: 1 }}
-        >
-          No classes this week
-        </Typography>
-      ) : (
-        <Box
-          sx={{
-            '--hour': `${HOUR_PX}px`,
-            '--axis': `${AXIS_PX}px`,
-            [NARROW_GRID]: { '--hour': `${HOUR_NARROW_PX}px`, '--axis': `${AXIS_NARROW_PX}px` },
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 3,
-            [GRID]: {
-              display: 'grid',
-              gap: 0,
-              gridTemplateColumns: `var(--axis) repeat(${days.length}, minmax(0, 1fr))`,
-              bgcolor: 'background.paper',
-              border: 1,
-              borderColor: 'divider',
-              borderRadius: 1,
-              overflow: 'hidden',
-            },
-          }}
-        >
-          {/* Time axis (grid only). */}
-          <Box aria-hidden sx={{ display: 'none', [GRID]: { display: 'block' }, pt: `${HEADER_PX + TOP_PAD}px`, pb: 1 }}>
-            <Box sx={{ position: 'relative', height: bodyHeight }}>
-              {hours.map((h, i) => (
-                <Typography
-                  key={h}
-                  component="span"
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{
-                    position: 'absolute',
-                    top: `calc(${i} * var(--hour))`,
-                    right: 8,
-                    transform: 'translateY(-50%)',
-                    lineHeight: 1,
-                  }}
-                >
-                  {`${String(h).padStart(2, '0')}:00`}
-                </Typography>
-              ))}
-            </Box>
-          </Box>
-
-          {days.map(({ d, placed }) => {
-            const dayStart = weekStart + d * DAY;
-            const [weekday, date] = chinaDateLabel(dayStart).split(' ');
-            const isToday = d === today;
-            const headingId = `day-${d}`;
-            return (
-              <Box
-                component="section"
-                key={d}
-                ref={isToday ? todayRef : undefined}
-                aria-labelledby={headingId}
-                sx={{ minWidth: 0, [LIST]: { scrollMarginTop: { xs: 112, sm: 120 } }, [GRID]: { borderLeft: 1, borderColor: 'divider' } }}
-              >
-                <Typography
-                  id={headingId}
-                  variant="h3"
-                  aria-current={isToday ? 'date' : undefined}
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1,
-                    [LIST]: { mb: 1, fontSize: '1rem', lineHeight: '24px', fontWeight: 500 },
-                    [GRID]: {
-                      height: HEADER_PX,
-                      justifyContent: 'center',
-                      borderBottom: 1,
-                      borderColor: 'divider',
-                    },
-                  }}
-                >
-                  <Box component="span" sx={{ color: isToday ? 'primary.main' : 'text.secondary', fontWeight: 500 }}>
-                    {weekday}
-                  </Box>{' '}
-                  <Box
+      {/* A size container: grid or list follows the content width, not the window. */}
+      <Box ref={bodyRef} sx={{ containerType: 'inline-size' }}>
+        {classes.length === 0 ? (
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            sx={{ px: 2, py: 2.5, border: 1, borderStyle: 'dashed', borderColor: 'divider', borderRadius: 1 }}
+          >
+            No classes this week
+          </Typography>
+        ) : (
+          <Box
+            sx={{
+              '--hour': `${HOUR_PX}px`,
+              '--axis': `${AXIS_PX}px`,
+              [NARROW_GRID]: { '--hour': `${HOUR_NARROW_PX}px`, '--axis': `${AXIS_NARROW_PX}px` },
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 3,
+              [GRID]: {
+                display: 'grid',
+                gap: 0,
+                gridTemplateColumns: `var(--axis) repeat(${days.length}, minmax(0, 1fr))`,
+                bgcolor: 'background.paper',
+                border: 1,
+                borderColor: 'divider',
+                borderRadius: 1,
+                overflow: 'hidden',
+              },
+            }}
+          >
+            {/* Time axis (grid only). */}
+            <Box aria-hidden sx={{ display: 'none', [GRID]: { display: 'block' }, pt: `${HEADER_PX + TOP_PAD}px`, pb: 1 }}>
+              <Box sx={{ position: 'relative', height: bodyHeight }}>
+                {hours.map((h, i) => (
+                  <Typography
+                    key={h}
                     component="span"
-                    sx={(theme) => ({
-                      minWidth: 30,
-                      height: 30,
-                      px: 0.5,
-                      borderRadius: `${theme.yungu.shape.full}px`,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      ...(isToday && { bgcolor: 'primary.main', color: 'primary.contrastText' }),
-                    })}
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{
+                      position: 'absolute',
+                      top: `calc(${i} * var(--hour))`,
+                      right: 8,
+                      transform: 'translateY(-50%)',
+                      lineHeight: 1,
+                    }}
                   >
-                    {date}
-                  </Box>
-                </Typography>
-
-                <Box
-                  sx={{
-                    [GRID]: {
-                      position: 'relative',
-                      height: bodyHeight,
-                      mt: `${TOP_PAD}px`,
-                      mb: 1,
-                      // Today's column is faintly tinted, besides its filled date.
-                      bgcolor: isToday ? alpha(theme.palette.primary.main, 0.04) : undefined,
-                      // A line at every inner hour; the header's border already marks the top...
-                      backgroundImage: `repeating-linear-gradient(to bottom, transparent 0 calc(var(--hour) - 1px), ${theme.palette.divider} calc(var(--hour) - 1px) var(--hour))`,
-                      // ...and none at the last hour's end, which would double the frame's bottom border.
-                      backgroundSize: `100% calc(${hours.length - 1} * var(--hour))`,
-                      backgroundRepeat: 'no-repeat',
-                    },
-                  }}
-                >
-                  {nowLine?.day === d && <NowLine hours={nowLine.hours} />}
-                  {placed.length === 0 ? (
-                    <Typography variant="body2" color="text.secondary" sx={{ px: 1.5, py: 1, [GRID]: { display: 'none' } }}>
-                      No classes
-                    </Typography>
-                  ) : (
-                    <Box
-                      component="ol"
-                      sx={{
-                        m: 0,
-                        p: 0,
-                        listStyle: 'none',
-                        [LIST]: { display: 'flex', flexDirection: 'column', gap: 0.5 },
-                      }}
-                    >
-                      {placed.map((p, i) => (
-                        // Same name and start can repeat (e.g. split study halls), so the index disambiguates.
-                        <ClassBlock
-                          key={`${p.event.start}-${p.event.name}-${i}`}
-                          placed={p}
-                          color={colorOf(p.event)}
-                          surface={surface}
-                          weekStart={weekStart}
-                          firstHour={firstHour}
-                        />
-                      ))}
-                    </Box>
-                  )}
-                </Box>
+                    {`${String(h).padStart(2, '0')}:00`}
+                  </Typography>
+                ))}
               </Box>
-            );
-          })}
-        </Box>
-      )}
+            </Box>
+
+            {days.map(({ d, placed }) => {
+              const dayStart = weekStart + d * DAY;
+              const [weekday, date] = chinaDateLabel(dayStart).split(' ');
+              const isToday = d === today;
+              const headingId = `day-${d}`;
+              return (
+                <Box
+                  component="section"
+                  key={d}
+                  ref={isToday ? todayRef : undefined}
+                  aria-labelledby={headingId}
+                  sx={{ minWidth: 0, [LIST]: { scrollMarginTop: { xs: 112, sm: 120 } }, [GRID]: { borderLeft: 1, borderColor: 'divider' } }}
+                >
+                  <Typography
+                    id={headingId}
+                    variant="h3"
+                    aria-current={isToday ? 'date' : undefined}
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1,
+                      [LIST]: { mb: 1, fontSize: '1rem', lineHeight: '24px', fontWeight: 500 },
+                      [GRID]: {
+                        height: HEADER_PX,
+                        justifyContent: 'center',
+                        borderBottom: 1,
+                        borderColor: 'divider',
+                      },
+                    }}
+                  >
+                    <Box component="span" sx={{ color: isToday ? 'primary.main' : 'text.secondary', fontWeight: 500 }}>
+                      {weekday}
+                    </Box>{' '}
+                    <Box
+                      component="span"
+                      sx={(theme) => ({
+                        minWidth: 30,
+                        height: 30,
+                        px: 0.5,
+                        borderRadius: `${theme.yungu.shape.full}px`,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        ...(isToday && { bgcolor: 'primary.main', color: 'primary.contrastText' }),
+                      })}
+                    >
+                      {date}
+                    </Box>
+                  </Typography>
+
+                  <Box
+                    sx={{
+                      [GRID]: {
+                        position: 'relative',
+                        height: bodyHeight,
+                        mt: `${TOP_PAD}px`,
+                        mb: 1,
+                        // Today's column is faintly tinted, besides its filled date.
+                        bgcolor: isToday ? alpha(theme.palette.primary.main, 0.04) : undefined,
+                        // A line at every inner hour; the header's border already marks the top...
+                        backgroundImage: `repeating-linear-gradient(to bottom, transparent 0 calc(var(--hour) - 1px), ${theme.palette.divider} calc(var(--hour) - 1px) var(--hour))`,
+                        // ...and none at the last hour's end, which would double the frame's bottom border.
+                        backgroundSize: `100% calc(${hours.length - 1} * var(--hour))`,
+                        backgroundRepeat: 'no-repeat',
+                      },
+                    }}
+                  >
+                    {nowLine?.day === d && <NowLine hours={nowLine.hours} />}
+                    {placed.length === 0 ? (
+                      <Typography variant="body2" color="text.secondary" sx={{ px: 1.5, py: 1, [GRID]: { display: 'none' } }}>
+                        No classes
+                      </Typography>
+                    ) : (
+                      <Box
+                        component="ol"
+                        sx={{
+                          m: 0,
+                          p: 0,
+                          listStyle: 'none',
+                          [LIST]: { display: 'flex', flexDirection: 'column', gap: 0.5 },
+                        }}
+                      >
+                        {placed.map((p, i) => (
+                          // Same name and start can repeat (e.g. split study halls), so the index disambiguates.
+                          <ClassBlock
+                            key={`${p.event.start}-${p.event.name}-${i}`}
+                            placed={p}
+                            color={colorOf(p.event)}
+                            surface={surface}
+                            weekStart={weekStart}
+                            firstHour={firstHour}
+                          />
+                        ))}
+                      </Box>
+                    )}
+                  </Box>
+                </Box>
+              );
+            })}
+          </Box>
+        )}
+      </Box>
     </>
   );
 }

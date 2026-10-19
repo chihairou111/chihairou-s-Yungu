@@ -41,6 +41,21 @@ describe('AppShell', () => {
     expect(screen.getByRole('main')).toHaveTextContent('content');
   });
 
+  it('hosts the Today\'s classes panel on every page, beside the content rather than inside it', () => {
+    for (const pathname of ['/assignments', '/calendar']) {
+      nav.pathname = pathname;
+      const { unmount } = render(
+        <AppShell userName="Bruce Zheng" panel={<aside aria-label="Today's classes" data-today-panel="" data-open="true" />}>
+          content
+        </AppShell>,
+      );
+      const panel = screen.getByRole('complementary', { name: "Today's classes" });
+      expect(screen.getByRole('main').contains(panel)).toBe(false);
+      unmount();
+    }
+    nav.pathname = '/assignments';
+  });
+
   it('signs out through the avatar menu', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('{"ok":true}'));
     vi.stubGlobal('fetch', fetchMock);

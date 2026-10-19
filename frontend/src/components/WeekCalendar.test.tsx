@@ -174,8 +174,11 @@ describe('WeekCalendar phone layout', () => {
     vi.restoreAllMocks();
   });
 
+  /** The list follows the content column's width (a phone, or a window narrowed by the docked panel), not the window's. */
   function stubWidth(listLayout: boolean) {
-    vi.stubGlobal('matchMedia', (query: string) => ({ matches: listLayout && query.includes('max-width'), media: query, addEventListener() {}, removeEventListener() {} }));
+    vi.restoreAllMocks();
+    vi.stubGlobal('matchMedia', () => ({ matches: !listLayout, addEventListener() {}, removeEventListener() {} }));
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(listLayout ? 500 : 900);
   }
 
   it('opens the per-day list at today', async () => {
@@ -194,6 +197,7 @@ describe('WeekCalendar phone layout', () => {
     await renderFixtureWeek(WED_NOON);
     expect(scroll).not.toHaveBeenCalled();
     stubWidth(true);
+    Element.prototype.scrollIntoView = scroll;
     await renderFixtureWeek(WEEK + 9 * DAY);
     expect(scroll).not.toHaveBeenCalled();
   });

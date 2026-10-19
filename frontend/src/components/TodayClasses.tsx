@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, type CSSProperties } from 'react';
 import Box from '@mui/material/Box';
+import Card from '@mui/material/Card';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { COURSE_COLORS, courseColorHex } from '@/lib/colors';
@@ -23,8 +24,9 @@ interface TodayClassesProps {
 /**
  * Today's classes as given (select and order them with `todaysClasses`): a course-color dot and the
  * name, then "HH:MM–HH:MM · room". The class in progress is labelled Now and the next one Next, and
- * the list opens scrolled to that row; ended classes recede. The surrounding surface (the drawer)
- * supplies the title.
+ * the list opens scrolled to that card; ended classes recede. Each class is its own card (the
+ * style's card shape and surface), 8px apart, with no rules between them. The surrounding surface
+ * (the drawer or the docked panel) supplies the padding and, in the drawer, the title.
  */
 export default function TodayClasses({ events: classes, now, courses }: TodayClassesProps) {
   const timing = classTimeline(classes, now);
@@ -38,7 +40,7 @@ export default function TodayClasses({ events: classes, now, courses }: TodayCla
 
   if (classes.length === 0) {
     return (
-      <Typography variant="body2" color="text.secondary" sx={{ px: 2, py: 2.5 }}>
+      <Typography variant="body2" color="text.secondary" sx={{ py: 0.5 }}>
         No classes today
       </Typography>
     );
@@ -50,12 +52,13 @@ export default function TodayClasses({ events: classes, now, courses }: TodayCla
   };
 
   return (
-    <Box component="ol" sx={{ m: 0, p: 0, listStyle: 'none' }}>
+    <Box component="ol" sx={{ m: 0, p: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 1 }}>
       {classes.map((c, i) => {
         const ended = timing[i] === 'ended';
         const label = LABEL[timing[i]];
         return (
-          <Box
+          <Card
+            variant="outlined"
             component="li"
             key={`${c.start}-${c.name}`}
             ref={i === focus ? focusRef : undefined}
@@ -65,10 +68,12 @@ export default function TodayClasses({ events: classes, now, courses }: TodayCla
               px: 2,
               py: 1.5,
               minHeight: 64,
+              flexShrink: 0,
               display: 'flex',
               flexDirection: 'column',
               justifyContent: 'center',
-              '& + &': { borderTop: 1, borderColor: 'divider' },
+              // Clears the panel's top edge when the list scrolls Now / Next into view.
+              scrollMarginBlock: '16px',
             }}
           >
             {label && (
@@ -87,7 +92,7 @@ export default function TodayClasses({ events: classes, now, courses }: TodayCla
               <Typography
                 variant="body2"
                 component="h3"
-                sx={{ fontWeight: 600, overflowWrap: 'anywhere', color: ended ? 'text.secondary' : 'text.primary' }}
+                sx={{ fontWeight: 600, overflowWrap: 'anywhere', textWrap: 'pretty', color: ended ? 'text.secondary' : 'text.primary' }}
               >
                 {c.name}
               </Typography>
@@ -95,7 +100,7 @@ export default function TodayClasses({ events: classes, now, courses }: TodayCla
             <Typography variant="body2" color="text.secondary" sx={{ pl: TEXT_INSET, overflowWrap: 'anywhere' }}>
               {[`${chinaClock(c.start)}–${chinaClock(c.end)}`, c.room].filter(Boolean).join(' · ')}
             </Typography>
-          </Box>
+          </Card>
         );
       })}
     </Box>

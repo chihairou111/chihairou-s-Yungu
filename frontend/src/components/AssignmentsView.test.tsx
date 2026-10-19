@@ -1,7 +1,6 @@
 import { render, screen } from './test-render';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Course } from '@/lib/types';
 import AssignmentsView from './AssignmentsView';
 import { DAY, NOW, todo } from './test-fixtures';
 
@@ -16,22 +15,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const COURSES: Course[] = [
-  { id: 10, name: 'Product Design I', color: 'Banana' },
-  { id: 1, name: 'Chinese I', color: 'Tomato' },
-];
-
-function renderView(panelOpen = false) {
-  return render(
-    <AssignmentsView
-      todo={[todo('Observation task', 2 * DAY)]}
-      submitted={[]}
-      courses={COURSES}
-      todayClasses={[]}
-      now={NOW}
-      initialPanelOpen={panelOpen}
-    />,
-  );
+function renderView() {
+  return render(<AssignmentsView todo={[todo('Observation task', 2 * DAY)]} submitted={[]} now={NOW} />);
 }
 
 describe('AssignmentsView', () => {
@@ -72,21 +57,9 @@ describe('AssignmentsView', () => {
     expect(replace).toHaveBeenLastCalledWith(null, '', '/assignments');
   });
 
-  it("offers today's classes on both tabs", () => {
+  it("leaves Today's classes to the dashboard shell (shared with Calendar)", () => {
     renderView();
-    expect(screen.getByRole('button', { name: "Today's classes" })).toBeInTheDocument();
-    nav.search = 'tab=submitted';
-    renderView();
-    expect(screen.getAllByRole('button', { name: "Today's classes" })).toHaveLength(2);
-  });
-
-  it("renders the Today's classes panel in its stored state, beside the tab panel", () => {
-    const { unmount } = renderView(true);
-    const panel = screen.getByRole('complementary', { name: "Today's classes" });
-    expect(panel).toHaveAttribute('data-open', 'true');
-    expect(screen.getByRole('tabpanel').contains(panel)).toBe(false);
-    unmount();
-    renderView(false);
-    expect(document.querySelector('aside')).toHaveAttribute('data-open', 'false');
+    expect(screen.queryByRole('button', { name: "Today's classes" })).not.toBeInTheDocument();
+    expect(document.querySelector('aside')).toBeNull();
   });
 });

@@ -44,7 +44,11 @@ test('sign in, browse assignments and calendar, sign out', async ({ page }) => {
   const todayPanel = page.getByRole('complementary', { name: "Today's classes" });
   // The real clock decides whether today has classes; the panel shows either its items or its empty state.
   await expect(todayPanel.getByText('No classes today').or(todayPanel.getByRole('listitem').first())).toBeVisible();
-  await todayPanel.getByRole('button', { name: "Close today's classes" }).click();
+  // No title row or close button of its own: hovering the panel reveals the edge button on its left edge.
+  await expect(todayPanel.getByRole('heading', { name: "Today's classes" })).toHaveCount(0);
+  await page.mouse.move(viewport.width - 100, viewport.height / 2);
+  await expect(todayButton).toHaveCSS('opacity', '1');
+  await todayButton.click();
   await expect(todayPanel).toBeHidden();
 
   // By course is gone: no grouping switch, and a stale ?view=course still shows the priority columns.
@@ -256,9 +260,14 @@ test.describe("docked today's classes panel", () => {
     await expect(toggle).toHaveAttribute('aria-controls', (await panel(page).getAttribute('id'))!);
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect.poll(() => contentWidth(page)).toBeLessThan(wide - 300);
+    await expect.poll(() => panel(page).evaluate((el) => getComputedStyle(el).transform)).toBe('none');
     const box = (await panel(page).boundingBox())!;
     expect(Math.round(box.x + box.width)).toBe(viewport.width);
-    expect(Math.round(box.y)).toBe(64);
+    // Below the header band (64 + 48), which still spans the full width above it.
+    expect(Math.round(box.y)).toBe(112);
+    const band = (await page.locator('[data-page-header]').boundingBox())!;
+    expect(Math.round(band.x + band.width)).toBe(viewport.width);
+    expect(band.y + band.height).toBeLessThanOrEqual(box.y + 1);
     const main = (await page.getByRole('tabpanel').boundingBox())!;
     expect(main.x + main.width).toBeLessThanOrEqual(box.x);
     await expect(panel(page).getByText('No classes today').or(panel(page).getByRole('listitem').first())).toBeVisible();
@@ -276,8 +285,10 @@ test.describe("docked today's classes panel", () => {
     expect(await panel(page).evaluate((el) => getComputedStyle(el).transform)).toBe('none');
     expect(await contentWidth(page)).toBeLessThan(wide - 300);
 
-    // Its own button closes it, and that survives a reload too.
-    await panel(page).getByRole('button', { name: "Close today's classes" }).click();
+    // Hovering the panel reveals the edge button, which closes it; that survives a reload too.
+    await page.mouse.move(viewport.width - 100, viewport.height / 2);
+    await expect(toggle).toHaveCSS('opacity', '1');
+    await toggle.click();
     await expect(panel(page)).toHaveCount(0);
     await expect.poll(() => contentWidth(page)).toBeCloseTo(wide, 0);
     expect(await panelCookie(page)).toBe('closed');
@@ -285,6 +296,42 @@ test.describe("docked today's classes panel", () => {
     await expect(page.getByRole('heading', { name: 'This week' }).or(page.getByRole('heading', { name: 'Earlier' })).first()).toBeVisible();
     await expect(panel(page)).toHaveCount(0);
     expect(await contentWidth(page)).toBeCloseTo(wide, 0);
+  });
+
+  test('the panel belongs to the shell: it stays open, unchanged, on Calendar and across reloads', async ({ page }) => {
+    await signIn(page);
+    const toggle = page.getByRole('button', { name: "Today's classes", exact: true });
+    await toggle.focus();
+    await page.keyboard.press('Enter');
+    await expect(panel(page)).toBeVisible();
+    await expect.poll(() => panel(page).evaluate((el) => el.getBoundingClientRect().x)).toBe(1280 - 344);
+    const before = (await panel(page).boundingBox())!;
+
+    // Client-side navigation to Calendar: the same panel, already in place (no slide), beside real content.
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Calendar' }).click();
+    await expect(page).toHaveURL(/\/calendar$/);
+    await expect(panel(page)).toBeVisible();
+    expect(await panel(page).evaluate((el) => getComputedStyle(el).transform)).toBe('none');
+    expect(await panel(page).boundingBox()).toEqual(before);
+    const firstDay = page.getByRole('main').getByRole('region').first();
+    await expect(firstDay).toBeVisible();
+    const day = (await firstDay.boundingBox())!;
+    expect(day.x + day.width).toBeLessThanOrEqual(before.x);
+    await expectNoHorizontalScroll(page);
+
+    // A reload on Calendar paints it open too.
+    await page.reload();
+    await expect(panel(page)).toBeVisible();
+    await expect(firstDay).toBeVisible();
+
+    // Closed on Calendar: no space is held for it.
+    await toggle.focus();
+    await page.keyboard.press('Enter');
+    await expect(panel(page)).toHaveCount(0);
+    await expect.poll(() => page.getByRole('main').evaluate((el) => Math.round(el.getBoundingClientRect().right))).toBe(1280);
+    await page.goto('/assignments');
+    await expect(panel(page)).toHaveCount(0);
+    expect(await page.getByRole('main').evaluate((el) => Math.round(el.getBoundingClientRect().right))).toBe(1280);
   });
 
   test('the server renders the stored state (JavaScript off)', async ({ page, context, baseURL }) => {
@@ -329,6 +376,18 @@ test.describe('docked panel at 900px', () => {
       ),
     );
     expect(new Set(lefts).size).toBe(1);
+  });
+
+  test('the calendar falls back to its list beside the open panel, without horizontal scroll', async ({ page, context, baseURL }) => {
+    await signIn(page);
+    await context.addCookies([{ name: 'yl_today_panel', value: 'open', url: baseURL! }]);
+    await page.goto('/calendar');
+    await expect(page.getByRole('complementary', { name: "Today's classes" })).toBeVisible();
+    const days = page.getByRole('main').getByRole('region');
+    await expect(days.first()).toBeVisible();
+    const lefts = await days.evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().left)));
+    expect(new Set(lefts).size).toBe(1);
+    await expectNoHorizontalScroll(page);
   });
 });
 

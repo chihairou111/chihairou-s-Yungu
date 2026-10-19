@@ -8,10 +8,23 @@ export const PAGE_HEADER_ATTR = 'data-page-header';
 
 /** Marks the docked Today's classes panel; while it is open (from 900px) the content narrows for it. */
 export const TODAY_PANEL_ATTR = 'data-today-panel';
+/** Height of the page header band (px); the docked Today's classes panel starts below it. */
+export const PAGE_HEADER_PX = 48;
 /** Width of the docked panel (px). */
 export const TODAY_PANEL_PX = 344;
 /** Space the open panel takes from the page (a length; 0px while closed). Set by the app shell. */
 export const TODAY_PANEL_SPACE = 'var(--today-panel, 0px)';
+
+/** Moves with the docked panel's slide, so the content, the title and the header follow it; still for reduced motion. */
+export function panelTransition(theme: Theme, property: string | string[]) {
+  return {
+    transition: theme.transitions.create(property, {
+      duration: theme.transitions.duration.enteringScreen,
+      easing: theme.transitions.easing.easeInOut,
+    }),
+    '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+  };
+}
 
 /** Content is capped at this width and centred in the space right of the rail (on large screens). */
 export const CONTENT_MAX_PX = 1280;
@@ -83,7 +96,8 @@ interface PageHeaderProps {
 
 /**
  * The lower part of the top app bar, owned by the page: tabs or page controls on the app bar's own
- * surface ("tabs attached to the top app bar"). It spans the full width under the app bar, sticks
+ * surface ("tabs attached to the top app bar"). It spans the full width under the app bar (over the
+ * docked Today's classes panel too, which starts below it), sticks
  * with it, and starts at the title's left edge (both line up with the capped content column). The app shell drops the app bar's bottom edge while
  * a page header is present, so the header draws the one edge between the bar and the content
  * (a hairline in classic, a tonal change in expressive; see `theme.yungu.header`).
@@ -104,11 +118,15 @@ export default function PageHeader({ children }: PageHeaderProps) {
           alignItems: 'center',
           flexWrap: 'wrap',
           columnGap: 2,
-          minHeight: 48,
-          // Full bleed: undo the content padding, then pad back to the title's left edge.
+          minHeight: PAGE_HEADER_PX,
+          // Full bleed: undo the content padding, then pad back to the title's left edge. On the right
+          // it also spans the docked panel's space (the panel starts below it), padded back by as much;
+          // its margin and padding move with the content's, so its right edge stays at the window's.
           ml: perBreakpoint((bp) => `-${pl[bp]}`),
-          mr: perBreakpoint((bp) => `-${pr[bp]}`),
-          ...aligned,
+          mr: perBreakpoint((bp) => `calc(-${pr[bp]} - ${TODAY_PANEL_SPACE})`),
+          pl: aligned.pl,
+          pr: perBreakpoint((bp) => `calc(${aligned.pr[bp]} + ${TODAY_PANEL_SPACE})`),
+          ...panelTransition(theme, ['margin-right', 'padding-right']),
           mb: CONTENT_GAP,
           bgcolor: header.bg,
           borderBottom: header.edge,

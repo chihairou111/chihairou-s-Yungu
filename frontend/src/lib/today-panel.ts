@@ -1,5 +1,5 @@
-// Whether the docked Today's classes panel is open on the Assignments page. No next/headers
-// import, so client code can use it; the page reads the cookie on the server for the first paint.
+// Whether the docked Today's classes panel is open (on every dashboard page). No next/headers
+// import, so client code can use it; the dashboard layout reads the cookie on the server for the first paint.
 
 export const TODAY_PANEL_COOKIE = 'yl_today_panel';
 export const TODAY_PANEL_MAX_AGE = 60 * 60 * 24 * 365;

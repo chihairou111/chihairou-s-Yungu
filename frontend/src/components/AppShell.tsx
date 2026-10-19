@@ -12,7 +12,6 @@ import MenuList from '@mui/material/MenuList';
 import Popover from '@mui/material/Popover';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
-import type { Theme } from '@mui/material/styles';
 import Logout from '@mui/icons-material/Logout';
 import { sectionFor } from './nav-items';
 import {
@@ -23,20 +22,11 @@ import {
   TODAY_PANEL_SPACE,
   alignedPadding,
   pagePadding,
+  panelTransition,
 } from './PageHeader';
 import { PHONE_NAV_CLEARANCE } from './NavRail';
+import { BOTTOM_FAB_MEDIA } from './TodayDrawer';
 import SettingsMenu from './SettingsMenu';
-
-/** Moves with the docked panel's slide, so the content and the title follow it; still for reduced motion. */
-function panelTransition(theme: Theme, property: string) {
-  return {
-    transition: theme.transitions.create(property, {
-      duration: theme.transitions.duration.enteringScreen,
-      easing: theme.transitions.easing.easeInOut,
-    }),
-    '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
-  };
-}
 
 /** "Bruce Zheng" -> "BZ"; "郑博" -> "郑"; blank -> "?". */
 export function initials(name: string): string {
@@ -50,14 +40,19 @@ export function initials(name: string): string {
 interface AppShellProps {
   userName: string;
   children: ReactNode;
+  /**
+   * Today's classes (a `TodayDrawer`): part of the shell, so it is the same on every page and keeps
+   * its state, without re-animating, as the user moves between pages.
+   */
+  panel?: ReactNode;
 }
 
 /**
  * Material app bar (section title, settings and account menus) over the page content. A page may
  * extend the bar with a `PageHeader` (tabs, page controls); the bar then gives up its bottom edge
- * so the two read as one header.
+ * so the two read as one header. The Today's classes panel sits beside the content on every page.
  */
-export default function AppShell({ userName, children }: AppShellProps) {
+export default function AppShell({ userName, children, panel }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
@@ -159,8 +154,11 @@ export default function AppShell({ userName, children }: AppShellProps) {
           // Room for the docked panel, which slides in over this margin as the content narrows.
           mr: TODAY_PANEL_SPACE,
           ...panelTransition(theme, 'margin-right'),
-          // On phones the last card clears the bottom nav (and the button beside it).
+          // Room below the last card for the bottom-right Today's classes button (40 + 16 inset + margin)
+          // where it is always shown; on phones the last card clears the bottom nav and the button beside it.
           pb: { xs: PHONE_NAV_CLEARANCE, sm: 3 },
+          [BOTTOM_FAB_MEDIA]: { pb: 9 },
+          [theme.breakpoints.down('sm')]: { pb: PHONE_NAV_CLEARANCE },
           // Content is capped and centred; a page header still spans the full width (see PageHeader).
           [`& > :not([${PAGE_HEADER_ATTR}])`]: { maxWidth: CONTENT_MAX_PX, mx: 'auto' },
           // A page header sits flush under the app bar and sets the content's top spacing itself.
@@ -169,6 +167,7 @@ export default function AppShell({ userName, children }: AppShellProps) {
       >
         {children}
       </Box>
+      {panel}
     </Box>
   );
 }
