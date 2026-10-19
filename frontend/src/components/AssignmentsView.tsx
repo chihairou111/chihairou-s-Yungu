@@ -5,7 +5,7 @@ import Tab from '@mui/material/Tab';
 import Tabs from '@mui/material/Tabs';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
-import { useTheme } from '@mui/material/styles';
+import { useTheme, type SxProps, type Theme } from '@mui/material/styles';
 import Check from '@mui/icons-material/Check';
 import type { Assignment, ClassEvent, Course } from '@/lib/types';
 import CourseBoard from './CourseBoard';
@@ -36,9 +36,6 @@ export default function AssignmentsView({ todo, submitted, courses, todayClasses
   const params = useSearchParams();
   const tab: TabKey = params.get('tab') === 'submitted' ? 'submitted' : 'todo';
   const view: ViewKey = params.get('view') === 'course' ? 'course' : 'priority';
-  // Material 3 segmented buttons mark the selected segment with a check.
-  const { segmentedCheck } = useTheme().yungu;
-  const check = (value: ViewKey) => (segmentedCheck && view === value ? <Check aria-hidden sx={{ fontSize: 18, mr: 1 }} /> : null);
 
   function go(nextTab: TabKey, nextView: ViewKey) {
     const query = new URLSearchParams();
@@ -62,30 +59,23 @@ export default function AssignmentsView({ todo, submitted, courses, todayClasses
             aria-controls={tab === 'submitted' ? 'panel-submitted' : undefined}
           />
         </Tabs>
-        {/* Right end of the tab row; below 600px a full-width segmented row under the tabs. */}
+        {/* Right end of the tab row from 600px; phones get the copy at the top of the panel. */}
         {tab === 'todo' && (
-          <ToggleButtonGroup
-            exclusive
-            size="small"
-            color="primary"
-            value={view}
-            onChange={(_, next: ViewKey | null) => next && go(tab, next)}
-            aria-label="Group to-do work"
-            sx={{ ml: { sm: 'auto' }, width: { xs: '100%', sm: 'auto' }, mb: { xs: 1.5, sm: 0 } }}
-          >
-            <ToggleButton value="priority" sx={{ px: 2, flex: { xs: 1, sm: 'none' } }}>
-              {check('priority')}
-              By priority
-            </ToggleButton>
-            <ToggleButton value="course" sx={{ px: 2, flex: { xs: 1, sm: 'none' } }}>
-              {check('course')}
-              By course
-            </ToggleButton>
-          </ToggleButtonGroup>
+          <ViewSwitch view={view} onChange={(next) => go(tab, next)} sx={{ display: { xs: 'none', sm: 'inline-flex' }, ml: 'auto' }} />
         )}
       </PageHeader>
       {/* Room below the last card for the bottom-right button (40px + 16px inset + margin). */}
-      <Box role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} sx={{ [BOTTOM_FAB_MEDIA]: { pb: 9 } }}>
+      <Box
+        role="tabpanel"
+        id={`panel-${tab}`}
+        aria-labelledby={`tab-${tab}`}
+        // Phones already clear the bottom nav and the button with the shell's bottom padding.
+        sx={(theme) => ({ [BOTTOM_FAB_MEDIA]: { pb: 9 }, [theme.breakpoints.down('sm')]: { pb: 0 } })}
+      >
+        {/* On phones the switch scrolls with the content, so only the title and tabs stay pinned. */}
+        {tab === 'todo' && (
+          <ViewSwitch view={view} onChange={(next) => go(tab, next)} sx={{ display: { xs: 'flex', sm: 'none' }, mb: 2 }} />
+        )}
         {tab === 'todo' ? (
           view === 'course' ? (
             <CourseBoard courses={courses} items={todo} now={now} />
@@ -98,5 +88,38 @@ export default function AssignmentsView({ todo, submitted, courses, todayClasses
       </Box>
       <TodayDrawer events={todayClasses} now={now} courses={courses} />
     </>
+  );
+}
+
+interface ViewSwitchProps {
+  view: ViewKey;
+  onChange: (next: ViewKey) => void;
+  sx: SxProps<Theme>;
+}
+
+/** The By priority | By course segmented button. Full width on phones, intrinsic width in the header. */
+function ViewSwitch({ view, onChange, sx }: ViewSwitchProps) {
+  // Material 3 segmented buttons mark the selected segment with a check.
+  const { segmentedCheck } = useTheme().yungu;
+  const check = (value: ViewKey) => (segmentedCheck && view === value ? <Check aria-hidden sx={{ fontSize: 18, mr: 1 }} /> : null);
+  return (
+    <ToggleButtonGroup
+      exclusive
+      size="small"
+      color="primary"
+      value={view}
+      onChange={(_, next: ViewKey | null) => next && onChange(next)}
+      aria-label="Group to-do work"
+      sx={sx}
+    >
+      <ToggleButton value="priority" sx={{ px: 2, flex: { xs: 1, sm: 'none' } }}>
+        {check('priority')}
+        By priority
+      </ToggleButton>
+      <ToggleButton value="course" sx={{ px: 2, flex: { xs: 1, sm: 'none' } }}>
+        {check('course')}
+        By course
+      </ToggleButton>
+    </ToggleButtonGroup>
   );
 }

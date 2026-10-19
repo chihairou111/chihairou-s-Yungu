@@ -67,7 +67,7 @@ export default function LoginForm() {
           {error}
         </Alert>
       )}
-      <Button type="submit" variant="contained" size="large" disabled={pending} fullWidth>
+      <Button type="submit" variant="contained" size="large" disabled={pending} fullWidth sx={{ minHeight: { xs: 48, sm: 40 } }}>
         {pending ? 'Signing in…' : 'Sign in'}
       </Button>
     </Stack>

@@ -14,7 +14,8 @@ import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
 import Logout from '@mui/icons-material/Logout';
 import { sectionFor } from './nav-items';
-import { PAGE_HEADER_ATTR, PAGE_PR, contentInset } from './PageHeader';
+import { CONTENT_MAX_PX, PAGE_HEADER_ATTR, alignedPadding, pagePadding } from './PageHeader';
+import { PHONE_NAV_CLEARANCE } from './NavRail';
 import SettingsMenu from './SettingsMenu';
 
 /** "Bruce Zheng" -> "BZ"; "郑博" -> "郑"; blank -> "?". */
@@ -67,7 +68,7 @@ export default function AppShell({ userName, children }: AppShellProps) {
       }}
     >
       <AppBar position="sticky">
-        <Toolbar sx={(theme) => ({ pl: contentInset(theme), pr: PAGE_PR })}>
+        <Toolbar sx={(theme) => alignedPadding(theme, 'viewport')}>
           <Typography variant="h1" sx={{ flexGrow: 1, minWidth: 0 }} noWrap>
             {title}
           </Typography>
@@ -129,10 +130,12 @@ export default function AppShell({ userName, children }: AppShellProps) {
       <Box
         component="main"
         sx={(theme) => ({
-          pl: contentInset(theme),
-          pr: PAGE_PR,
+          ...pagePadding(theme),
           pt: 2,
-          pb: 3,
+          // On phones the last card clears the bottom nav (and the button beside it).
+          pb: { xs: PHONE_NAV_CLEARANCE, sm: 3 },
+          // Content is capped and centred; a page header still spans the full width (see PageHeader).
+          [`& > :not([${PAGE_HEADER_ATTR}])`]: { maxWidth: CONTENT_MAX_PX, mx: 'auto' },
           // A page header sits flush under the app bar and sets the content's top spacing itself.
           [`&:has([${PAGE_HEADER_ATTR}])`]: { pt: 0 },
         })}

@@ -10,7 +10,8 @@ export default function LoginPage() {
   return (
     <Box
       component="main"
-      sx={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', px: 2, py: 4, bgcolor: 'background.default' }}
+      // Optically centred: exact centring sits low on tall screens.
+      sx={{ minHeight: '100dvh', display: 'grid', placeItems: 'start center', px: 2, pt: 'max(32px, 18vh)', pb: 4, bgcolor: 'background.default' }}
     >
       <LoginCard>
         <Typography variant="h1" sx={{ fontSize: '1.5rem' }}>

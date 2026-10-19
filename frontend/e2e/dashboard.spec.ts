@@ -66,7 +66,10 @@ test('sign in, browse assignments and calendar, sign out', async ({ page }) => {
 
   await page.getByRole('tab', { name: 'Submitted' }).click();
   await expect(page).toHaveURL(/\?tab=submitted$/);
-  await expect(page.getByText('Submitted late').first()).toBeVisible();
+  // Grouped by due date; only late work carries a chip.
+  // (Which groups show depends on today's date; the fixtures are always in the past.)
+  await expect(page.getByRole('heading', { level: 3, name: /^(This week|Last week|Earlier)$/ }).first()).toBeVisible();
+  await expect(page.getByText('Late', { exact: true })).toHaveCount(1);
 
   // Hovering the rail reveals its labels; the link goes to the calendar.
   const nav = page.getByRole('navigation', { name: 'Main' });
@@ -104,21 +107,94 @@ test.describe('phone width', () => {
     await signIn(page);
     await expect(page.getByRole('heading', { name: 'Overdue', exact: true })).toBeVisible();
     await expectNoHorizontalScroll(page);
-    // No hover on a phone, so the Today's classes button is always shown.
-    const fab = page.getByRole('button', { name: "Today's classes" });
-    await expect(fab).toHaveCSS('opacity', '1');
-    // Material's bottom-right FAB spot (16px insets), not over the content's right edge.
-    const box = (await fab.boundingBox())!;
-    expect(Math.round(390 - (box.x + box.width))).toBe(16);
-    expect(Math.round(844 - (box.y + box.height))).toBe(16);
+    // Cards use the compact 16px margins: at least 340 of the 390px.
+    const card = (await page.getByRole('article').first().boundingBox())!;
+    expect(card.width).toBeGreaterThanOrEqual(340);
     await page.goto('/assignments?view=course');
     await expect(page.getByRole('article', { name: 'Chinese I' })).toBeVisible();
     await expectNoHorizontalScroll(page);
     await page.goto('/assignments?tab=submitted');
-    await expect(page.getByText('Submitted late').first()).toBeVisible();
+    await expect(page.getByText('Late', { exact: true })).toBeVisible();
     await expectNoHorizontalScroll(page);
     await page.goto('/calendar');
     await expect(rangeLabel(page)).toBeVisible();
+    await expectNoHorizontalScroll(page);
+  });
+
+  test('the nav docks bottom-left, beside the bottom-right button, and clears the content', async ({ page }) => {
+    await signIn(page);
+    const nav = page.getByRole('navigation', { name: 'Main' });
+    const navBox = (await nav.boundingBox())!;
+    expect(Math.round(navBox.x)).toBe(16);
+    expect(Math.round(844 - (navBox.y + navBox.height))).toBe(16);
+    expect(Math.round(navBox.height)).toBe(56);
+    // Icons only, but each link keeps its name and the current page is marked.
+    await expect(nav.getByRole('link', { name: 'Assignments' })).toHaveAttribute('aria-current', 'page');
+    await expect(nav.getByRole('link', { name: 'Calendar' })).toBeVisible();
+
+    // No hover on a phone, so the Today's classes button is always shown, centred on the nav pill.
+    const fab = page.getByRole('button', { name: "Today's classes" });
+    await expect(fab).toHaveCSS('opacity', '1');
+    const fabBox = (await fab.boundingBox())!;
+    expect(Math.round(390 - (fabBox.x + fabBox.width))).toBe(16);
+    expect(Math.round(fabBox.y + fabBox.height / 2)).toBe(Math.round(navBox.y + navBox.height / 2));
+    expect(navBox.x + navBox.width).toBeLessThan(fabBox.x);
+
+    // Scrolled to the end, the last card sits above the nav.
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    const lastCard = (await page.getByRole('article').last().boundingBox())!;
+    expect(lastCard.y + lastCard.height).toBeLessThanOrEqual(navBox.y);
+
+    // The view switch scrolls with the content: only the title and tabs stay pinned.
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const views = page.getByRole('group', { name: 'Group to-do work' });
+    await expect(views).toHaveCount(1);
+    expect(await views.evaluate((el) => el.closest('[data-page-header]') === null)).toBe(true);
+    const header = (await page.locator('[data-page-header]').boundingBox())!;
+    expect(Math.round(header.y + header.height)).toBe(104);
+
+    // The nav still navigates.
+    await nav.getByRole('link', { name: 'Calendar' }).click();
+    await expect(page).toHaveURL(/\/calendar$/);
+    await expect(nav.getByRole('link', { name: 'Calendar' })).toHaveAttribute('aria-current', 'page');
+  });
+
+  test('the calendar header is one row with the short range', async ({ page }) => {
+    await signIn(page);
+    await page.goto('/calendar');
+    const header = (await page.locator('[data-page-header]').boundingBox())!;
+    expect(Math.round(header.y + header.height)).toBe(104);
+    await expect(rangeLabel(page)).toHaveText(/^[A-Z][a-z]{2} \d{1,2} – .+, \d{4}[A-Z][a-z]{2} \d{1,2}–/);
+  });
+});
+
+test.describe('wide screens', () => {
+  test.use({ viewport: { width: 1920, height: 1080 } });
+
+  test('content is capped at 1280 and lines up with the title and tabs', async ({ page }) => {
+    await signIn(page);
+    const title = (await page.getByRole('heading', { level: 1 }).boundingBox())!;
+    const tabs = (await page.getByRole('tablist').boundingBox())!;
+    const board = (await page.getByRole('tabpanel').boundingBox())!;
+    expect(Math.round(board.width)).toBe(1280);
+    expect(Math.round(title.x)).toBe(Math.round(board.x));
+    expect(Math.round(tabs.x)).toBe(Math.round(board.x));
+    // The first content row starts right under the header.
+    const first = (await page.getByRole('heading', { name: 'Overdue', exact: true }).boundingBox())!;
+    expect(first.y).toBeLessThanOrEqual(140);
+  });
+});
+
+test.describe('half-width window', () => {
+  test.use({ viewport: { width: 800, height: 800 } });
+
+  test('the calendar keeps the week grid from 720px', async ({ page }) => {
+    await signIn(page);
+    await page.goto('/calendar');
+    const days = page.getByRole('main').getByRole('region');
+    await expect(days.first()).toBeVisible();
+    const tops = await days.evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)));
+    expect(new Set(tops).size).toBe(1);
     await expectNoHorizontalScroll(page);
   });
 });

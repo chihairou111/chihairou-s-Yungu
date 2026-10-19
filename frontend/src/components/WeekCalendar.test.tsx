@@ -1,6 +1,7 @@
 import { render, screen, within } from './test-render';
-import { describe, expect, it, vi } from 'vitest';
-import { COURSE_COLORS } from '@/lib/colors';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { COURSE_COLORS, contrastRatio, lightEventColors } from '@/lib/colors';
+import expressive from '@/theme/expressive';
 import { data } from '@/lib/data';
 import { parseWeekParam } from '@/lib/time';
 import type { ClassEvent, Course } from '@/lib/types';
@@ -113,32 +114,101 @@ describe('WeekCalendar', () => {
 });
 
 describe('WeekCalendar course colors', () => {
-  it('fills each class with its course color and readable text', async () => {
+  // test-render uses the expressive style; blocks sit on its paper surface.
+  const SURFACE = expressive.palette.background.paper;
+
+  it('fills each class with a light tint of its course color and dark readable text in the same hue', async () => {
     await renderFixtureWeek();
     const chinese = blockFor('Mon 12', 'Chinese I'); // Tomato
-    expect(chinese.style.getPropertyValue('--course-bg')).toBe('#D50000');
-    expect(chinese.style.getPropertyValue('--course-fg')).toBe('#fff');
+    expect(chinese.style.getPropertyValue('--course')).toBe('#D50000');
+    expect(chinese.style.getPropertyValue('--course-bg')).toBe(lightEventColors('#D50000', SURFACE).bg);
+    expect(chinese.style.getPropertyValue('--course-fg')).toBe(lightEventColors('#D50000', SURFACE).fg);
     const design = blockFor('Wed 14', 'Product Design I'); // Banana
-    expect(design.style.getPropertyValue('--course-bg')).toBe('#F6BF26');
-    expect(design.style.getPropertyValue('--course-fg')).toBe('rgba(0,0,0,0.87)');
+    const bg = design.style.getPropertyValue('--course-bg');
+    expect(contrastRatio(design.style.getPropertyValue('--course-fg'), bg)).toBeGreaterThanOrEqual(4.5);
   });
 
   it('colors the timetable\'s "CL Business I" like its course', async () => {
     const courses = await data.getCourses();
     const business = courses.find((c) => c.name.startsWith('CL Business'))!;
     await renderFixtureWeek();
-    expect(blockFor('Mon 12', 'CL Business I').style.getPropertyValue('--course-bg')).toBe(COURSE_COLORS[business.color]);
+    expect(blockFor('Mon 12', 'CL Business I').style.getPropertyValue('--course')).toBe(COURSE_COLORS[business.color]);
   });
 
   it('uses Graphite for a course color the palette does not know', () => {
     const odd = { id: 1, name: 'Assembly', color: 'Chartreuse' } as unknown as Course;
     render(<WeekCalendar weekStart={WEEK} courses={[odd]} events={[cls('Assembly', 0, 480, 540)]} now={NOW} />);
-    expect(screen.getByRole('listitem').style.getPropertyValue('--course-bg')).toBe('#616161');
+    expect(screen.getByRole('listitem').style.getPropertyValue('--course')).toBe('#616161');
   });
 
   it('falls back to Peacock for a class with no known course', () => {
     render(<WeekCalendar weekStart={WEEK} courses={[]} events={[cls('Assembly', 0, 480, 540)]} now={NOW} />);
-    expect(screen.getByRole('listitem').style.getPropertyValue('--course-bg')).toBe('#039BE5');
+    expect(screen.getByRole('listitem').style.getPropertyValue('--course')).toBe('#039BE5');
+  });
+});
+
+describe('WeekCalendar current time', () => {
+  const nowLine = (day: string) => screen.getByRole('region', { name: day }).querySelector('[data-now-line]') as HTMLElement | null;
+
+  it("draws the current-time line on today's column at the current minute", async () => {
+    await renderFixtureWeek(WEEK + 2 * DAY + 10.5 * HOUR); // Wed 10:30; the grid starts at 08:00
+    expect(nowLine('Wed 14')).not.toBeNull();
+    expect(nowLine('Wed 14')!.style.getPropertyValue('--now')).toBe('2.5');
+    expect(nowLine('Mon 12')).toBeNull();
+  });
+
+  it('draws no line outside the shown hours or in another week', async () => {
+    await renderFixtureWeek(WEEK + 2 * DAY + 20 * HOUR);
+    expect(document.querySelector('[data-now-line]')).toBeNull();
+  });
+
+  it('draws no line in another week', async () => {
+    await renderFixtureWeek(WEEK + 9 * DAY + 10 * HOUR);
+    expect(document.querySelector('[data-now-line]')).toBeNull();
+  });
+});
+
+describe('WeekCalendar phone layout', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function stubWidth(listLayout: boolean) {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: listLayout && query.includes('max-width'), media: query, addEventListener() {}, removeEventListener() {} }));
+  }
+
+  it('opens the per-day list at today', async () => {
+    stubWidth(true);
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    await renderFixtureWeek(WED_NOON);
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scroll.mock.contexts[0]).toBe(screen.getByRole('region', { name: 'Wed 14' }));
+  });
+
+  it('does not scroll the grid, or a week without today', async () => {
+    stubWidth(false);
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    await renderFixtureWeek(WED_NOON);
+    expect(scroll).not.toHaveBeenCalled();
+    stubWidth(true);
+    await renderFixtureWeek(WEEK + 9 * DAY);
+    expect(scroll).not.toHaveBeenCalled();
+  });
+
+  it('shows a short range for phones while the heading keeps the full range', () => {
+    render(<WeekCalendar weekStart={WEEK} courses={[]} events={[]} now={NOW} />);
+    const heading = screen.getByRole('heading', { level: 2 });
+    expect(heading).toHaveAccessibleName('Oct 12 – 18, 2026');
+    expect(within(heading).getByText('Oct 12–18')).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('marks classes too short for a second line at the narrow grid size', () => {
+    render(<WeekCalendar weekStart={WEEK} courses={[]} events={[cls('Short', 0, 480, 510), cls('Long', 1, 480, 520)]} now={NOW} />);
+    expect(blockFor('Mon 12', 'Short')).toHaveAttribute('data-short');
+    expect(blockFor('Tue 13', 'Long')).not.toHaveAttribute('data-short');
   });
 });
 

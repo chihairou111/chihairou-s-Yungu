@@ -1,5 +1,5 @@
 'use client';
-import type { CSSProperties } from 'react';
+import { useEffect, useRef, type CSSProperties } from 'react';
 import Link from 'next/link';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -8,22 +8,33 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import ChevronLeft from '@mui/icons-material/ChevronLeft';
 import ChevronRight from '@mui/icons-material/ChevronRight';
-import { chinaClock, chinaDateLabel, dayIndex, formatWeekParam, shiftWeek, weekRangeLabel } from '@/lib/time';
-import { COURSE_COLORS, courseColorHex, readableTextOn } from '@/lib/colors';
+import { alpha, useTheme } from '@mui/material/styles';
+import { chinaClock, chinaDateLabel, dayIndex, formatWeekParam, shiftWeek, weekRangeLabel, weekRangeShortLabel } from '@/lib/time';
+import { COURSE_COLORS, courseColorHex, lightEventColors } from '@/lib/colors';
+import { nowLineHours } from '@/lib/schedule';
 import type { ClassEvent, Course } from '@/lib/types';
 import PageHeader from './PageHeader';
+import { useNow } from './useNow';
+import { VISUALLY_HIDDEN } from './visually-hidden';
 
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
-/** Height of one hour in the grid, in px. A 40-minute class gets 48px: two lines of text. */
+/** One hour of the grid: 72px (a 40-minute class gets 48px, two lines); 64px in the narrow grid. */
 const HOUR_PX = 72;
-const HEADER_PX = 56;
+const HOUR_NARROW_PX = 64;
+/** Time axis width: 56px; 48px in the narrow grid. */
 const AXIS_PX = 56;
+const AXIS_NARROW_PX = 48;
+const HEADER_PX = 56;
 /** Space above the first hour line so its axis label is not clipped. */
 const TOP_PAD = 8;
-/** The grid needs the `md` breakpoint (900px); below it the same markup reads as a per-day list. */
-const MD_UP = '@media (min-width: 900px)';
-const MD_DOWN = '@media (max-width: 899.95px)';
+/** A block shorter than this (px, in the narrow grid) shows its name only. */
+const TWO_LINES_PX = 40;
+/** The grid needs 720px; below it the same markup reads as a per-day list. */
+const LIST_QUERY = '(max-width: 719.95px)';
+const GRID = '@media (min-width: 720px)';
+const LIST = `@media ${LIST_QUERY}`;
+const NARROW_GRID = '@media (min-width: 720px) and (max-width: 899.95px)';
 /** Google Calendar's default event color, for a class whose course is unknown. */
 const DEFAULT_COLOR = 'Peacock';
 
@@ -79,11 +90,15 @@ interface WeekCalendarProps {
 }
 
 /**
- * One week of classes (China time): days across, time down. Mon–Fri always show,
- * Sat/Sun only when they have classes. Below 900px the same markup reflows into a
- * per-day list.
+ * One week of classes (China time): days across, time down, with a current-time line on today's
+ * column. Mon–Fri always show, Sat/Sun only when they have classes. Below 720px the same markup
+ * reflows into a per-day list that opens at today.
  */
-export default function WeekCalendar({ weekStart, events, courses, now }: WeekCalendarProps) {
+export default function WeekCalendar({ weekStart, events, courses, now: serverNow }: WeekCalendarProps) {
+  const now = useNow(serverNow);
+  const theme = useTheme();
+  const surface = theme.palette.background.paper;
+  const todayRef = useRef<HTMLElement>(null);
   const classes = events.filter((e) => e.isClass && dayIndex(e.start, weekStart) >= 0 && dayIndex(e.start, weekStart) < 7);
   const days = [0, 1, 2, 3, 4, 5, 6]
     .map((d) => ({ d, placed: layoutDay(classes.filter((e) => dayIndex(e.start, weekStart) === d)) }))
@@ -93,11 +108,19 @@ export default function WeekCalendar({ weekStart, events, courses, now }: WeekCa
   const firstHour = Math.floor(Math.min(...classes.map((e) => minuteOfDay(e.start, weekStart))) / 60);
   const lastHour = Math.ceil(Math.max(...classes.map((e) => minuteOfDay(e.end, weekStart))) / 60);
   const hours = classes.length > 0 ? Array.from({ length: lastHour - firstHour }, (_, i) => firstHour + i) : [];
-  const bodyPx = hours.length * HOUR_PX;
+  const bodyHeight = `calc(${hours.length} * var(--hour))`;
   const colorOf = (e: ClassEvent) => {
     const course = courses.find((c) => c.id === e.courseId);
     return course ? courseColorHex(course.color) : COURSE_COLORS[DEFAULT_COLOR];
   };
+  const nowLine = classes.length > 0 ? nowLineHours(now, weekStart, firstHour, hours.length) : null;
+  const scrollToToday = days.some(({ d }) => d === today) && days[0].d !== today;
+
+  // On a phone the list opens at today (once, on arrival), so a Thursday does not start on Monday.
+  useEffect(() => {
+    if (scrollToToday && window.matchMedia?.(LIST_QUERY).matches) todayRef.current?.scrollIntoView?.({ block: 'start' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on arrival, not on every clock tick
+  }, [weekStart]);
 
   return (
     <>
@@ -114,8 +137,17 @@ export default function WeekCalendar({ weekStart, events, courses, now }: WeekCa
             <ChevronRight />
           </IconButton>
         </Stack>
-        <Typography variant="h2" sx={{ whiteSpace: 'nowrap', py: 1 }}>
-          {weekRangeLabel(weekStart)}
+        {/* One row on phones: the range moves to the right end in its short form; the heading keeps the full range. */}
+        <Typography
+          variant="h2"
+          sx={{ whiteSpace: 'nowrap', py: 1, [theme.breakpoints.down('sm')]: { ml: 'auto', fontSize: '1rem', lineHeight: '24px', fontWeight: 500 } }}
+        >
+          <Box component="span" sx={{ [theme.breakpoints.down('sm')]: VISUALLY_HIDDEN }}>
+            {weekRangeLabel(weekStart)}
+          </Box>
+          <Box component="span" aria-hidden="true" sx={{ display: { xs: 'inline', sm: 'none' } }}>
+            {weekRangeShortLabel(weekStart)}
+          </Box>
         </Typography>
       </PageHeader>
 
@@ -130,11 +162,16 @@ export default function WeekCalendar({ weekStart, events, courses, now }: WeekCa
       ) : (
         <Box
           sx={{
-            display: { xs: 'flex', md: 'grid' },
+            '--hour': `${HOUR_PX}px`,
+            '--axis': `${AXIS_PX}px`,
+            [NARROW_GRID]: { '--hour': `${HOUR_NARROW_PX}px`, '--axis': `${AXIS_NARROW_PX}px` },
+            display: 'flex',
             flexDirection: 'column',
-            gap: { xs: 3, md: 0 },
-            gridTemplateColumns: `${AXIS_PX}px repeat(${days.length}, minmax(0, 1fr))`,
-            [MD_UP]: {
+            gap: 3,
+            [GRID]: {
+              display: 'grid',
+              gap: 0,
+              gridTemplateColumns: `var(--axis) repeat(${days.length}, minmax(0, 1fr))`,
               bgcolor: 'background.paper',
               border: 1,
               borderColor: 'divider',
@@ -144,8 +181,8 @@ export default function WeekCalendar({ weekStart, events, courses, now }: WeekCa
           }}
         >
           {/* Time axis (grid only). */}
-          <Box aria-hidden sx={{ display: { xs: 'none', md: 'block' }, pt: `${HEADER_PX + TOP_PAD}px`, pb: 1 }}>
-            <Box sx={{ position: 'relative', height: bodyPx }}>
+          <Box aria-hidden sx={{ display: 'none', [GRID]: { display: 'block' }, pt: `${HEADER_PX + TOP_PAD}px`, pb: 1 }}>
+            <Box sx={{ position: 'relative', height: bodyHeight }}>
               {hours.map((h, i) => (
                 <Typography
                   key={h}
@@ -154,7 +191,7 @@ export default function WeekCalendar({ weekStart, events, courses, now }: WeekCa
                   color="text.secondary"
                   sx={{
                     position: 'absolute',
-                    top: i * HOUR_PX,
+                    top: `calc(${i} * var(--hour))`,
                     right: 8,
                     transform: 'translateY(-50%)',
                     lineHeight: 1,
@@ -175,8 +212,9 @@ export default function WeekCalendar({ weekStart, events, courses, now }: WeekCa
               <Box
                 component="section"
                 key={d}
+                ref={isToday ? todayRef : undefined}
                 aria-labelledby={headingId}
-                sx={{ minWidth: 0, [MD_UP]: { borderLeft: 1, borderColor: 'divider' } }}
+                sx={{ minWidth: 0, [LIST]: { scrollMarginTop: { xs: 112, sm: 120 } }, [GRID]: { borderLeft: 1, borderColor: 'divider' } }}
               >
                 <Typography
                   id={headingId}
@@ -186,8 +224,8 @@ export default function WeekCalendar({ weekStart, events, courses, now }: WeekCa
                     display: 'flex',
                     alignItems: 'center',
                     gap: 1,
-                    mb: { xs: 1.5, md: 0 },
-                    [MD_UP]: {
+                    [LIST]: { mb: 1, fontSize: '1rem', lineHeight: '24px', fontWeight: 500 },
+                    [GRID]: {
                       height: HEADER_PX,
                       justifyContent: 'center',
                       borderBottom: 1,
@@ -217,22 +255,24 @@ export default function WeekCalendar({ weekStart, events, courses, now }: WeekCa
 
                 <Box
                   sx={{
-                    [MD_UP]: {
+                    [GRID]: {
                       position: 'relative',
-                      height: bodyPx,
+                      height: bodyHeight,
                       mt: `${TOP_PAD}px`,
                       mb: 1,
+                      // Today's column is faintly tinted, besides its filled date.
+                      bgcolor: isToday ? alpha(theme.palette.primary.main, 0.04) : undefined,
                       // A line at every inner hour; the header's border already marks the top...
-                      backgroundImage: (t) =>
-                        `repeating-linear-gradient(to bottom, transparent 0 ${HOUR_PX - 1}px, ${t.palette.divider} ${HOUR_PX - 1}px ${HOUR_PX}px)`,
+                      backgroundImage: `repeating-linear-gradient(to bottom, transparent 0 calc(var(--hour) - 1px), ${theme.palette.divider} calc(var(--hour) - 1px) var(--hour))`,
                       // ...and none at the last hour's end, which would double the frame's bottom border.
-                      backgroundSize: `100% ${bodyPx - HOUR_PX}px`,
+                      backgroundSize: `100% calc(${hours.length - 1} * var(--hour))`,
                       backgroundRepeat: 'no-repeat',
                     },
                   }}
                 >
+                  {nowLine?.day === d && <NowLine hours={nowLine.hours} />}
                   {placed.length === 0 ? (
-                    <Typography variant="body2" color="text.secondary" sx={{ px: 2, py: 1.5, [MD_UP]: { display: 'none' } }}>
+                    <Typography variant="body2" color="text.secondary" sx={{ px: 1.5, py: 1, [GRID]: { display: 'none' } }}>
                       No classes
                     </Typography>
                   ) : (
@@ -242,7 +282,7 @@ export default function WeekCalendar({ weekStart, events, courses, now }: WeekCa
                         m: 0,
                         p: 0,
                         listStyle: 'none',
-                        [MD_DOWN]: { display: 'flex', flexDirection: 'column', gap: 0.5 },
+                        [LIST]: { display: 'flex', flexDirection: 'column', gap: 0.5 },
                       }}
                     >
                       {placed.map((p, i) => (
@@ -251,6 +291,7 @@ export default function WeekCalendar({ weekStart, events, courses, now }: WeekCa
                           key={`${p.event.start}-${p.event.name}-${i}`}
                           placed={p}
                           color={colorOf(p.event)}
+                          surface={surface}
                           weekStart={weekStart}
                           firstHour={firstHour}
                         />
@@ -267,28 +308,68 @@ export default function WeekCalendar({ weekStart, events, courses, now }: WeekCa
   );
 }
 
+/** The current-time line across today's column: a 2px red line with a dot at the column's left edge. */
+function NowLine({ hours }: { hours: number }) {
+  return (
+    <Box
+      aria-hidden
+      data-now-line=""
+      style={{ '--now': String(hours) } as CSSProperties}
+      sx={{
+        display: 'none',
+        [GRID]: {
+          display: 'block',
+          position: 'absolute',
+          zIndex: 2,
+          pointerEvents: 'none',
+          left: 0,
+          right: 0,
+          top: 'calc(var(--now) * var(--hour) - 1px)',
+          height: 2,
+          bgcolor: 'error.main',
+          '&::before': {
+            content: '""',
+            position: 'absolute',
+            left: -6,
+            top: -5,
+            width: 12,
+            height: 12,
+            borderRadius: '50%',
+            bgcolor: 'error.main',
+          },
+        },
+      }}
+    />
+  );
+}
+
 interface ClassBlockProps {
   placed: PlacedEvent;
-  /** Course color (hex) filling the block. */
+  /** Course color (hex): tinted for the fill, darkened for the text. */
   color: string;
+  /** The surface the tint is laid over. */
+  surface: string;
   weekStart: number;
   firstHour: number;
 }
 
 /**
- * A class filled with its course color: name, then "08:00–08:40 · D419". Positioned by time in the
- * grid; a full-width row in the list.
+ * A class in Google Calendar's light event style: a light tint of its course color, with name and
+ * "08:00–08:40 · D419" in a dark shade of the same hue. Positioned by time in the grid; a full-width
+ * row in the list.
  */
-function ClassBlock({ placed: { event, lane, lanes }, color, weekStart, firstHour }: ClassBlockProps) {
-  const top = ((minuteOfDay(event.start, weekStart) - firstHour * 60) / 60) * HOUR_PX;
-  const height = ((event.end - event.start) / MIN / 60) * HOUR_PX;
+function ClassBlock({ placed: { event, lane, lanes }, color, surface, weekStart, firstHour }: ClassBlockProps) {
+  const top = (minuteOfDay(event.start, weekStart) - firstHour * 60) / 60;
+  const duration = (event.end - event.start) / MIN / 60;
   const meta = [`${chinaClock(event.start)}–${chinaClock(event.end)}`, event.room].filter(Boolean).join(' · ');
-  // Grid geometry travels as custom properties so one shared style rule serves every block.
+  const { bg, fg } = lightEventColors(color, surface);
+  // Grid geometry (in hours; the grid sets px per hour) travels as custom properties so one shared style rule serves every block.
   const geometry = {
-    '--course-bg': color,
-    '--course-fg': readableTextOn(color),
-    '--top': `${top}px`,
-    '--height': `${height}px`,
+    '--course': color,
+    '--course-bg': bg,
+    '--course-fg': fg,
+    '--top': String(top),
+    '--duration': String(duration),
     '--left': `${(lane / lanes) * 100}%`,
     '--width': `${100 / lanes}%`,
   } as CSSProperties;
@@ -298,15 +379,16 @@ function ClassBlock({ placed: { event, lane, lanes }, color, weekStart, firstHou
       component="li"
       title={`${event.name}\n${meta}`}
       style={geometry}
+      data-short={duration * HOUR_NARROW_PX < TWO_LINES_PX ? '' : undefined}
       sx={(theme) => ({
         bgcolor: 'var(--course-bg)',
         color: 'var(--course-fg)',
         borderRadius: `${theme.yungu.shape.small}px`,
-        [MD_DOWN]: { px: 2, py: 1.25 },
-        [MD_UP]: {
+        [LIST]: { px: 1.5, py: 1 },
+        [GRID]: {
           position: 'absolute',
-          top: 'calc(var(--top) + 1px)',
-          height: 'calc(var(--height) - 2px)',
+          top: 'calc(var(--top) * var(--hour) + 1px)',
+          height: 'calc(var(--duration) * var(--hour) - 2px)',
           left: 'calc(var(--left) + 4px)',
           width: 'calc(var(--width) - 8px)',
           px: 1,
@@ -314,14 +396,18 @@ function ClassBlock({ placed: { event, lane, lanes }, color, weekStart, firstHou
           overflow: 'hidden',
           '& > *': { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
         },
+        [NARROW_GRID]: { px: 0.75, '&[data-short] > :nth-of-type(2)': { display: 'none' } },
       })}
     >
       <Typography
         variant="body2"
         sx={{
+          color: 'inherit',
           fontWeight: 600,
           overflowWrap: 'anywhere',
-          [MD_UP]: { fontSize: '0.8125rem', lineHeight: 1.4 },
+          [LIST]: { lineHeight: '20px' },
+          [GRID]: { fontSize: '0.8125rem', lineHeight: 1.4 },
+          [NARROW_GRID]: { fontSize: '0.75rem', lineHeight: '16px' },
         }}
       >
         {event.name}
@@ -329,8 +415,11 @@ function ClassBlock({ placed: { event, lane, lanes }, color, weekStart, firstHou
       <Typography
         variant="body2"
         sx={{
+          color: 'inherit',
           overflowWrap: 'anywhere',
-          [MD_UP]: { fontSize: '0.75rem', lineHeight: 1.4 },
+          [LIST]: { fontSize: '0.8125rem', lineHeight: '18px' },
+          [GRID]: { fontSize: '0.75rem', lineHeight: 1.4 },
+          [NARROW_GRID]: { fontSize: '0.6875rem', lineHeight: '14px' },
         }}
       >
         {meta}
