@@ -43,12 +43,25 @@ export function isAbort(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
 }
 
+/** How much wider than the tile page 1 is drawn: the tile shows its top-left part, large enough to read. */
+export const PREVIEW_ZOOM = 1.6;
+
+/** The preview tile's shape (width / height); the drawing is cut to it. */
+export const PREVIEW_ASPECT = 4 / 3;
+
 /**
- * Draws the first page of the PDF at `url` into `canvas`, `width` CSS pixels wide (sharp on high-density
- * screens). Rejects when the file cannot be fetched or parsed, so the caller can show a fallback. Aborting
- * `signal` stops the download or the drawing and rejects with an `AbortError` (see `isAbort`).
+ * Draws the top of the first page of the PDF at `url` into `canvas`, cut to a `width` × ¾`width` CSS-pixel
+ * tile (sharp on high-density screens): the page is `PREVIEW_ZOOM` times the tile's width, anchored at its
+ * top-left corner, so a title and the first lines read. Resolves with the document's page count. Rejects
+ * when the file cannot be fetched or parsed, so the caller can show a fallback. Aborting `signal` stops the
+ * download or the drawing and rejects with an `AbortError` (see `isAbort`).
  */
-export async function renderFirstPage(url: string, canvas: HTMLCanvasElement, width: number, signal?: AbortSignal): Promise<void> {
+export async function renderFirstPage(
+  url: string,
+  canvas: HTMLCanvasElement,
+  width: number,
+  { signal }: { signal?: AbortSignal } = {},
+): Promise<{ pages: number }> {
   if (signal?.aborted) throw abortError();
   const { lib, worker } = await loadPdfJs();
   if (signal?.aborted) throw abortError();
@@ -63,13 +76,15 @@ export async function renderFirstPage(url: string, canvas: HTMLCanvasElement, wi
     const doc = await task.promise;
     const page = await doc.getPage(1);
     if (signal?.aborted) throw abortError();
-    const scale = (width / page.getViewport({ scale: 1 }).width) * Math.min(window.devicePixelRatio || 1, 2);
-    const viewport = page.getViewport({ scale });
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
+    const pixels = width * Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.floor(pixels);
+    canvas.height = Math.floor(pixels / PREVIEW_ASPECT);
+    // Only the part of the page inside the canvas is drawn; the viewport's origin is the page's top-left.
+    const viewport = page.getViewport({ scale: (pixels * PREVIEW_ZOOM) / page.getViewport({ scale: 1 }).width });
     const rendering = page.render({ canvas, viewport });
     renderTask = rendering;
     await rendering.promise;
+    return { pages: doc.numPages };
   } catch (error) {
     // pdf.js rejects a cancelled render or a destroyed task with its own errors; report them as the abort.
     if (signal?.aborted) throw abortError();
@@ -77,5 +92,53 @@ export async function renderFirstPage(url: string, canvas: HTMLCanvasElement, wi
   } finally {
     signal?.removeEventListener('abort', onAbort);
     await task.destroy();
+  }
+}
+
+/** A PDF's rendered first page as an image URL, and how many pages the PDF has. */
+export interface PdfPreview {
+  src: string;
+  pages: number;
+}
+
+/** How many rendered previews are kept (least recently used dropped first). */
+export const PREVIEW_CACHE_SIZE = 30;
+
+/** Rendered previews by file id and PDF URL, oldest first (a Map keeps insertion order). */
+const previews = new Map<string, PdfPreview>();
+
+/** The preview already rendered under `key`, if still kept; marks it as recently used. */
+export function cachedPreview(key: string): PdfPreview | undefined {
+  const preview = previews.get(key);
+  if (preview) {
+    previews.delete(key);
+    previews.set(key, preview);
+  }
+  return preview;
+}
+
+/**
+ * The preview for `key` (a file id and its PDF's URL): from the cache, or rendered once by
+ * `renderFirstPage` and kept as an image. An image, unlike a canvas, keeps its pixels when the tile
+ * remounts or the browser drops the GPU context, so a tile never goes blank. Failures and aborts are not
+ * cached.
+ */
+export async function loadPreview(key: string, url: string, width: number, options: { signal?: AbortSignal } = {}): Promise<PdfPreview> {
+  const cached = cachedPreview(key);
+  if (cached) return cached;
+  const canvas = document.createElement('canvas');
+  try {
+    const { pages } = await renderFirstPage(url, canvas, width, options);
+    const preview = { src: canvas.toDataURL('image/png'), pages };
+    previews.set(key, preview);
+    for (const oldest of previews.keys()) {
+      if (previews.size <= PREVIEW_CACHE_SIZE) break;
+      previews.delete(oldest);
+    }
+    return preview;
+  } finally {
+    // Free the bitmap now rather than whenever the canvas is collected.
+    canvas.width = 0;
+    canvas.height = 0;
   }
 }

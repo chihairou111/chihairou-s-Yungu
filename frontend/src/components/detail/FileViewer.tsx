@@ -188,7 +188,7 @@ function TopBar({ file, titleId, at, count, onClose, onStep }: TopBarProps) {
             variant="body2"
             sx={{ color: V.muted, fontVariantNumeric: 'tabular-nums', minWidth: '3.5em', textAlign: 'center', whiteSpace: 'nowrap' }}
           >
-            {at + 1} / {count}
+            File {at + 1} of {count}
           </Typography>
           <IconButton
             onClick={() => onStep(1)}

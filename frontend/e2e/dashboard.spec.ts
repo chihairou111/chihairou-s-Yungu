@@ -476,13 +476,20 @@ test('attachments: rendered previews, and a full-screen viewer that steps throug
   const detail = page.getByRole('dialog');
   await expect(detail.getByRole('heading', { name: 'Attachments (4)' })).toBeVisible();
 
-  // The PDF's first page is drawn by pdf.js (its worker served by the app), not left blank.
+  // The PDF's first page is drawn by pdf.js (its worker served by the app) and kept as an image, not left
+  // blank; the caption gains the page count pdf.js read.
   const pdfTile = detail.getByRole('button', { name: /Observation worksheet\.pdf/ });
+  await expect(pdfTile).toHaveAccessibleName('Observation worksheet.pdf, PDF · 1 page · 17 KB');
   await expect
     .poll(() =>
-      pdfTile.locator('canvas').evaluate((canvas: HTMLCanvasElement) => {
-        if (canvas.width === 0) return false;
-        const { data } = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height);
+      pdfTile.locator('img').evaluate((img: HTMLImageElement) => {
+        if (!img.complete || img.naturalWidth === 0) return false;
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const context = canvas.getContext('2d')!;
+        context.drawImage(img, 0, 0);
+        const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
         for (let i = 0; i < data.length; i += 4) if (data[i] < 128) return true; // some dark text pixels
         return false;
       }),
@@ -493,7 +500,7 @@ test('attachments: rendered previews, and a full-screen viewer that steps throug
   await detail.getByRole('button', { name: /Field notes example\.png/ }).click();
   const viewer = page.getByRole('dialog', { name: 'Field notes example.png' });
   await expect(viewer).toBeVisible();
-  await expect(viewer.getByText('3 / 4')).toBeVisible();
+  await expect(viewer.getByText('File 3 of 4')).toBeVisible();
   await expect(viewer.getByRole('link', { name: 'Download' })).toHaveAttribute('href', /\?download=1$/);
 
   await page.keyboard.press('ArrowLeft');

@@ -51,7 +51,7 @@ describe('FileViewer', () => {
     expect(title()).toHaveTextContent('Plan.png');
     expect(within(list).getByRole('button', { name: /Plan\.png/ })).toHaveAttribute('aria-current', 'true');
     expect(within(viewer()).getByRole('img', { name: 'Plan.png' })).toHaveAttribute('src', '/api/files/c');
-    expect(within(viewer()).getByText('3 / 6')).toBeInTheDocument();
+    expect(within(viewer()).getByText('File 3 of 6')).toBeInTheDocument();
   });
 
   it('steps through files with the arrow keys and buttons', async () => {

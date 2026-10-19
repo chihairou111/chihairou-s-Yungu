@@ -4,11 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FileRef } from '@/lib/types';
 import AttachmentsSection from './AttachmentsSection';
 import { fileCaption, formatBytes } from './FileThumb';
-import { renderFirstPage } from './pdfThumb';
+import { loadPreview } from './pdfThumb';
 
 vi.mock('./pdfThumb', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./pdfThumb')>()),
-  renderFirstPage: vi.fn(() => Promise.resolve()),
+  loadPreview: vi.fn(() => Promise.resolve({ src: 'data:image/png;base64,x', pages: 1 })),
 }));
 
 const MB = 1024 * 1024;
@@ -31,7 +31,7 @@ const FOUR: FileRef[] = [
 ];
 
 beforeEach(() => {
-  vi.mocked(renderFirstPage).mockClear();
+  vi.mocked(loadPreview).mockClear();
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -72,10 +72,7 @@ describe('AttachmentsSection', () => {
 
   it('renders the first page of PDFs and of Office previews', () => {
     render(<AttachmentsSection files={FOUR} />);
-    const urls = vi.mocked(renderFirstPage).mock.calls.map(([url, canvas]) => {
-      expect(canvas).toBeInstanceOf(HTMLCanvasElement);
-      return url;
-    });
+    const urls = vi.mocked(loadPreview).mock.calls.map(([, url]) => url);
     expect(urls.sort()).toEqual(['/api/files/a', '/api/files/d-preview']);
   });
 
@@ -85,7 +82,7 @@ describe('AttachmentsSection', () => {
     await userEvent.click(second);
     const viewer = await screen.findByRole('dialog');
     expect(within(viewer).getByRole('heading', { name: '贫民窟日常.mp4' })).toBeInTheDocument();
-    expect(within(viewer).getByText('2 / 4')).toBeInTheDocument();
+    expect(within(viewer).getByText('File 2 of 4')).toBeInTheDocument();
     await userEvent.keyboard('{Escape}');
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(second).toHaveFocus();

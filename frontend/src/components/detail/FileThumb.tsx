@@ -18,7 +18,7 @@ import SlideshowOutlined from '@mui/icons-material/SlideshowOutlined';
 import TableChartOutlined from '@mui/icons-material/TableChartOutlined';
 import type { FileRef } from '@/lib/types';
 import { EASE_OUT, FADE_MS } from './motion';
-import { isAbort, renderFirstPage } from './pdfThumb';
+import { cachedPreview, isAbort, loadPreview, type PdfPreview } from './pdfThumb';
 
 const UNITS = ['KB', 'MB', 'GB'];
 
@@ -70,9 +70,10 @@ export function fileTypeLabel(file: FileRef): string {
   }
 }
 
-/** "PDF · 75 MB". */
-export function fileCaption(file: FileRef): string {
-  return `${fileTypeLabel(file)} · ${formatBytes(file.size)}`;
+/** "PDF · 75 MB", or with the page count once known: "PDF · 3 pages · 17 KB", "Word · 1 page · 47 KB". */
+export function fileCaption(file: FileRef, pages?: number): string {
+  const count = pages === undefined ? '' : ` · ${pages} ${pages === 1 ? 'page' : 'pages'}`;
+  return `${fileTypeLabel(file)}${count} · ${formatBytes(file.size)}`;
 }
 
 /** The icon for a file's type; spreadsheets and slides get their own among Office files. */
@@ -134,44 +135,39 @@ function useNearViewport<T extends Element>(): [RefObject<T | null>, boolean] {
   return [ref, near];
 }
 
-/** The first page of a PDF on a sheet of paper, cropped at the bottom of the preview. */
-function PdfPage({ url, onLoad }: { url: string; onLoad: (load: Load) => void }) {
+/**
+ * The top of a PDF's first page, filling the preview. Rendered once near the viewport and then kept as an
+ * image (see `loadPreview`), so scrolling, remounting or a lost GPU context never leaves it blank.
+ */
+function PdfPage({
+  cacheKey,
+  url,
+  preview,
+  onPreview,
+  onLoad,
+}: {
+  cacheKey: string;
+  url: string;
+  preview: PdfPreview | undefined;
+  onPreview: (preview: PdfPreview) => void;
+  onLoad: (load: Load) => void;
+}) {
   const [boxRef, near] = useNearViewport<HTMLSpanElement>();
-  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!near || !canvas) return;
-    // Unmounting (or StrictMode's rehearsal) cancels the render, so two never draw into one canvas.
+    const box = boxRef.current;
+    if (!near || preview || !box) return;
+    // Unmounting (or StrictMode's rehearsal) cancels the render; a cancelled render is not a failure.
     const controller = new AbortController();
-    renderFirstPage(url, canvas, canvas.clientWidth || 240, controller.signal).then(
-      () => onLoad('ready'),
-      (error: unknown) => {
-        if (!isAbort(error) && !controller.signal.aborted) onLoad('error');
-      },
-    );
+    loadPreview(cacheKey, url, box.clientWidth || 240, { signal: controller.signal }).then(onPreview, (error: unknown) => {
+      if (!isAbort(error) && !controller.signal.aborted) onLoad('error');
+    });
     return () => controller.abort();
-  }, [near, url, onLoad]);
+  }, [boxRef, near, preview, cacheKey, url, onPreview, onLoad]);
 
   return (
-    <Box
-      component="span"
-      ref={boxRef}
-      sx={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'center', pt: '10%' }}
-    >
-      <Box
-        component="canvas"
-        ref={canvasRef}
-        sx={(theme) => ({
-          display: 'block',
-          width: '78%',
-          height: 'auto',
-          alignSelf: 'flex-start',
-          bgcolor: '#fff',
-          borderRadius: '2px',
-          boxShadow: `0 1px 2px ${alpha(theme.palette.common.black, 0.12)}, 0 4px 12px ${alpha(theme.palette.common.black, 0.08)}`,
-        })}
-      />
+    <Box component="span" ref={boxRef} sx={{ position: 'absolute', inset: 0, display: 'block', bgcolor: '#fff' }}>
+      {preview && <Box component="img" src={preview.src} alt="" sx={{ ...FILL_SX, objectPosition: 'left top' }} />}
     </Box>
   );
 }
@@ -238,10 +234,24 @@ function TypeTile({ file }: { file: FileRef }) {
 }
 
 /** The rendered preview inside a tile, by kind; reports when it has painted (or failed). */
-function Preview({ file, load, onLoad }: { file: FileRef; load: Load; onLoad: (load: Load) => void }) {
+function Preview({
+  file,
+  cacheKey,
+  load,
+  pdfPreview,
+  onPdfPreview,
+  onLoad,
+}: {
+  file: FileRef;
+  cacheKey: string;
+  load: Load;
+  pdfPreview: PdfPreview | undefined;
+  onPdfPreview: (preview: PdfPreview) => void;
+  onLoad: (load: Load) => void;
+}) {
   if (load === 'error') return <TypeTile file={file} />;
   const pdf = previewPdf(file);
-  if (pdf) return <PdfPage url={pdf} onLoad={onLoad} />;
+  if (pdf) return <PdfPage cacheKey={cacheKey} url={pdf} preview={pdfPreview} onPreview={onPdfPreview} onLoad={onLoad} />;
   switch (file.kind) {
     case 'image':
       return (
@@ -330,6 +340,14 @@ function hasRenderedPreview(file: FileRef): boolean {
   return previewPdf(file) !== null || file.kind === 'image' || file.kind === 'video';
 }
 
+type TileState = { key: string; load: Load; pdf?: PdfPreview };
+
+/** A tile's starting state: ready at once when its PDF page was rendered before. */
+function initialState(file: FileRef, key: string): TileState {
+  const pdf = previewPdf(file) ? cachedPreview(key) : undefined;
+  return pdf ? { key, load: 'ready', pdf } : { key, load: 'loading' };
+}
+
 const tileSx = (theme: Theme) => ({
   width: '100%',
   height: '100%',
@@ -368,16 +386,20 @@ const tileSx = (theme: Theme) => ({
 
 /**
  * One file as a tile: a rendered preview (a PDF's first page, the image, a frame of the video, an
- * audio icon with its length, or the type icon) over its name and "PDF · 75 MB". A skeleton holds the
- * space while the preview loads; the type icon takes over if it fails. The whole tile opens the file.
+ * audio icon with its length, or the type icon) over its name and "PDF · 3 pages · 75 MB". A skeleton
+ * holds the space while the preview loads (a PDF page rendered before shows at once); the type icon takes
+ * over if it fails. The whole tile opens the file.
  */
 export default function FileThumb({ file, onOpen }: { file: FileRef; onOpen: () => void }) {
-  const [state, setState] = useState<{ key: string; load: Load }>({ key: '', load: 'loading' });
   const key = `${file.id}:${previewPdf(file) ?? file.url}`;
-  const load = state.key === key ? state.load : 'loading';
+  const [state, setState] = useState(() => initialState(file, key));
+  // A different file (or PDF) in this tile: start over from its cached preview, if any.
+  if (state.key !== key) setState(initialState(file, key));
+  const { load, pdf: pdfPreview } = state;
   const onLoad = useCallback((next: Load) => setState({ key, load: next }), [key]);
+  const onPdfPreview = useCallback((pdf: PdfPreview) => setState({ key, load: 'ready', pdf }), [key]);
   const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
-  const caption = fileCaption(file);
+  const caption = fileCaption(file, pdfPreview?.pages);
 
   return (
     <ButtonBase onClick={onOpen} data-file-id={file.id} aria-label={`${file.name}, ${caption}`} sx={tileSx}>
@@ -401,7 +423,7 @@ export default function FileThumb({ file, onOpen }: { file: FileRef; onOpen: () 
           className="thumb-media"
           sx={{ position: 'absolute', inset: 0, display: 'block', opacity: load === 'loading' && hasRenderedPreview(file) ? 0 : 1 }}
         >
-          <Preview file={file} load={load} onLoad={onLoad} />
+          <Preview file={file} cacheKey={key} load={load} pdfPreview={pdfPreview} onPdfPreview={onPdfPreview} onLoad={onLoad} />
         </Box>
         {load === 'loading' && hasRenderedPreview(file) && (
           <Skeleton variant="rectangular" animation={reduceMotion ? false : 'wave'} data-testid="thumb-skeleton" sx={{ position: 'absolute', inset: 0, height: '100%', transform: 'none' }} />
