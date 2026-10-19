@@ -326,7 +326,7 @@ function DetailView({ detail, now, titleId, onClose, onWrite, workFocus }: Detai
           </>
         }
         work={<YourWork onWrite={onWrite} focusOnMount={workFocus} />}
-        comments={<CommentsSection comments={detail.comments} />}
+        comments={<CommentsSection taskId={detail.id} comments={detail.comments} />}
       />
     </>
   );

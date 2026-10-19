@@ -5,6 +5,7 @@ import {
   chinaDayNumber,
   chinaDueLabel,
   chinaMonthDay,
+  chinaRelativeTime,
   chinaShortDate,
   dayIndex,
   formatWeekParam,
@@ -87,5 +88,28 @@ describe('chinaMonthDay', () => {
   it('gives the China-time month and day', () => {
     expect(chinaMonthDay(Date.UTC(2026, 9, 16, 14, 0))).toBe('Oct 16');
     expect(chinaMonthDay(Date.UTC(2026, 9, 16, 17, 30))).toBe('Oct 17');
+  });
+});
+
+describe('chinaRelativeTime', () => {
+  // 2026-10-19 14:30 China time
+  const now = Date.UTC(2026, 9, 19, 6, 30);
+  const at = (d: number, h: number, m: number) => Date.UTC(2026, 9, d, h - 8, m);
+  it('says just now under a minute, and for a clock a little ahead', () => {
+    expect(chinaRelativeTime(now - 30_000, now)).toBe('just now');
+    expect(chinaRelativeTime(now + 5_000, now)).toBe('just now');
+  });
+  it('counts minutes under an hour', () => {
+    expect(chinaRelativeTime(now - 5 * 60_000, now)).toBe('5 min ago');
+    expect(chinaRelativeTime(now - 59 * 60_000, now)).toBe('59 min ago');
+  });
+  it('uses the clock for earlier today, yesterday and older', () => {
+    expect(chinaRelativeTime(at(19, 9, 5), now)).toBe('Today 09:05');
+    expect(chinaRelativeTime(at(18, 21, 30), now)).toBe('Yesterday 21:30');
+    expect(chinaRelativeTime(at(16, 22, 0), now)).toBe('Oct 16, 22:00');
+  });
+  it('follows the China day, not the host time zone', () => {
+    // 00:10 China today is still yesterday in Los Angeles
+    expect(chinaRelativeTime(at(19, 0, 10), Date.UTC(2026, 9, 19, 6, 30))).toBe('Today 00:10');
   });
 });

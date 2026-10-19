@@ -107,3 +107,14 @@ export function chinaFileStamp(ms: number): string {
   const date = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
   return `${date} ${pad(d.getUTCHours())}.${pad(d.getUTCMinutes())}.${pad(d.getUTCSeconds())}`;
 }
+
+/** How long ago `ms` was, in China time: "just now", "5 min ago", "Today 14:05", "Yesterday 21:30", "Oct 16, 22:00". */
+export function chinaRelativeTime(ms: number, now: number): string {
+  const diff = now - ms;
+  if (diff < 60_000) return 'just now';
+  if (diff < HOUR) return `${Math.floor(diff / 60_000)} min ago`;
+  const days = chinaDayNumber(now) - chinaDayNumber(ms);
+  if (days <= 0) return `Today ${chinaClock(ms)}`;
+  if (days === 1) return `Yesterday ${chinaClock(ms)}`;
+  return chinaDueLabel(ms);
+}
