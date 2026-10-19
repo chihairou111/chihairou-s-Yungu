@@ -4,6 +4,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AssignmentDetail, FileRef } from '@/lib/types';
 import { HOUR, NOW, todo } from '../test-fixtures';
 import { ApiError } from './api';
+import { shortcutLabel } from './EditorToolbar';
 import WriteView from './WriteView';
 
 const api = vi.hoisted(() => ({ renderPdf: vi.fn() }));
@@ -124,6 +125,33 @@ describe('WriteView', () => {
     expect((await editor()).textContent).toBe('城中村 field notes');
   });
 
+  it('keeps an edited title with the draft and restores it', async () => {
+    const view = open();
+    await editor();
+    const title = screen.getByRole('textbox', { name: 'Title' });
+    await userEvent.clear(title);
+    await userEvent.type(title, '观察记录');
+    view.unmount();
+    open();
+    expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('观察记录');
+  });
+
+  it('shows the save state as words, announced politely', async () => {
+    open();
+    await userEvent.type(await editor(), 'x');
+    expect(screen.getByRole('status')).toHaveTextContent('Saving…');
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Draft saved'));
+  });
+
+  it('writes shortcuts the way each platform does', () => {
+    expect(shortcutLabel({ key: 'B' }, true)).toBe('⌘B');
+    expect(shortcutLabel({ key: '1', alt: true }, true)).toBe('⌥⌘1');
+    expect(shortcutLabel({ key: 'Z', shift: true }, true)).toBe('⇧⌘Z');
+    expect(shortcutLabel({ key: 'B' }, false)).toBe('Ctrl+B');
+    expect(shortcutLabel({ key: '1', alt: true }, false)).toBe('Ctrl+Alt+1');
+    expect(shortcutLabel({ key: 'Z', shift: true }, false)).toBe('Ctrl+Shift+Z');
+  });
+
   it('refuses to export an empty document without calling the server', async () => {
     open();
     await editor();
@@ -154,6 +182,7 @@ describe('WriteView', () => {
     expect(work.add).toHaveBeenCalledWith(PDF);
     await waitFor(() => expect(left).toBe(true));
     expect(localStorage.getItem(DRAFT)).toBeNull();
+    expect(localStorage.getItem(`${DRAFT}_title`)).toBeNull();
   });
 
   it('keeps the draft and says why when the PDF fails', async () => {
@@ -177,18 +206,27 @@ describe('WriteView', () => {
     expect(localStorage.getItem(DRAFT)).toBe('<p>Half done</p>');
   });
 
+  it('inserts a link at the caret and keeps what is typed next outside it', async () => {
+    open();
+    const doc = await editor();
+    await userEvent.type(doc, 'See ');
+    await userEvent.click(screen.getByRole('button', { name: 'Link' }));
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Link address' }), 'https://example.com{Enter}');
+    await waitFor(() => expect(doc).toHaveFocus());
+    await userEvent.keyboard(' more');
+    expect(doc.innerHTML).toContain('<a href="https://example.com">https://example.com</a> more');
+  });
+
   it('adds a link through the link dialog and refuses unsafe addresses', async () => {
     open();
     const doc = await editor();
     await userEvent.type(doc, 'site');
-    await userEvent.keyboard('{Shift>}{ArrowLeft}{ArrowLeft}{ArrowLeft}{ArrowLeft}{/Shift}');
     await userEvent.click(screen.getByRole('button', { name: 'Link' }));
     const address = await screen.findByRole('textbox', { name: 'Link address' });
     await userEvent.type(address, 'javascript:alert(1){Enter}');
     expect(await screen.findByText(/Use a web address/)).toBeInTheDocument();
     await userEvent.clear(address);
     await userEvent.type(address, 'example.com{Enter}');
-    await waitFor(() => expect(doc.innerHTML).toContain('href="https://example.com"'));
-    expect(screen.getByRole('button', { name: 'Link' })).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(doc.innerHTML).toContain('<a href="https://example.com">https://example.com</a>'));
   });
 });

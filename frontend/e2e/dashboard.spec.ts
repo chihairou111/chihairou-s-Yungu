@@ -526,6 +526,19 @@ test('write: format text, keep the draft across a reload, Done adds a PDF to You
   await page.reload();
   await expect(doc.locator('strong')).toHaveText('观察记录');
 
+  // A link inserted at the caret; text typed after it, even right at its end, stays outside the link.
+  await doc.click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' see ');
+  await dialog.getByRole('button', { name: 'Link' }).click();
+  await page.getByRole('textbox', { name: 'Link address' }).fill('example.com');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type(' more');
+  for (let i = 0; i < 5; i++) await page.keyboard.press('Backspace');
+  await page.keyboard.type('!');
+  await expect(doc.locator('a')).toHaveText('https://example.com');
+  await expect(doc).toContainText('https://example.com!');
+
   const title = dialog.getByRole('textbox', { name: 'Title' });
   await title.fill('Field notes');
   await dialog.getByRole('button', { name: 'Done' }).click();

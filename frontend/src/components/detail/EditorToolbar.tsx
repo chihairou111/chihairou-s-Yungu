@@ -34,26 +34,39 @@ export function normalizeLink(input: string): string | null {
   return null;
 }
 
+/** A Tiptap shortcut: Ctrl/⌘ plus optional Alt/⌥ and Shift/⇧ plus a key. */
+export interface Shortcut {
+  key: string;
+  alt?: boolean;
+  shift?: boolean;
+}
+
+/** "⌥⌘1" / "⇧⌘Z" on Apple keyboards (Apple's modifier order), "Ctrl+Alt+1" / "Ctrl+Shift+Z" elsewhere. */
+export function shortcutLabel({ key, alt, shift }: Shortcut, mac: boolean): string {
+  if (mac) return `${alt ? '⌥' : ''}${shift ? '⇧' : ''}⌘${key}`;
+  return ['Ctrl', alt && 'Alt', shift && 'Shift', key].filter(Boolean).join('+');
+}
+
 interface Control {
   label: string;
   icon: ReactNode;
-  /** Shortcut after Ctrl/⌘, shown in the tooltip. */
-  keys?: string;
+  /** Shown in the tooltip. */
+  shortcut?: Shortcut;
   /** Starts a new group (a hairline before it). */
   group?: boolean;
 }
 
 const CONTROLS: Control[] = [
-  { label: 'Bold', icon: <FormatBold />, keys: 'B' },
-  { label: 'Italic', icon: <FormatItalic />, keys: 'I' },
-  { label: 'Underline', icon: <FormatUnderlined />, keys: 'U' },
-  { label: 'Heading 1', icon: <HeadingGlyph level={1} />, keys: 'Alt+1', group: true },
-  { label: 'Heading 2', icon: <HeadingGlyph level={2} />, keys: 'Alt+2' },
-  { label: 'Bulleted list', icon: <FormatListBulleted />, keys: 'Shift+8', group: true },
-  { label: 'Numbered list', icon: <FormatListNumbered />, keys: 'Shift+7' },
+  { label: 'Bold', icon: <FormatBold />, shortcut: { key: 'B' } },
+  { label: 'Italic', icon: <FormatItalic />, shortcut: { key: 'I' } },
+  { label: 'Underline', icon: <FormatUnderlined />, shortcut: { key: 'U' } },
+  { label: 'Heading 1', icon: <HeadingGlyph level={1} />, shortcut: { key: '1', alt: true }, group: true },
+  { label: 'Heading 2', icon: <HeadingGlyph level={2} />, shortcut: { key: '2', alt: true } },
+  { label: 'Bulleted list', icon: <FormatListBulleted />, shortcut: { key: '8', shift: true }, group: true },
+  { label: 'Numbered list', icon: <FormatListNumbered />, shortcut: { key: '7', shift: true } },
   { label: 'Link', icon: <InsertLink />, group: true },
-  { label: 'Undo', icon: <Undo />, keys: 'Z', group: true },
-  { label: 'Redo', icon: <Redo />, keys: 'Shift+Z' },
+  { label: 'Undo', icon: <Undo />, shortcut: { key: 'Z' }, group: true },
+  { label: 'Redo', icon: <Redo />, shortcut: { key: 'Z', shift: true } },
 ];
 
 /** "H1" / "H2" drawn at icon size, since the icon set has no heading glyphs. */
@@ -99,7 +112,7 @@ export default function EditorToolbar({ editor, disabled = false }: { editor: Ed
   const [focusIndex, setFocusIndex] = useState(0);
   // The Link button the link form hangs from, while it is open.
   const [linkAnchor, setLinkAnchor] = useState<HTMLElement | null>(null);
-  const mod = isMac() ? '⌘' : 'Ctrl+';
+  const mac = isMac();
 
   const chain = () => editor.chain().focus();
   const actions: { run: (button: HTMLElement) => void; pressed?: boolean; disabled?: boolean }[] = [
@@ -153,7 +166,7 @@ export default function EditorToolbar({ editor, disabled = false }: { editor: Ed
         {CONTROLS.map((control, i) => {
           const action = actions[i];
           const off = disabled || action.disabled;
-          const hint = control.keys ? `${control.label} (${mod}${control.keys})` : control.label;
+          const hint = control.shortcut ? `${control.label} (${shortcutLabel(control.shortcut, mac)})` : control.label;
           return (
             <Fragment key={control.label}>
               {control.group && <Divider orientation="vertical" flexItem sx={{ mx: { xs: 0, sm: 0.5 }, my: 1 }} />}

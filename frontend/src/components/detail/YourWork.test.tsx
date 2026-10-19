@@ -80,6 +80,22 @@ describe('YourWork', () => {
     expect(uploadInput()).toHaveAttribute('multiple');
   });
 
+  it('takes focus when it returns from the writer: the new file row, else Write', () => {
+    const d = detail({ myFiles: [ref('a', 'a.txt'), ref('pdf', 'notes.pdf')] });
+    const wrap = (focus: Parameters<typeof YourWork>[0]['focusOnMount']) => (
+      <DetailContext.Provider value={{ refresh }}>
+        <WorkProvider detail={d}>
+          <YourWork {...handlers} focusOnMount={focus} />
+        </WorkProvider>
+      </DetailContext.Provider>
+    );
+    const first = render(wrap({ kind: 'file', id: 'pdf' }));
+    expect(screen.getByRole('button', { name: /^notes\.pdf/ })).toHaveFocus();
+    first.unmount();
+    render(wrap({ kind: 'write' }));
+    expect(screen.getByRole('button', { name: 'Write' })).toHaveFocus();
+  });
+
   it('wires Record, Camera and Write to their handlers', async () => {
     const user = userEvent.setup();
     setup(detail());

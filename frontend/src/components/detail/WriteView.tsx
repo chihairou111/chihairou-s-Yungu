@@ -17,6 +17,9 @@ import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import ArrowBack from '@mui/icons-material/ArrowBack';
 import CheckRounded from '@mui/icons-material/CheckRounded';
+import CloudDoneOutlined from '@mui/icons-material/CloudDoneOutlined';
+import CloudOffOutlined from '@mui/icons-material/CloudOffOutlined';
+import CloudSyncOutlined from '@mui/icons-material/CloudSyncOutlined';
 import type { Theme } from '@mui/material/styles';
 import type { AssignmentDetail, FileRef } from '@/lib/types';
 import { VISUALLY_HIDDEN } from '../visually-hidden';
@@ -46,7 +49,8 @@ const EXTENSIONS = [
     link: false,
   }),
   Underline,
-  LinkMark.configure({
+  // Not inclusive (Link makes it so whenever autolink is on): text typed at a link's end stays outside it.
+  LinkMark.extend({ inclusive: () => false }).configure({
     openOnClick: false,
     defaultProtocol: 'https',
     HTMLAttributes: { target: null, rel: null, class: null },
@@ -87,6 +91,16 @@ const documentSx = (theme: Theme) => ({
   },
 });
 
+/** Hoisted so the editor's options stay the same object from render to render. */
+const EDITOR_PROPS = {
+  attributes: { role: 'textbox', 'aria-multiline': 'true', 'aria-label': 'Your writing', spellcheck: 'true' },
+};
+
+/** Opening the writer puts the caret in the text on laptops; on phones that would throw up the keyboard. */
+function caretOnOpen(): 'end' | false {
+  return typeof window !== 'undefined' && window.matchMedia?.('(min-width: 600px)').matches ? 'end' : false;
+}
+
 type Failure = { message: string; tone: 'info' | 'error'; session?: boolean };
 
 function failureOf(error: unknown): Failure {
@@ -113,7 +127,13 @@ interface WriteViewProps {
 export default function WriteView({ detail, titleId, onBack, onDone }: WriteViewProps) {
   const work = useWorkContext();
   const draft = useDraft(detail.id);
-  const [title, setTitle] = useState(detail.title);
+  const [title, setTitle] = useState(draft.title ?? detail.title);
+  const [autofocus] = useState(caretOnOpen);
+  // On phones the caret waits for a tap; focus starts on ← instead of falling out of the dialog.
+  const backButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!autofocus) backButton.current?.focus();
+  }, [autofocus]);
   const [exporting, setExporting] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
   // Leaving mid-export cancels it: the draft stays, and nothing is added behind the user's back.
@@ -124,11 +144,11 @@ export default function WriteView({ detail, titleId, onBack, onDone }: WriteView
     extensions: EXTENSIONS,
     content: draft.html,
     immediatelyRender: false,
-    editorProps: {
-      attributes: { role: 'textbox', 'aria-multiline': 'true', 'aria-label': 'Your writing', spellcheck: 'true' },
-    },
+    autofocus,
+    editorProps: EDITOR_PROPS,
     onUpdate: ({ editor: e }) => {
-      draft.setHtml(e.isEmpty ? '' : e.getHTML());
+      // Serialised once typing pauses, not on every keystroke.
+      draft.setHtml(() => (e.isEmpty ? '' : e.getHTML()));
       setFailure((f) => (f?.tone === 'info' ? null : f));
     },
   });
@@ -184,13 +204,16 @@ export default function WriteView({ detail, titleId, onBack, onDone }: WriteView
         }}
       >
         <Tooltip title="Back to assignment (keeps your draft)" describeChild>
-          <IconButton onClick={onBack} aria-label="Back to assignment">
+          <IconButton ref={backButton} onClick={onBack} aria-label="Back to assignment">
             <ArrowBack />
           </IconButton>
         </Tooltip>
         <InputBase
           value={title}
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={(e) => {
+            setTitle(e.target.value);
+            draft.setTitle(e.target.value === detail.title ? null : e.target.value);
+          }}
           placeholder="Title"
           inputProps={{ 'aria-label': 'Title', maxLength: 100, spellCheck: false }}
           sx={(theme) => ({
@@ -222,11 +245,20 @@ export default function WriteView({ detail, titleId, onBack, onDone }: WriteView
 
       <Box
         sx={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', cursor: 'text' }}
-        // A click in the margins or below the last line puts the caret at the end, as on paper.
+        // A click in a side margin puts the caret on that line (its start or end); below the text, at the end.
         onMouseDown={(e) => {
-          if (!editor || e.target !== e.currentTarget && !(e.target as HTMLElement).dataset.column) return;
+          const target = e.target as HTMLElement;
+          if (!editor || (target !== e.currentTarget && !target.dataset.column)) return;
           e.preventDefault();
-          editor.commands.focus('end');
+          const box = editor.view.dom.getBoundingClientRect();
+          if (e.clientY >= box.bottom) {
+            editor.commands.focus('end');
+            return;
+          }
+          const left = e.clientX < box.left ? box.left + 1 : box.right - 1;
+          const hit = editor.view.posAtCoords({ left, top: Math.max(e.clientY, box.top + 1) });
+          if (hit) editor.chain().focus().setTextSelection(hit.pos).run();
+          else editor.commands.focus('end');
         }}
       >
         <Box data-column="1" sx={{ maxWidth: COLUMN_PX, minHeight: '100%', mx: 'auto', px: { xs: 2, sm: 3 }, pt: { xs: 2, sm: 4 }, pb: 10 }}>
@@ -256,17 +288,28 @@ export default function WriteView({ detail, titleId, onBack, onDone }: WriteView
   );
 }
 
-/** "Saving…" while typing pauses, then "Draft saved"; says so when this browser keeps no drafts. */
+/**
+ * "Saving…" while typing pauses, then "Draft saved"; says so when this browser keeps no drafts. On phones
+ * the words give way to a cloud icon (the words stay for screen readers, announced politely).
+ */
 function DraftIndicator({ status }: { status: DraftStatus }) {
   const text = { idle: '', saving: 'Saving…', saved: 'Draft saved', unavailable: 'Drafts off in this browser' }[status];
+  const Icon = { idle: null, saving: CloudSyncOutlined, saved: CloudDoneOutlined, unavailable: CloudOffOutlined }[status];
   return (
-    <Typography
-      variant="body2"
-      color="text.secondary"
-      noWrap
-      sx={{ flexShrink: 0, display: { xs: status === 'unavailable' ? 'block' : 'none', sm: 'block' }, minWidth: { sm: '7.5em' }, textAlign: 'right' }}
+    <Stack
+      role="status"
+      direction="row"
+      sx={{ flexShrink: 0, alignItems: 'center', justifyContent: 'flex-end', color: 'text.secondary', minWidth: { xs: 24, sm: '7.5em' }, mr: { xs: 0.5, sm: 0 } }}
     >
-      {text}
-    </Typography>
+      {Icon && <Icon aria-hidden fontSize="small" sx={{ display: { sm: 'none' } }} />}
+      <Typography
+        variant="body2"
+        color="inherit"
+        noWrap
+        sx={{ '@media (max-width: 599.95px)': VISUALLY_HIDDEN }}
+      >
+        {text}
+      </Typography>
+    </Stack>
   );
 }

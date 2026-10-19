@@ -32,7 +32,11 @@ interface YourWorkProps {
   onCamera?: () => void;
   /** Switches the pop-up to the writing view. */
   onWrite: () => void;
+  /** Where focus lands when the panel mounts (back from the writer): its Write button, or a new file's row. */
+  focusOnMount?: WorkFocus | null;
 }
+
+export type WorkFocus = { kind: 'write' } | { kind: 'file'; id: string };
 
 const noop = () => {};
 
@@ -42,11 +46,21 @@ const noop = () => {};
  * Update once the work has been handed in. Files can also be dropped anywhere on the panel. The work
  * itself lives in the `WorkProvider` above, so it survives a trip to the writer.
  */
-export default function YourWork({ onRecord = noop, onCamera = noop, onWrite }: YourWorkProps) {
+export default function YourWork({ onRecord = noop, onCamera = noop, onWrite, focusOnMount = null }: YourWorkProps) {
   const work = useWorkContext();
   const input = useRef<HTMLInputElement>(null);
   const uploadButton = useRef<HTMLButtonElement>(null);
+  const writeButton = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLUListElement>(null);
+  const [initialFocus] = useState(focusOnMount);
+  useEffect(() => {
+    if (!initialFocus) return;
+    const row =
+      initialFocus.kind === 'file'
+        ? Array.from(list.current?.querySelectorAll<HTMLElement>('[data-file-id]') ?? []).find((el) => el.dataset.fileId === initialFocus.id)
+        : null;
+    (row ?? writeButton.current)?.focus();
+  }, [initialFocus]);
   // Where focus goes once a removed row has left: the next row's ✕, else the previous one's, else Upload.
   const focusAfterRemove = useRef<string | null>(null);
   useEffect(() => {
@@ -185,7 +199,7 @@ export default function YourWork({ onRecord = noop, onCamera = noop, onWrite }: 
         <AddButton icon={<PhotoCameraOutlined />} onClick={onCamera} disabled={work.submitting}>
           Camera
         </AddButton>
-        <AddButton icon={<EditNoteOutlined />} onClick={onWrite} disabled={work.submitting}>
+        <AddButton icon={<EditNoteOutlined />} onClick={onWrite} disabled={work.submitting} buttonRef={writeButton}>
           Write
         </AddButton>
         <AddButton

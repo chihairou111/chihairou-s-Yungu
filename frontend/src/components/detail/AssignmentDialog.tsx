@@ -26,7 +26,7 @@ import Instructions from './Instructions';
 import { useTaskParam } from './useTaskParam';
 import { WorkProvider } from './WorkContext';
 import WriteView from './WriteView';
-import YourWork from './YourWork';
+import YourWork, { type WorkFocus } from './YourWork';
 
 /** Width of the Your work column beside the content (from 900px). */
 const WORK_PX = 320;
@@ -58,12 +58,21 @@ export default function AssignmentDialog({ now }: { now: number }) {
   const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   // A short confirmation after the writer's PDF lands in Your work.
   const [notice, setNotice] = useState<string | null>(null);
-  if (!isOpen && notice !== null) setNotice(null);
+  // Where focus returns when the writer closes: the new PDF's row after Done, else the Write button.
+  const [workFocus, setWorkFocus] = useState<WorkFocus | null>(null);
+  if (!isOpen && (notice !== null || workFocus !== null)) {
+    setNotice(null);
+    setWorkFocus(null);
+  }
   const [result, setResult] = useState<{ key: string; loaded: Loaded } | null>(null);
 
   // While the dialog fades out the URL no longer names the task; keep showing what was open.
   const [shown, setShown] = useState({ taskId, writing });
-  if (isOpen && (shown.taskId !== taskId || shown.writing !== writing)) setShown({ taskId, writing });
+  if (isOpen && (shown.taskId !== taskId || shown.writing !== writing)) {
+    // Leaving the writer by any route (←, Esc, browser Back) returns focus to Your work.
+    if (shown.writing && !writing && shown.taskId === taskId && workFocus === null) setWorkFocus({ kind: 'write' });
+    setShown({ taskId, writing });
+  }
   const view = isOpen ? { taskId, writing } : shown;
 
   // Each opening (and each retry) is a new generation, so a result cached from an earlier opening is
@@ -161,11 +170,22 @@ export default function AssignmentDialog({ now }: { now: number }) {
                 onBack={closeWriter}
                 onDone={(file) => {
                   setNotice(`Added ${file.name} to Your work`);
+                  setWorkFocus({ kind: 'file', id: file.id });
                   closeWriter();
                 }}
               />
             ) : (
-              <DetailView detail={loaded.detail} now={now} titleId={titleId} onClose={close} onWrite={openWriter} />
+              <DetailView
+                detail={loaded.detail}
+                now={now}
+                titleId={titleId}
+                onClose={close}
+                onWrite={() => {
+                  setWorkFocus(null);
+                  openWriter();
+                }}
+                workFocus={workFocus}
+              />
             )}
           </WorkProvider>
         </DetailContext.Provider>
@@ -289,9 +309,10 @@ interface DetailViewProps {
   titleId: string;
   onClose: () => void;
   onWrite: () => void;
+  workFocus: WorkFocus | null;
 }
 
-function DetailView({ detail, now, titleId, onClose, onWrite }: DetailViewProps) {
+function DetailView({ detail, now, titleId, onClose, onWrite, workFocus }: DetailViewProps) {
   return (
     <>
       <TopBar onClose={onClose}>
@@ -304,7 +325,7 @@ function DetailView({ detail, now, titleId, onClose, onWrite }: DetailViewProps)
             <AttachmentsSection files={detail.attachments} />
           </>
         }
-        work={<YourWork onWrite={onWrite} />}
+        work={<YourWork onWrite={onWrite} focusOnMount={workFocus} />}
         comments={<CommentsSection comments={detail.comments} />}
       />
     </>

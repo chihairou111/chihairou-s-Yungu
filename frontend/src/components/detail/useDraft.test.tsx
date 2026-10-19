@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DRAFT_DELAY_MS, draftKey, useDraft } from './useDraft';
+import { DRAFT_DELAY_MS, draftKey, draftTitleKey, useDraft } from './useDraft';
 
 describe('useDraft', () => {
   beforeEach(() => {
@@ -49,7 +49,32 @@ describe('useDraft', () => {
     act(() => result.current.clear());
     act(() => vi.advanceTimersByTime(DRAFT_DELAY_MS));
     expect(localStorage.getItem('yl_write_draft_7')).toBeNull();
-    expect(result.current.html).toBe('');
+  });
+
+  it('serialises a deferred value once, when the pause ends', () => {
+    const serialise = vi.fn(() => '<p>late</p>');
+    const { result } = renderHook(() => useDraft(7));
+    act(() => result.current.setHtml(() => '<p>never</p>'));
+    act(() => result.current.setHtml(serialise));
+    expect(serialise).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(DRAFT_DELAY_MS));
+    expect(serialise).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem('yl_write_draft_7')).toBe('<p>late</p>');
+  });
+
+  it('keeps the title beside the text, restores it, and clear() forgets both', () => {
+    const first = renderHook(() => useDraft(7));
+    expect(first.result.current.title).toBeNull();
+    act(() => first.result.current.setTitle('Field notes'));
+    expect(localStorage.getItem('yl_write_draft_7_title')).toBe('Field notes');
+    first.unmount();
+    const { result } = renderHook(() => useDraft(7));
+    expect(result.current.title).toBe('Field notes');
+    act(() => result.current.setTitle(null));
+    expect(localStorage.getItem(draftTitleKey(7))).toBeNull();
+    act(() => result.current.setTitle('Again'));
+    act(() => result.current.clear());
+    expect(localStorage.getItem(draftTitleKey(7))).toBeNull();
   });
 
   it('keeps working without storage (blocked or full)', () => {
@@ -63,8 +88,8 @@ describe('useDraft', () => {
     expect(result.current.html).toBe('');
     act(() => result.current.setHtml('<p>a</p>'));
     act(() => vi.advanceTimersByTime(DRAFT_DELAY_MS));
-    expect(result.current.html).toBe('<p>a</p>');
     expect(result.current.status).toBe('unavailable');
+    expect(() => act(() => result.current.setTitle('t'))).not.toThrow();
     expect(() => unmount()).not.toThrow();
   });
 });
