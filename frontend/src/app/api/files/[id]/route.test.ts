@@ -55,5 +55,12 @@ describe('GET /api/files/[id]', () => {
     expect(res.headers.get('content-type')).toBe('application/pdf');
     expect(res.headers.get('content-disposition')).toMatch(/^inline;/);
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res.headers.get('content-security-policy')).toBeNull();
+  });
+  it('sandboxes text/plain', async () => {
+    const f = await data.uploadFile('a.txt', 'text/plain', new Uint8Array([1]));
+    const res = await GET(new Request('http://localhost/x'), ctx({ id: f.id }));
+    expect(res.headers.get('content-security-policy')).toContain('sandbox');
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
   });
 });

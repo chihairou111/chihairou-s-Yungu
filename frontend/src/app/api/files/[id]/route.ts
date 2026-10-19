@@ -20,11 +20,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const baseType = file.ref.mime.split(';')[0].trim().toLowerCase();
   const active = ACTIVE_TYPES.has(baseType);
   const disposition = active || new URL(request.url).searchParams.get('download') === '1' ? 'attachment' : 'inline';
+  // Chrome will not show a PDF in its viewer under a sandbox CSP, and passive media cannot run script.
+  const passive = !active && /^(application\/pdf$|image\/|video\/|audio\/)/.test(baseType);
   return new Response(file.bytes as BodyInit, {
     headers: {
+      ...(passive ? {} : { 'Content-Security-Policy': "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; sandbox" }),
       'Content-Type': active ? 'application/octet-stream' : file.ref.mime,
       'X-Content-Type-Options': 'nosniff',
-      'Content-Security-Policy': "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; sandbox",
       'Content-Length': String(file.bytes.length),
       'Content-Disposition': `${disposition}; filename*=UTF-8''${encodeURIComponent(file.ref.name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`,
     },
