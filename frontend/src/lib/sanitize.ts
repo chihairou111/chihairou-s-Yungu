@@ -11,3 +11,12 @@ export function sanitizeInstructions(html: string): string {
     },
   });
 }
+
+/** Written-work editor output: only what the editor toolbar can produce. */
+export function sanitizeEditorHtml(html: string): string {
+  return sanitizeHtml(html, {
+    allowedTags: ['p', 'br', 'strong', 'em', 'u', 'h1', 'h2', 'ul', 'ol', 'li', 'a'],
+    allowedAttributes: { a: ['href'] },
+    allowedSchemes: ['http', 'https', 'mailto'],
+  });
+}
