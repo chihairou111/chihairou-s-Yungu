@@ -60,6 +60,8 @@ export default function Instructions({ html }: { html: string }) {
           <Box
             id={bodyId}
             ref={bodyRef}
+            // A link below the cut would scroll the clipped box when tabbed to; open the text instead.
+            onFocus={collapsed ? () => setExpanded(true) : undefined}
             // Already sanitised on the server with an allowlist (`sanitizeInstructions`).
             dangerouslySetInnerHTML={{ __html: nestHeadings(html) }}
             sx={[

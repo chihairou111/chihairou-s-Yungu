@@ -5,7 +5,7 @@ import Typography from '@mui/material/Typography';
 import { dueLabel } from '@/lib/due';
 import { relativeDue } from '@/lib/priority';
 import type { Assignment, Priority } from '@/lib/types';
-import CardOpener from './CardOpener';
+import CardOpener, { openerHostSx } from './CardOpener';
 
 /** Palette used for each priority wherever it is shown (chip, column header). */
 export const PRIORITY_TONE: Record<Priority, 'error' | 'warning' | 'primary'> = {
@@ -27,7 +27,7 @@ export default function AssignmentCard({ assignment, now, variant, headingLevel 
   const tone = PRIORITY_TONE[variant];
 
   return (
-    <Card variant="outlined" component="article" sx={{ p: 2, position: 'relative' }}>
+    <Card variant="outlined" component="article" sx={[{ p: 2 }, openerHostSx]}>
       <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.8125rem', lineHeight: '18px', overflowWrap: 'anywhere' }}>
         {assignment.course}
       </Typography>

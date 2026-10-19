@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -15,9 +15,10 @@ import LockClockOutlined from '@mui/icons-material/LockClockOutlined';
 import SearchOffOutlined from '@mui/icons-material/SearchOffOutlined';
 import type { AssignmentDetail } from '@/lib/types';
 import { VISUALLY_HIDDEN } from '../visually-hidden';
-import { ApiError, fetchDetail } from './api';
+import { ApiError, fetchDetail, isSessionEnded } from './api';
 import AttachmentsSection from './AttachmentsSection';
 import CommentsSection from './CommentsSection';
+import { DetailContext, type DetailActions } from './DetailContext';
 import DetailHeader from './DetailHeader';
 import Instructions from './Instructions';
 import { useTaskParam } from './useTaskParam';
@@ -51,7 +52,6 @@ function fromError(error: unknown): Loaded {
 export default function AssignmentDialog({ now }: { now: number }) {
   const { taskId, isOpen, writing, close, openWriter, closeWriter } = useTaskParam();
   const titleId = useId();
-  const [attempt, setAttempt] = useState(0);
   const [result, setResult] = useState<{ key: string; loaded: Loaded } | null>(null);
 
   // While the dialog fades out the URL no longer names the task; keep showing what was open.
@@ -59,11 +59,21 @@ export default function AssignmentDialog({ now }: { now: number }) {
   if (isOpen && (shown.taskId !== taskId || shown.writing !== writing)) setShown({ taskId, writing });
   const view = isOpen ? { taskId, writing } : shown;
 
-  const key = `${view.taskId}:${attempt}`;
+  // Each opening (and each retry) is a new generation, so a result cached from an earlier opening is
+  // never shown again: reopening loads afresh behind the skeleton instead of flashing old state.
+  const [generation, setGeneration] = useState(0);
+  const openKey = isOpen ? String(taskId) : null;
+  const [lastOpenKey, setLastOpenKey] = useState(openKey);
+  if (openKey !== lastOpenKey) {
+    setLastOpenKey(openKey);
+    if (openKey !== null) setGeneration((n) => n + 1);
+  }
+
+  const key = `${view.taskId}:${generation}`;
   useEffect(() => {
     if (!isOpen || taskId === null) return;
     const controller = new AbortController();
-    const requestKey = `${taskId}:${attempt}`;
+    const requestKey = `${taskId}:${generation}`;
     fetchDetail(taskId, controller.signal).then(
       (detail) => setResult({ key: requestKey, loaded: { kind: 'ready', detail } }),
       (error: unknown) => {
@@ -71,7 +81,24 @@ export default function AssignmentDialog({ now }: { now: number }) {
       },
     );
     return () => controller.abort();
-  }, [isOpen, taskId, attempt]);
+  }, [isOpen, taskId, generation]);
+
+  const actions = useMemo<DetailActions>(
+    () => ({
+      async refresh() {
+        if (taskId === null) return;
+        const requestKey = `${taskId}:${generation}`;
+        try {
+          const detail = await fetchDetail(taskId);
+          setResult((current) => (current?.key === requestKey ? { key: requestKey, loaded: { kind: 'ready', detail } } : current));
+        } catch (error) {
+          if (isSessionEnded(error)) setResult({ key: requestKey, loaded: { kind: 'session-ended' } });
+          throw error;
+        }
+      },
+    }),
+    [taskId, generation],
+  );
 
   // A non-numeric id is never sent to the server.
   const loaded: Loaded | null = view.taskId === null ? { kind: 'not-found' } : result?.key === key ? result.loaded : null;
@@ -92,8 +119,16 @@ export default function AssignmentDialog({ now }: { now: number }) {
             backgroundImage: 'none',
             overflow: 'hidden',
             borderRadius: `${theme.yungu.shape.extraLarge}px`,
+            // The skeleton opens large; a message (not found, signed out) then shrinks the same dialog
+            // to fit it instead of snapping. `interpolate-size` lets the height animate to `auto`.
+            interpolateSize: 'allow-keywords',
+            transition: theme.transitions.create(['width', 'max-width', 'height', 'max-height', 'margin', 'border-radius'], {
+              duration: theme.transitions.duration.enteringScreen,
+              easing: theme.transitions.easing.easeInOut,
+            }),
+            '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
             ...(compact
-              ? { m: 2, width: 'calc(100% - 32px)', maxWidth: 440 }
+              ? { m: 2, width: 'calc(100% - 32px)', maxWidth: 440, height: 'auto', maxHeight: 'calc(100% - 32px)' }
               : {
                   m: { xs: 0, sm: 4 },
                   width: { xs: '100%', sm: 'calc(100% - 64px)' },
@@ -110,9 +145,13 @@ export default function AssignmentDialog({ now }: { now: number }) {
         <LoadingView titleId={titleId} onClose={close} />
       ) : loaded.kind === 'ready' ? (
         view.writing ? (
-          <WriteView detail={loaded.detail} onBack={closeWriter} />
+          <DetailContext.Provider value={actions}>
+            <WriteView detail={loaded.detail} onBack={closeWriter} />
+          </DetailContext.Provider>
         ) : (
-          <DetailView detail={loaded.detail} now={now} titleId={titleId} onClose={close} onWrite={openWriter} />
+          <DetailContext.Provider value={actions}>
+            <DetailView detail={loaded.detail} now={now} titleId={titleId} onClose={close} onWrite={openWriter} />
+          </DetailContext.Provider>
         )
       ) : loaded.kind === 'not-found' ? (
         <StatusView
@@ -146,7 +185,7 @@ export default function AssignmentDialog({ now }: { now: number }) {
           actions={
             <>
               <Button onClick={close}>Close</Button>
-              <Button variant="contained" onClick={() => setAttempt((n) => n + 1)}>
+              <Button variant="contained" onClick={() => setGeneration((n) => n + 1)}>
                 Try again
               </Button>
             </>

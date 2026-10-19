@@ -1,4 +1,4 @@
-import { render, screen } from '../test-render';
+import { act, render, screen } from '../test-render';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Instructions, { COLLAPSED_PX, nestHeadings } from './Instructions';
@@ -48,5 +48,13 @@ describe('Instructions', () => {
     );
     render(<Instructions html="<h2>Task 3</h2><p>Go.</p>" />);
     expect(screen.getByRole('heading', { level: 5, name: 'Task 3' })).toBeInTheDocument();
+  });
+
+  it('expands when keyboard focus reaches a link below the cut', () => {
+    mockScrollHeight(900);
+    render(<Instructions html={'<p>Long text</p><p><a href="https://a.b">Reference</a></p>'} />);
+    expect(screen.getByRole('button', { name: 'Show more' })).toBeInTheDocument();
+    act(() => screen.getByRole('link', { name: 'Reference' }).focus());
+    expect(screen.getByRole('button', { name: 'Show less' })).toHaveAttribute('aria-expanded', 'true');
   });
 });

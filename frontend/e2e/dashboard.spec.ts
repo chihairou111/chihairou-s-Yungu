@@ -407,3 +407,25 @@ test.describe('stored open panel on a phone', () => {
     await expectNoHorizontalScroll(page);
   });
 });
+
+test('keyboard: Tab reaches a card, which shows a focus ring and opens the pop-up', async ({ page }) => {
+  await signIn(page);
+  await page.getByRole('heading', { name: 'Overdue', exact: true }).waitFor();
+  for (let i = 0; i < 40; i++) {
+    await page.keyboard.press('Tab');
+    if (await page.evaluate(() => document.activeElement?.closest('article') !== null)) break;
+  }
+  const ring = await page.evaluate(() => {
+    const card = document.activeElement!.closest('article')!;
+    const style = getComputedStyle(card);
+    return { style: style.outlineStyle, width: style.outlineWidth };
+  });
+  expect(ring).toEqual({ style: 'solid', width: '2px' });
+
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/[?&]task=\d+/);
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page).toHaveURL(/\/assignments$/);
+  await expect(page.getByRole('dialog')).toBeHidden();
+});

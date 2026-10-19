@@ -1,6 +1,7 @@
 'use client';
 import { useContext, type ReactNode } from 'react';
 import Box from '@mui/material/Box';
+import type { Theme } from '@mui/material/styles';
 import { OpenTaskContext } from './detail/useTaskParam';
 
 interface CardOpenerProps {
@@ -12,9 +13,21 @@ interface CardOpenerProps {
 }
 
 /**
+ * Styles for the card that hosts a `CardOpener`: the anchor for its stretched hit area, and the focus
+ * ring, drawn on the card itself (outside it), since a card clips anything its children draw past its edge.
+ */
+export function openerHostSx(theme: Theme) {
+  return {
+    position: 'relative',
+    '&:has(button:focus-visible)': { outline: `2px solid ${theme.palette.primary.main}`, outlineOffset: '2px' },
+  } as const;
+}
+
+/**
  * A card's title as the button that opens its assignment. The button's hit area stretches over the
  * whole card (the card must be `position: relative`), so the card reads and clicks as one control
- * whose name is just the title; the hover state layer and the focus ring are drawn on the card's shape.
+ * whose name is just the title; the hover state layer is drawn on the card's shape and the focus ring
+ * by the card (`openerHostSx`).
  */
 export default function CardOpener({ taskId, lines, children }: CardOpenerProps) {
   const open = useContext(OpenTaskContext);
@@ -45,7 +58,6 @@ export default function CardOpener({ taskId, lines, children }: CardOpenerProps)
         '&:hover::after': { bgcolor: 'action.hover' },
         '&:active::after': { bgcolor: 'action.selected' },
         '&:focus-visible': { outline: 'none' },
-        '&:focus-visible::after': { outline: `2px solid ${theme.palette.primary.main}`, outlineOffset: 2 },
         '@media (prefers-reduced-motion: reduce)': { '&::after': { transition: 'none' } },
       })}
     >

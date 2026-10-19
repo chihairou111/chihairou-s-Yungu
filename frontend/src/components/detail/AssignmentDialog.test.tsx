@@ -1,4 +1,4 @@
-import { render, screen } from '../test-render';
+import { act, render, screen } from '../test-render';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AssignmentDetail } from '@/lib/types';
@@ -26,6 +26,21 @@ vi.mock('./api', async (importOriginal) => ({
   fetchDetail: api.fetchDetail,
 }));
 
+vi.mock('./YourWork', async () => {
+  const { useDetailActions } = await import('./DetailContext');
+  return {
+    default: function YourWorkStub({ detail }: { detail: AssignmentDetail }) {
+      const { refresh } = useDetailActions();
+      return (
+        <>
+          <p>{detail.submitted ? 'Submitted' : 'Not submitted'}</p>
+          <button onClick={() => void refresh()}>Refresh</button>
+        </>
+      );
+    },
+  };
+});
+
 function detail(extra: Partial<AssignmentDetail> = {}): AssignmentDetail {
   return {
     ...todo('Task 3：开始第一次观察', 5 * HOUR, { id: 94616, estimatedMinutes: 45 }),
@@ -50,7 +65,7 @@ beforeEach(() => {
   param.writing = false;
 });
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => vi.resetAllMocks());
 
 describe('AssignmentDialog', () => {
   it('stays closed without ?task', () => {
@@ -141,5 +156,35 @@ describe('AssignmentDialog', () => {
     render(<AssignmentDialog now={NOW} />);
     await userEvent.click(await screen.findByRole('button', { name: 'Back to the assignment' }));
     expect(param.closeWriter).toHaveBeenCalled();
+  });
+
+  it('loads afresh behind the skeleton when reopened, never flashing the earlier result', async () => {
+    api.fetchDetail.mockResolvedValueOnce(detail());
+    openTask(94616);
+    const { rerender } = render(<AssignmentDialog now={NOW} />);
+    expect(await screen.findByText('Not submitted')).toBeInTheDocument();
+
+    param.isOpen = false;
+    param.taskId = null;
+    rerender(<AssignmentDialog now={NOW} />);
+    let resolve!: (d: AssignmentDetail) => void;
+    api.fetchDetail.mockReturnValueOnce(new Promise((r) => (resolve = r)));
+    openTask(94616);
+    rerender(<AssignmentDialog now={NOW} />);
+    expect(screen.getByRole('dialog')).toHaveAttribute('aria-busy', 'true');
+    expect(screen.queryByText('Not submitted')).not.toBeInTheDocument();
+    await act(async () => resolve(detail({ submitted: true })));
+    expect(screen.getByText('Submitted')).toBeInTheDocument();
+  });
+
+  it('refresh() swaps in the fetched detail in place, without the skeleton', async () => {
+    api.fetchDetail.mockResolvedValueOnce(detail());
+    openTask(94616);
+    render(<AssignmentDialog now={NOW} />);
+    const refresh = await screen.findByRole('button', { name: 'Refresh' });
+    api.fetchDetail.mockResolvedValueOnce(detail({ submitted: true }));
+    await userEvent.click(refresh);
+    expect(await screen.findByText('Submitted')).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).not.toHaveAttribute('aria-busy');
   });
 });

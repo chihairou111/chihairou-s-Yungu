@@ -97,4 +97,34 @@ describe('useTaskParam', () => {
     result.current.closeWriter();
     expect(replace).toHaveBeenCalledWith(null, '', '/assignments?task=101');
   });
+
+  it('ignores a second close while the first is still navigating, and re-arms once the URL changes', () => {
+    nav.search = 'task=101';
+    setHistoryState({ ylTask: true });
+    const go = vi.spyOn(window.history, 'go').mockImplementation(() => {});
+    const { result, rerender } = renderHook(() => useTaskParam());
+    result.current.close();
+    result.current.close();
+    expect(go).toHaveBeenCalledTimes(1);
+
+    nav.search = '';
+    rerender();
+    nav.search = 'task=101';
+    rerender();
+    result.current.close();
+    expect(go).toHaveBeenCalledTimes(2);
+  });
+
+  it('closing a directly linked task from a pushed writer steps back, then replaces the task entry', () => {
+    nav.search = 'tab=submitted&task=101&write=1';
+    setHistoryState({ ylWrite: true });
+    const go = vi.spyOn(window.history, 'go').mockImplementation(() => {});
+    const replace = vi.spyOn(window.history, 'replaceState').mockImplementation(() => {});
+    const { result } = renderHook(() => useTaskParam());
+    result.current.close();
+    expect(go).toHaveBeenCalledWith(-1);
+    expect(replace).not.toHaveBeenCalled();
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    expect(replace).toHaveBeenCalledWith(null, '', '/assignments?tab=submitted');
+  });
 });

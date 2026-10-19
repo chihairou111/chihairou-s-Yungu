@@ -1,5 +1,5 @@
 'use client';
-import { createContext } from 'react';
+import { createContext, useEffect, useRef } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 
 export interface TaskParam {
@@ -38,12 +38,27 @@ export const OpenTaskContext = createContext<(id: number) => void>(() => {});
  * Opening pushes a history entry; closing goes back over the entries we pushed, or, for a direct link,
  * replaces the URL without the params. Other params (`?tab=`) are kept. Like the tab switch, this uses
  * the native History API, which Next syncs with `useSearchParams` without a server round trip.
+ * A close that is still on its way (Esc, then ✕ before the URL changes) swallows repeats, so a double
+ * close never steps back past the list.
  */
 export function useTaskParam(): TaskParam {
   const pathname = usePathname();
   const params = useSearchParams();
   const raw = params.get('task');
   const taskId = raw !== null && /^\d{1,15}$/.test(raw) ? Number(raw) : null;
+  const query = params.toString();
+  // Set while a close is navigating; cleared once the URL has changed.
+  const closing = useRef(false);
+  useEffect(() => {
+    closing.current = false;
+  }, [query]);
+
+  /** Runs one closing navigation per URL state; repeats before the URL changes are ignored. */
+  function once(navigate: () => void) {
+    if (closing.current) return;
+    closing.current = true;
+    navigate();
+  }
 
   function url(edit: (next: URLSearchParams) => void): string {
     const next = new URLSearchParams(params.toString());
@@ -64,26 +79,33 @@ export function useTaskParam(): TaskParam {
       }));
     },
     close() {
-      const { ylTask, ylWrite } = currentMarks();
-      if (ylTask) {
-        window.history.go(ylWrite ? -2 : -1);
-        return;
-      }
-      window.history.replaceState(null, '', url((next) => {
-        next.delete('task');
-        next.delete('write');
-      }));
+      once(() => {
+        const { ylTask, ylWrite } = currentMarks();
+        const list = url((next) => {
+          next.delete('task');
+          next.delete('write');
+        });
+        if (ylTask) {
+          window.history.go(ylWrite ? -2 : -1);
+        } else if (ylWrite) {
+          // A directly linked task with a writer we pushed: step back off the writer, then replace the
+          // task entry itself, so Back afterwards does not reopen the pop-up.
+          window.addEventListener('popstate', () => window.history.replaceState(null, '', list), { once: true });
+          window.history.go(-1);
+        } else {
+          window.history.replaceState(null, '', list);
+        }
+      });
     },
     openWriter() {
       const marks: EntryMarks = { ...(currentMarks().ylTask ? { ylTask: true } : {}), ylWrite: true };
       window.history.pushState(marks, '', url((next) => next.set('write', '1')));
     },
     closeWriter() {
-      if (currentMarks().ylWrite) {
-        window.history.go(-1);
-        return;
-      }
-      window.history.replaceState(null, '', url((next) => next.delete('write')));
+      once(() => {
+        if (currentMarks().ylWrite) window.history.go(-1);
+        else window.history.replaceState(null, '', url((next) => next.delete('write')));
+      });
     },
   };
 }
