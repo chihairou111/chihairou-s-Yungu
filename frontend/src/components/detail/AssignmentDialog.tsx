@@ -1,0 +1,308 @@
+'use client';
+import { useEffect, useId, useState, type ReactNode } from 'react';
+import Link from 'next/link';
+import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import Dialog from '@mui/material/Dialog';
+import IconButton from '@mui/material/IconButton';
+import Paper from '@mui/material/Paper';
+import Skeleton from '@mui/material/Skeleton';
+import Stack from '@mui/material/Stack';
+import Typography from '@mui/material/Typography';
+import Close from '@mui/icons-material/Close';
+import CloudOffOutlined from '@mui/icons-material/CloudOffOutlined';
+import LockClockOutlined from '@mui/icons-material/LockClockOutlined';
+import SearchOffOutlined from '@mui/icons-material/SearchOffOutlined';
+import type { AssignmentDetail } from '@/lib/types';
+import { VISUALLY_HIDDEN } from '../visually-hidden';
+import { ApiError, fetchDetail } from './api';
+import AttachmentsSection from './AttachmentsSection';
+import CommentsSection from './CommentsSection';
+import DetailHeader from './DetailHeader';
+import Instructions from './Instructions';
+import { useTaskParam } from './useTaskParam';
+import WriteView from './WriteView';
+import YourWork from './YourWork';
+
+/** Width of the Your work column beside the content (from 900px). */
+const WORK_PX = 320;
+
+type Loaded =
+  | { kind: 'ready'; detail: AssignmentDetail }
+  | { kind: 'not-found' }
+  | { kind: 'session-ended' }
+  | { kind: 'error'; message: string };
+
+function fromError(error: unknown): Loaded {
+  if (error instanceof ApiError) {
+    if (error.status === 401) return { kind: 'session-ended' };
+    if (error.status === 404 || error.status === 400) return { kind: 'not-found' };
+    return { kind: 'error', message: error.message };
+  }
+  return { kind: 'error', message: 'Something went wrong. Try again.' };
+}
+
+/**
+ * The assignment pop-up, driven by `?task=ID` (writer `&write=1`). About 90% of the window, up to
+ * 1200px wide; full-screen on phones. A fixed header (course · teacher, title, due facts, ✕) over one
+ * scrolling body: content on the left (Instructions, Attachments, Comments) and Your work in a 320px
+ * column that stays in view, stacked below 900px (Your work after the attachments, comments last).
+ */
+export default function AssignmentDialog({ now }: { now: number }) {
+  const { taskId, isOpen, writing, close, openWriter, closeWriter } = useTaskParam();
+  const titleId = useId();
+  const [attempt, setAttempt] = useState(0);
+  const [result, setResult] = useState<{ key: string; loaded: Loaded } | null>(null);
+
+  // While the dialog fades out the URL no longer names the task; keep showing what was open.
+  const [shown, setShown] = useState({ taskId, writing });
+  if (isOpen && (shown.taskId !== taskId || shown.writing !== writing)) setShown({ taskId, writing });
+  const view = isOpen ? { taskId, writing } : shown;
+
+  const key = `${view.taskId}:${attempt}`;
+  useEffect(() => {
+    if (!isOpen || taskId === null) return;
+    const controller = new AbortController();
+    const requestKey = `${taskId}:${attempt}`;
+    fetchDetail(taskId, controller.signal).then(
+      (detail) => setResult({ key: requestKey, loaded: { kind: 'ready', detail } }),
+      (error: unknown) => {
+        if (!controller.signal.aborted) setResult({ key: requestKey, loaded: fromError(error) });
+      },
+    );
+    return () => controller.abort();
+  }, [isOpen, taskId, attempt]);
+
+  // A non-numeric id is never sent to the server.
+  const loaded: Loaded | null = view.taskId === null ? { kind: 'not-found' } : result?.key === key ? result.loaded : null;
+  // Messages (not found, signed out, failed) take a small dialog; the detail and its skeleton the large one.
+  const compact = loaded !== null && loaded.kind !== 'ready';
+
+  return (
+    <Dialog
+      open={isOpen}
+      onClose={(_, reason) => (reason === 'escapeKeyDown' && view.writing ? closeWriter() : close())}
+      maxWidth={false}
+      aria-labelledby={titleId}
+      slotProps={{
+        paper: {
+          'aria-busy': loaded === null ? true : undefined,
+          sx: (theme) => ({
+            bgcolor: theme.yungu.color.surfaceContainerLowest,
+            backgroundImage: 'none',
+            overflow: 'hidden',
+            borderRadius: `${theme.yungu.shape.extraLarge}px`,
+            ...(compact
+              ? { m: 2, width: 'calc(100% - 32px)', maxWidth: 440 }
+              : {
+                  m: { xs: 0, sm: 4 },
+                  width: { xs: '100%', sm: 'calc(100% - 64px)' },
+                  maxWidth: { xs: '100%', sm: 1200 },
+                  height: { xs: '100%', sm: 'calc(100% - 64px)' },
+                  maxHeight: { xs: '100%', sm: 'calc(100% - 64px)' },
+                  borderRadius: { xs: 0, sm: `${theme.yungu.shape.extraLarge}px` },
+                }),
+          }),
+        },
+      }}
+    >
+      {loaded === null ? (
+        <LoadingView titleId={titleId} onClose={close} />
+      ) : loaded.kind === 'ready' ? (
+        view.writing ? (
+          <WriteView detail={loaded.detail} onBack={closeWriter} />
+        ) : (
+          <DetailView detail={loaded.detail} now={now} titleId={titleId} onClose={close} onWrite={openWriter} />
+        )
+      ) : loaded.kind === 'not-found' ? (
+        <StatusView
+          titleId={titleId}
+          icon={<SearchOffOutlined />}
+          title="Assignment not found"
+          text="It may have been removed, or the link is incomplete."
+          actions={<Button variant="contained" onClick={close}>Close</Button>}
+        />
+      ) : loaded.kind === 'session-ended' ? (
+        <StatusView
+          titleId={titleId}
+          icon={<LockClockOutlined />}
+          title="Signed out"
+          text="Your session ended — sign in again."
+          actions={
+            <>
+              <Button onClick={close}>Close</Button>
+              <Button variant="contained" component={Link} href="/login">
+                Sign in
+              </Button>
+            </>
+          }
+        />
+      ) : (
+        <StatusView
+          titleId={titleId}
+          icon={<CloudOffOutlined />}
+          title="Couldn’t load this assignment"
+          text={loaded.message}
+          actions={
+            <>
+              <Button onClick={close}>Close</Button>
+              <Button variant="contained" onClick={() => setAttempt((n) => n + 1)}>
+                Try again
+              </Button>
+            </>
+          }
+        />
+      )}
+    </Dialog>
+  );
+}
+
+/** The fixed top of the dialog: header content and the ✕, closed off from the scrolling body by a hairline. */
+function TopBar({ children, onClose }: { children: ReactNode; onClose: () => void }) {
+  return (
+    <Stack
+      direction="row"
+      sx={{
+        alignItems: 'flex-start',
+        gap: 2,
+        flexShrink: 0,
+        pl: { xs: 2, sm: 3 },
+        pr: { xs: 1, sm: 2 },
+        pt: { xs: 2, sm: 2.5 },
+        pb: 2,
+        borderBottom: 1,
+        borderColor: 'divider',
+      }}
+    >
+      <Box sx={{ flex: 1, minWidth: 0 }}>{children}</Box>
+      <IconButton onClick={onClose} aria-label="Close" sx={{ mt: -0.5 }}>
+        <Close />
+      </IconButton>
+    </Stack>
+  );
+}
+
+/** The scrolling body with its two areas: content (and comments) on the left, Your work on the right. */
+function Body({ content, work, comments }: { content: ReactNode; work: ReactNode; comments?: ReactNode }) {
+  return (
+    <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain' }}>
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: 'minmax(0, 1fr)', md: `minmax(0, 1fr) ${WORK_PX}px` },
+          gridTemplateAreas: { xs: '"content" "work" "comments"', md: '"content work" "comments work"' },
+          gridTemplateRows: { md: 'auto 1fr' },
+          columnGap: 5,
+          rowGap: 4,
+          p: { xs: 2, sm: 3 },
+          pb: { xs: 4, sm: 5 },
+        }}
+      >
+        <Stack sx={{ gridArea: 'content', gap: 4, minWidth: 0 }}>{content}</Stack>
+        <Paper
+          variant="outlined"
+          component="section"
+          aria-label="Your work"
+          sx={(theme) => ({
+            gridArea: 'work',
+            alignSelf: 'start',
+            position: { md: 'sticky' },
+            top: { md: theme.spacing(3) },
+            p: 2.5,
+            borderRadius: `${theme.yungu.shape.large}px`,
+          })}
+        >
+          {work}
+        </Paper>
+        {comments && <Box sx={{ gridArea: 'comments', minWidth: 0 }}>{comments}</Box>}
+      </Box>
+    </Box>
+  );
+}
+
+interface DetailViewProps {
+  detail: AssignmentDetail;
+  now: number;
+  titleId: string;
+  onClose: () => void;
+  onWrite: () => void;
+}
+
+function DetailView({ detail, now, titleId, onClose, onWrite }: DetailViewProps) {
+  return (
+    <>
+      <TopBar onClose={onClose}>
+        <DetailHeader detail={detail} now={now} titleId={titleId} />
+      </TopBar>
+      <Body
+        content={
+          <>
+            <Instructions html={detail.instructionsHtml} />
+            <AttachmentsSection files={detail.attachments} />
+          </>
+        }
+        work={<YourWork detail={detail} onWrite={onWrite} />}
+        comments={<CommentsSection comments={detail.comments} />}
+      />
+    </>
+  );
+}
+
+/** The detail's shape in grey while it loads, so nothing jumps when it arrives. */
+function LoadingView({ titleId, onClose }: { titleId: string; onClose: () => void }) {
+  return (
+    <>
+      <TopBar onClose={onClose}>
+        <Typography id={titleId} component="h2" sx={VISUALLY_HIDDEN}>
+          Loading assignment
+        </Typography>
+        <Skeleton width={180} />
+        <Skeleton variant="text" sx={{ fontSize: '1.5rem', maxWidth: 420 }} />
+        <Skeleton width={260} sx={{ mt: 1 }} />
+      </TopBar>
+      <Body
+        content={
+          <Box>
+            <Skeleton width={120} sx={{ fontSize: '1rem', mb: 1 }} />
+            {[100, 96, 98, 72].map((w, i) => (
+              <Skeleton key={i} sx={{ maxWidth: `${w}%` }} />
+            ))}
+          </Box>
+        }
+        work={
+          <>
+            <Skeleton width={100} sx={{ fontSize: '1rem' }} />
+            <Skeleton width={140} />
+            <Skeleton variant="rounded" height={36} sx={{ mt: 2 }} />
+          </>
+        }
+      />
+    </>
+  );
+}
+
+interface StatusViewProps {
+  titleId: string;
+  icon: ReactNode;
+  title: string;
+  text: string;
+  actions: ReactNode;
+}
+
+/** Not found, signed out, failed: one calm message in a small dialog, with what to do next. */
+function StatusView({ titleId, icon, title, text, actions }: StatusViewProps) {
+  return (
+    <Stack sx={{ alignItems: 'center', textAlign: 'center', px: 3, pt: 4, pb: 3 }}>
+      <Box sx={{ color: 'text.secondary', mb: 1.5, '& svg': { fontSize: 40 } }}>{icon}</Box>
+      <Typography id={titleId} variant="h2" component="h2">
+        {title}
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mt: 1, maxWidth: 360 }}>
+        {text}
+      </Typography>
+      <Stack direction="row" sx={{ mt: 3, gap: 1, flexWrap: 'wrap', justifyContent: 'center' }}>
+        {actions}
+      </Stack>
+    </Stack>
+  );
+}

@@ -4,6 +4,8 @@ import Box from '@mui/material/Box';
 import Tab from '@mui/material/Tab';
 import Tabs from '@mui/material/Tabs';
 import type { Assignment } from '@/lib/types';
+import AssignmentDialog from './detail/AssignmentDialog';
+import { OpenTaskContext, useTaskParam } from './detail/useTaskParam';
 import PageHeader from './PageHeader';
 import PriorityBoard from './PriorityBoard';
 import SubmittedList from './SubmittedList';
@@ -19,12 +21,14 @@ interface AssignmentsViewProps {
 
 /**
  * To-do | Submitted tabs attached to the app bar. To-do shows the work in priority columns. The tab
- * lives in the URL (`?tab=submitted`) so it survives reloads.
+ * lives in the URL (`?tab=submitted`) so it survives reloads. Cards open their assignment in the
+ * detail pop-up (`?task=ID`), mounted here over the lists.
  */
 export default function AssignmentsView({ todo, submitted, now }: AssignmentsViewProps) {
   const pathname = usePathname();
   const params = useSearchParams();
   const tab: TabKey = params.get('tab') === 'submitted' ? 'submitted' : 'todo';
+  const { open } = useTaskParam();
 
   function go(nextTab: TabKey) {
     // The native History API keeps useSearchParams in sync without a server round trip.
@@ -32,7 +36,7 @@ export default function AssignmentsView({ todo, submitted, now }: AssignmentsVie
   }
 
   return (
-    <>
+    <OpenTaskContext.Provider value={open}>
       <PageHeader>
         <Tabs value={tab} onChange={(_, next: TabKey) => go(next)} aria-label="Assignment lists">
           {/* Only the open tab's panel is mounted, so only that tab may point at it. */}
@@ -58,7 +62,8 @@ export default function AssignmentsView({ todo, submitted, now }: AssignmentsVie
           <SubmittedList items={submitted} now={now} />
         )}
       </Box>
-    </>
+      <AssignmentDialog now={now} />
+    </OpenTaskContext.Provider>
   );
 }
 

@@ -57,6 +57,14 @@ describe('AssignmentsView', () => {
     expect(replace).toHaveBeenLastCalledWith(null, '', '/assignments');
   });
 
+  it('opens a card as the detail pop-up by pushing ?task=ID, keeping the tab', async () => {
+    const push = vi.spyOn(window.history, 'pushState').mockImplementation(() => {});
+    const task = todo('Observation task', 2 * DAY, { id: 94616 });
+    render(<AssignmentsView todo={[task]} submitted={[]} now={NOW} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Observation task' }));
+    expect(push).toHaveBeenCalledWith({ ylTask: true }, '', '/assignments?task=94616');
+  });
+
   it("leaves Today's classes to the dashboard shell (shared with Calendar)", () => {
     renderView();
     expect(screen.queryByRole('button', { name: "Today's classes" })).not.toBeInTheDocument();
