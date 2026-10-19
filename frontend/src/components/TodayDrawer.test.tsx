@@ -4,7 +4,11 @@ import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClassEvent, Course } from '@/lib/types';
 import StyleProvider from './StyleProvider';
+import { DOCK_MIN_PX } from './PageHeader';
 import TodayDrawer, { DOCK_QUERY, shouldRevealEdgeButton } from './TodayDrawer';
+
+const nav = vi.hoisted(() => ({ pathname: '/assignments' }));
+vi.mock('next/navigation', () => ({ usePathname: () => nav.pathname }));
 
 const HOUR = 3600_000;
 const MIN = 60_000;
@@ -168,7 +172,7 @@ describe('TodayDrawer edge reveal', () => {
   });
 });
 
-/** Simulates the window width: docked panel from 900px, temporary drawer below. */
+/** Simulates the window width: docked panel from 1200px, temporary drawer below. */
 function stubWidth(docked: boolean) {
   vi.stubGlobal('matchMedia', (query: string) => ({
     matches: query === DOCK_QUERY ? docked : false,
@@ -182,7 +186,7 @@ function clearPanelCookie() {
   document.cookie = 'yl_today_panel=; Max-Age=0; Path=/';
 }
 
-describe('TodayDrawer docked panel (900px and up)', () => {
+describe('TodayDrawer docked panel (1200px and up)', () => {
   beforeEach(() => {
     stubWidth(true);
     clearPanelCookie();
@@ -277,9 +281,96 @@ describe('TodayDrawer docked panel (900px and up)', () => {
     delete (document.documentElement as { clientWidth?: number }).clientWidth;
   });
 
+  it('takes its space from the content at once when opening, and gives it back only once it has slid out', async () => {
+    render(<TodayDrawer events={classes} now={NOW} courses={COURSES} />);
+    expect(panel()).toHaveAttribute('data-takes-space', 'false');
+    await press(toggle());
+    expect(panel()).toHaveAttribute('data-takes-space', 'true');
+
+    await press(toggle());
+    expect(panel()).toHaveAttribute('data-open', 'false');
+    expect(panel()).toHaveAttribute('data-takes-space', 'true');
+    fireEvent.transitionEnd(panel(), { propertyName: 'transform' });
+    expect(panel()).toHaveAttribute('data-takes-space', 'false');
+  });
+
+  it('gives the space back at once when motion is reduced (no slide, so no transitionend)', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === DOCK_QUERY || query === '(prefers-reduced-motion: reduce)',
+      media: query,
+      addEventListener() {},
+      removeEventListener() {},
+    }));
+    render(<TodayDrawer events={classes} now={NOW} courses={COURSES} initialPanelOpen />);
+    expect(panel()).toHaveAttribute('data-takes-space', 'true');
+    await press(toggle());
+    expect(panel()).toHaveAttribute('data-takes-space', 'false');
+  });
 });
 
-describe('TodayDrawer below 900px', () => {
+describe('TodayDrawer after the last class', () => {
+  const tuesday: ClassEvent = { ...classes[0], name: 'Algebra II', start: classes[0].start + 24 * HOUR, end: classes[0].end + 24 * HOUR };
+
+  it("shows the next school day's classes once today's are over", async () => {
+    render(<TodayDrawer events={[...classes, tuesday]} now={MONDAY + 21 * HOUR} courses={COURSES} />);
+    await openWithKeyboard();
+    const drawer = screen.getByRole('dialog', { name: "Today's classes" });
+    expect(within(drawer).getByRole('heading', { name: 'Done for today' })).toBeInTheDocument();
+    expect(within(drawer).getByText('Tomorrow · Tue, Oct 20')).toBeInTheDocument();
+    expect(within(drawer).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['NextAlgebra II08:00–08:40 · D419']);
+  });
+
+  it("lists only today's classes during the day", async () => {
+    render(<TodayDrawer events={[...classes, tuesday]} now={NOW} courses={COURSES} />);
+    await openWithKeyboard();
+    expect(within(screen.getByRole('dialog')).getAllByRole('listitem')).toHaveLength(2);
+  });
+});
+
+describe('TodayDrawer on the calendar', () => {
+  afterEach(() => {
+    nav.pathname = '/assignments';
+    document.cookie = 'yl_today_panel=; Max-Age=0; Path=/';
+  });
+
+  it('renders neither the panel nor its button on /calendar, and leaves the stored state for other pages', () => {
+    stubWidth(true);
+    document.cookie = 'yl_today_panel=open; Path=/';
+    nav.pathname = '/calendar';
+    const { container, rerender } = render(<TodayDrawer events={classes} now={NOW} courses={COURSES} initialPanelOpen />);
+    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByRole('button', { name: "Today's classes" })).not.toBeInTheDocument();
+    expect(document.cookie).toContain('yl_today_panel=open');
+
+    nav.pathname = '/assignments';
+    rerender(<TodayDrawer events={classes} now={NOW} courses={COURSES} initialPanelOpen />);
+    expect(screen.getByRole('complementary', { name: "Today's classes" })).toHaveAttribute('data-open', 'true');
+    vi.unstubAllGlobals();
+  });
+  it('does not leave the content narrowed when the calendar opens mid slide-out', async () => {
+    stubWidth(true);
+    const { rerender } = render(<TodayDrawer events={classes} now={NOW} courses={COURSES} initialPanelOpen />);
+    act(() => screen.getByRole('button', { name: "Today's classes" }).focus());
+    await userEvent.keyboard('{Enter}');
+    expect(document.querySelector('aside')).toHaveAttribute('data-takes-space', 'true');
+    nav.pathname = '/calendar';
+    rerender(<TodayDrawer events={classes} now={NOW} courses={COURSES} initialPanelOpen />);
+    nav.pathname = '/assignments';
+    rerender(<TodayDrawer events={classes} now={NOW} courses={COURSES} initialPanelOpen />);
+    expect(document.querySelector('aside')).toHaveAttribute('data-open', 'false');
+    expect(document.querySelector('aside')).toHaveAttribute('data-takes-space', 'false');
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('TodayDrawer dock breakpoint', () => {
+  it('docks from 1200px', () => {
+    expect(DOCK_MIN_PX).toBe(1200);
+    expect(DOCK_QUERY).toBe('(min-width: 1200px)');
+  });
+});
+
+describe('TodayDrawer below 1200px', () => {
   beforeEach(() => {
     stubWidth(false);
     clearPanelCookie();

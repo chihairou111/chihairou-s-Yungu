@@ -16,13 +16,13 @@ import Logout from '@mui/icons-material/Logout';
 import { sectionFor } from './nav-items';
 import {
   CONTENT_MAX_PX,
+  DOCK_MIN_PX,
   PAGE_HEADER_ATTR,
   TODAY_PANEL_ATTR,
   TODAY_PANEL_PX,
   TODAY_PANEL_SPACE,
   alignedPadding,
   pagePadding,
-  panelTransition,
 } from './PageHeader';
 import { PHONE_NAV_CLEARANCE } from './NavRail';
 import { BOTTOM_FAB_MEDIA } from './TodayDrawer';
@@ -80,14 +80,15 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
         minHeight: '100dvh',
         bgcolor: 'background.default',
         [`&:has([${PAGE_HEADER_ATTR}]) > .MuiAppBar-root`]: { borderBottom: 'none' },
-        // A docked Today's classes panel that is open takes its width from the page (from 900px).
-        '@media (min-width: 900px)': {
-          [`&:has([${TODAY_PANEL_ATTR}][data-open="true"])`]: { '--today-panel': `${TODAY_PANEL_PX}px` },
+        // The docked Today's classes panel takes its width from the page (from the dock width) while it
+        // is open or sliding out; the width changes in one step, so only the panel itself moves.
+        [`@media (min-width: ${DOCK_MIN_PX}px)`]: {
+          [`&:has([${TODAY_PANEL_ATTR}][data-takes-space="true"])`]: { '--today-panel': `${TODAY_PANEL_PX}px` },
         },
       }}
     >
       <AppBar position="sticky">
-        <Toolbar sx={(theme) => ({ ...alignedPadding(theme, 'viewport'), ...panelTransition(theme, 'padding-left') })}>
+        <Toolbar sx={(theme) => alignedPadding(theme, 'viewport')}>
           <Typography variant="h1" sx={{ flexGrow: 1, minWidth: 0 }} noWrap>
             {title}
           </Typography>
@@ -151,9 +152,8 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
         sx={(theme) => ({
           ...pagePadding(theme),
           pt: 2,
-          // Room for the docked panel, which slides in over this margin as the content narrows.
+          // Room for the docked panel, which slides in over this margin.
           mr: TODAY_PANEL_SPACE,
-          ...panelTransition(theme, 'margin-right'),
           // Room below the last card for the bottom-right Today's classes button (40 + 16 inset + margin)
           // where it is always shown; on phones the last card clears the bottom nav and the button beside it.
           pb: { xs: PHONE_NAV_CLEARANCE, sm: 3 },

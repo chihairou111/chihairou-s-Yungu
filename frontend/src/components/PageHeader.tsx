@@ -6,25 +6,22 @@ import type { Theme } from '@mui/material/styles';
 /** Marks a page header so the app shell can join it to the app bar (see `AppShell`). */
 export const PAGE_HEADER_ATTR = 'data-page-header';
 
-/** Marks the docked Today's classes panel; while it is open (from 900px) the content narrows for it. */
+/** Marks the docked Today's classes panel; while it takes its space (from `DOCK_MIN_PX`) the content narrows for it. */
 export const TODAY_PANEL_ATTR = 'data-today-panel';
+/**
+ * From this window width (px) Today's classes dock as a panel beside the content; below it they open
+ * in a temporary drawer, so a laptop split-screen keeps the page's columns side by side.
+ */
+export const DOCK_MIN_PX = 1200;
 /** Height of the page header band (px); the docked Today's classes panel starts below it. */
 export const PAGE_HEADER_PX = 48;
 /** Width of the docked panel (px). */
 export const TODAY_PANEL_PX = 344;
-/** Space the open panel takes from the page (a length; 0px while closed). Set by the app shell. */
+/**
+ * Space the docked panel takes from the page (a length; 0px while closed). Set by the app shell. It
+ * changes in one step, never animated: at the start of opening, and once the panel has slid out.
+ */
 export const TODAY_PANEL_SPACE = 'var(--today-panel, 0px)';
-
-/** Moves with the docked panel's slide, so the content, the title and the header follow it; still for reduced motion. */
-export function panelTransition(theme: Theme, property: string | string[]) {
-  return {
-    transition: theme.transitions.create(property, {
-      duration: theme.transitions.duration.enteringScreen,
-      easing: theme.transitions.easing.easeInOut,
-    }),
-    '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
-  };
-}
 
 /** Content is capped at this width and centred in the space right of the rail (on large screens). */
 export const CONTENT_MAX_PX = 1280;
@@ -121,12 +118,11 @@ export default function PageHeader({ children }: PageHeaderProps) {
           minHeight: PAGE_HEADER_PX,
           // Full bleed: undo the content padding, then pad back to the title's left edge. On the right
           // it also spans the docked panel's space (the panel starts below it), padded back by as much;
-          // its margin and padding move with the content's, so its right edge stays at the window's.
+          // its margin and padding change with the content's, so its right edge stays at the window's.
           ml: perBreakpoint((bp) => `-${pl[bp]}`),
           mr: perBreakpoint((bp) => `calc(-${pr[bp]} - ${TODAY_PANEL_SPACE})`),
           pl: aligned.pl,
           pr: perBreakpoint((bp) => `calc(${aligned.pr[bp]} + ${TODAY_PANEL_SPACE})`),
-          ...panelTransition(theme, ['margin-right', 'padding-right']),
           mb: CONTENT_GAP,
           bgcolor: header.bg,
           borderBottom: header.edge,

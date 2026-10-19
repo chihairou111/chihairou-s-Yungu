@@ -298,7 +298,7 @@ test.describe("docked today's classes panel", () => {
     expect(await contentWidth(page)).toBeCloseTo(wide, 0);
   });
 
-  test('the panel belongs to the shell: it stays open, unchanged, on Calendar and across reloads', async ({ page }) => {
+  test('the panel belongs to the shell but stays off Calendar, and comes back unchanged', async ({ page }) => {
     await signIn(page);
     const toggle = page.getByRole('button', { name: "Today's classes", exact: true });
     await toggle.focus();
@@ -306,32 +306,47 @@ test.describe("docked today's classes panel", () => {
     await expect(panel(page)).toBeVisible();
     await expect.poll(() => panel(page).evaluate((el) => el.getBoundingClientRect().x)).toBe(1280 - 344);
     const before = (await panel(page).boundingBox())!;
+    const nav = page.getByRole('navigation', { name: 'Main' });
 
-    // Client-side navigation to Calendar: the same panel, already in place (no slide), beside real content.
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Calendar' }).click();
+    // Calendar already shows today as a column: neither the panel nor its button, and no space held.
+    await nav.getByRole('link', { name: 'Calendar' }).click();
     await expect(page).toHaveURL(/\/calendar$/);
+    await expect(page.getByRole('main').getByRole('region').first()).toBeVisible();
+    await expect(page.locator('aside#today-panel')).toHaveCount(0);
+    await expect(toggle).toHaveCount(0);
+    expect(await page.getByRole('main').evaluate((el) => Math.round(el.getBoundingClientRect().right))).toBe(1280);
+    await expectNoHorizontalScroll(page);
+    // The stored state is left for the other pages, also across a reload on Calendar.
+    expect(await panelCookie(page)).toBe('open');
+    await page.reload();
+    await expect(page.getByRole('main').getByRole('region').first()).toBeVisible();
+    await expect(page.locator('aside#today-panel')).toHaveCount(0);
+    await expect(toggle).toHaveCount(0);
+
+    // Back on Assignments it is open again, already in place (no slide).
+    await nav.getByRole('link', { name: 'Assignments' }).click();
+    await expect(page).toHaveURL(/\/assignments$/);
     await expect(panel(page)).toBeVisible();
     expect(await panel(page).evaluate((el) => getComputedStyle(el).transform)).toBe('none');
     expect(await panel(page).boundingBox()).toEqual(before);
-    const firstDay = page.getByRole('main').getByRole('region').first();
-    await expect(firstDay).toBeVisible();
-    const day = (await firstDay.boundingBox())!;
-    expect(day.x + day.width).toBeLessThanOrEqual(before.x);
-    await expectNoHorizontalScroll(page);
+  });
 
-    // A reload on Calendar paints it open too.
-    await page.reload();
-    await expect(panel(page)).toBeVisible();
-    await expect(firstDay).toBeVisible();
-
-    // Closed on Calendar: no space is held for it.
+  test('only the panel slides: the content takes its new width in one step', async ({ page }) => {
+    await signIn(page);
+    const wide = await contentWidth(page);
+    const toggle = page.getByRole('button', { name: "Today's classes", exact: true });
     await toggle.focus();
     await page.keyboard.press('Enter');
-    await expect(panel(page)).toHaveCount(0);
-    await expect.poll(() => page.getByRole('main').evaluate((el) => Math.round(el.getBoundingClientRect().right))).toBe(1280);
-    await page.goto('/assignments');
-    await expect(panel(page)).toHaveCount(0);
-    expect(await page.getByRole('main').evaluate((el) => Math.round(el.getBoundingClientRect().right))).toBe(1280);
+    // Opening: the content narrows at once (nothing animates its margins or padding).
+    await expect.poll(() => contentWidth(page)).toBeLessThan(wide - 300);
+    for (const el of [page.getByRole('main'), page.locator('[data-page-header]'), page.getByRole('banner').locator('.MuiToolbar-root')]) {
+      expect(await el.evaluate((e) => getComputedStyle(e).transitionProperty)).not.toMatch(/margin|padding/);
+    }
+    await expect.poll(() => panel(page).evaluate((el) => getComputedStyle(el).transform)).toBe('none');
+    // Closing: the content keeps its width until the panel has slid out, then widens in one step.
+    await page.keyboard.press('Enter');
+    expect(await contentWidth(page)).toBeLessThan(wide - 300);
+    await expect.poll(() => contentWidth(page)).toBeCloseTo(wide, 0);
   });
 
   test('the server renders the stored state (JavaScript off)', async ({ page, context, baseURL }) => {
@@ -360,33 +375,53 @@ test.describe("docked today's classes panel", () => {
   });
 });
 
-test.describe('docked panel at 900px', () => {
-  test.use({ viewport: { width: 900, height: 800 } });
+test.describe('below the dock width (1000px)', () => {
+  test.use({ viewport: { width: 1000, height: 800 } });
 
-  test('the columns reflow beside the open panel without horizontal scroll', async ({ page, context, baseURL }) => {
+  test('a stored open panel does not dock: the columns stay side by side and the button opens the drawer', async ({ page, context, baseURL }) => {
     await signIn(page);
     await context.addCookies([{ name: 'yl_today_panel', value: 'open', url: baseURL! }]);
     await page.reload();
-    await expect(page.getByRole('complementary', { name: "Today's classes" })).toBeVisible();
-    await expectNoHorizontalScroll(page);
-    // One column now: the three headings stack.
+    await expect(page.getByRole('heading', { name: 'Overdue', exact: true })).toBeVisible();
+    await expect(page.getByRole('complementary', { name: "Today's classes" })).toHaveCount(0);
+    expect(await page.getByRole('main').evaluate((el) => Math.round(el.getBoundingClientRect().right))).toBe(1000);
     const lefts = await Promise.all(
       ['Overdue', 'Nearly overdue', 'Upcoming'].map(async (name) =>
         Math.round((await page.getByRole('heading', { name, exact: true }).boundingBox())!.x),
       ),
     );
-    expect(new Set(lefts).size).toBe(1);
+    expect(new Set(lefts).size).toBe(3);
+    await expectNoHorizontalScroll(page);
+    const fab = page.getByRole('button', { name: "Today's classes", exact: true });
+    await expect(fab).toHaveCSS('opacity', '1');
+    await expect(fab).toHaveAttribute('aria-expanded', 'false');
+    await fab.click();
+    await expect(page.getByRole('dialog', { name: "Today's classes" })).toBeVisible();
   });
+});
 
-  test('the calendar falls back to its list beside the open panel, without horizontal scroll', async ({ page, context, baseURL }) => {
+test.describe('just below the dock width (1199px)', () => {
+  test.use({ viewport: { width: 1199, height: 800 } });
+
+  test('opens the drawer, not the panel', async ({ page, context, baseURL }) => {
     await signIn(page);
     await context.addCookies([{ name: 'yl_today_panel', value: 'open', url: baseURL! }]);
-    await page.goto('/calendar');
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Overdue', exact: true })).toBeVisible();
+    await expect(page.getByRole('complementary', { name: "Today's classes" })).toHaveCount(0);
+    await page.getByRole('button', { name: "Today's classes", exact: true }).click();
+    await expect(page.getByRole('dialog', { name: "Today's classes" })).toBeVisible();
+  });
+});
+
+test.describe('at the dock width (1200px)', () => {
+  test.use({ viewport: { width: 1200, height: 800 } });
+
+  test('a stored open panel docks', async ({ page, context, baseURL }) => {
+    await signIn(page);
+    await context.addCookies([{ name: 'yl_today_panel', value: 'open', url: baseURL! }]);
+    await page.reload();
     await expect(page.getByRole('complementary', { name: "Today's classes" })).toBeVisible();
-    const days = page.getByRole('main').getByRole('region');
-    await expect(days.first()).toBeVisible();
-    const lefts = await days.evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().left)));
-    expect(new Set(lefts).size).toBe(1);
     await expectNoHorizontalScroll(page);
   });
 });

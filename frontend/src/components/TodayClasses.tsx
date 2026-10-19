@@ -19,16 +19,35 @@ interface TodayClassesProps {
   now: number;
   /** For each class's course-color dot. */
   courses: Course[];
+  /**
+   * Today is over and `events` are the next school day's classes: this names that day ("Tomorrow ·
+   * Tue, Oct 20"), under a "Done for today" heading (see `classesForPanel`).
+   */
+  nextDay?: string;
+}
+
+/** "Done for today" over the day the list shows instead. */
+function NextDayHeading({ day }: { day: string }) {
+  return (
+    <Box sx={{ mb: 1.5 }}>
+      <Typography variant="body1" component="h3" sx={{ fontWeight: 600 }}>
+        Done for today
+      </Typography>
+      <Typography variant="body2" color="text.secondary">
+        {day}
+      </Typography>
+    </Box>
+  );
 }
 
 /**
- * Today's classes as given (select and order them with `todaysClasses`): a course-color dot and the
+ * Today's classes as given (select and order them with `classesForPanel`): a course-color dot and the
  * name, then "HH:MM–HH:MM · room". The class in progress is labelled Now and the next one Next, and
  * the list opens scrolled to that card; ended classes recede. Each class is its own card (the
  * style's card shape and surface), 8px apart, with no rules between them. The surrounding surface
  * (the drawer or the docked panel) supplies the padding and, in the drawer, the title.
  */
-export default function TodayClasses({ events: classes, now, courses }: TodayClassesProps) {
+export default function TodayClasses({ events: classes, now, courses, nextDay }: TodayClassesProps) {
   const timing = classTimeline(classes, now);
   const focus = timing.includes('now') ? timing.indexOf('now') : timing.indexOf('next');
   const focusRef = useRef<HTMLLIElement>(null);
@@ -51,7 +70,7 @@ export default function TodayClasses({ events: classes, now, courses }: TodayCla
     return course ? courseColorHex(course.color) : COURSE_COLORS.Peacock;
   };
 
-  return (
+  const list = (
     <Box component="ol" sx={{ m: 0, p: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 1 }}>
       {classes.map((c, i) => {
         const ended = timing[i] === 'ended';
@@ -104,5 +123,13 @@ export default function TodayClasses({ events: classes, now, courses }: TodayCla
         );
       })}
     </Box>
+  );
+  return nextDay ? (
+    <>
+      <NextDayHeading day={nextDay} />
+      {list}
+    </>
+  ) : (
+    list
   );
 }

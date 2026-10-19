@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
+import { usePathname } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Divider from '@mui/material/Divider';
 import Drawer from '@mui/material/Drawer';
@@ -10,10 +11,11 @@ import Typography from '@mui/material/Typography';
 import Close from '@mui/icons-material/Close';
 import ChevronRight from '@mui/icons-material/ChevronRight';
 import EventNote from '@mui/icons-material/EventNote';
+import { classesForPanel } from '@/lib/schedule';
 import { chinaShortDate } from '@/lib/time';
 import { todayPanelCookie } from '@/lib/today-panel';
 import type { ClassEvent, Course } from '@/lib/types';
-import { PAGE_HEADER_PX, TODAY_PANEL_ATTR, TODAY_PANEL_PX } from './PageHeader';
+import { DOCK_MIN_PX, PAGE_HEADER_PX, TODAY_PANEL_ATTR, TODAY_PANEL_PX } from './PageHeader';
 import TodayClasses from './TodayClasses';
 import { useNow } from './useNow';
 
@@ -22,7 +24,11 @@ const TITLE_ID = 'today-drawer-title';
 const PANEL_ID = 'today-panel';
 const PANEL_TITLE_ID = 'today-panel-title';
 /** From this width the classes dock as a panel beside the content; below it they open in a drawer. */
-export const DOCK_QUERY = '(min-width: 900px)';
+export const DOCK_QUERY = `(min-width: ${DOCK_MIN_PX}px)`;
+const UNDOCKED_MEDIA = `@media (max-width: ${DOCK_MIN_PX - 0.05}px)`;
+const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
+/** Today's classes is already the calendar's today column, so the calendar shows neither panel nor button. */
+const PANEL_HIDDEN_ON = '/calendar';
 const DOCKED_MEDIA = `@media ${DOCK_QUERY}`;
 /** Docked, but on a touch screen: no hover, so the button stays shown at the bottom right. */
 const DOCKED_TOUCH_MEDIA = `@media (hover: none) and ${DOCK_QUERY}`;
@@ -37,7 +43,7 @@ export const OPEN_REACH_PX = TODAY_PANEL_PX + EDGE_ZONE_PX / 2;
 /** Open, the button straddles the panel's left edge: 24px over the page's right margin, 16px over the panel's padding. */
 const OPEN_BUTTON_RIGHT_PX = TODAY_PANEL_PX - 16;
 /** Where the button parks at the bottom right instead: touch screens and narrow windows. */
-export const BOTTOM_FAB_MEDIA = '@media (hover: none), (max-width: 899.95px)';
+export const BOTTOM_FAB_MEDIA = `@media (hover: none), (max-width: ${DOCK_MIN_PX - 0.05}px)`;
 const EASE = 'cubic-bezier(0.05, 0.7, 0.1, 1)';
 
 function subscribeDock(onChange: () => void) {
@@ -46,7 +52,7 @@ function subscribeDock(onChange: () => void) {
   return () => query?.removeEventListener('change', onChange);
 }
 
-/** True from 900px. The server assumes a wide window, so a stored open panel renders open at once. */
+/** True from the dock width. The server assumes a wide window, so a stored open panel renders open at once. */
 function useDocked(): boolean {
   return useSyncExternalStore(
     subscribeDock,
@@ -68,9 +74,10 @@ export function shouldRevealEdgeButton(x: number, y: number, viewportWidth: numb
  * element covers the page. True while the pointer is near the right edge of the layout viewport
  * (`clientWidth` excludes a classic scrollbar, unlike `innerWidth`) or over the button itself.
  */
-function useEdgeReveal(buttonRef: RefObject<HTMLElement | null>, panelOpen: boolean): boolean {
+function useEdgeReveal(buttonRef: RefObject<HTMLElement | null>, panelOpen: boolean, enabled: boolean): boolean {
   const [near, setNear] = useState(false);
   useEffect(() => {
+    if (!enabled) return;
     const [top, reach] = panelOpen ? [PANEL_TOP_PX, OPEN_REACH_PX] : [APP_BAR_PX, EDGE_ZONE_PX];
     let frame = 0;
     let last: PointerEvent | null = null;
@@ -99,12 +106,12 @@ function useEdgeReveal(buttonRef: RefObject<HTMLElement | null>, panelOpen: bool
       root.removeEventListener('pointerleave', hide);
       window.removeEventListener('blur', hide);
     };
-  }, [buttonRef, panelOpen]);
-  return near;
+  }, [buttonRef, panelOpen, enabled]);
+  return enabled && near;
 }
 
 interface TodayDrawerProps {
-  /** Today's classes, already selected and ordered by `todaysClasses`. */
+  /** Today's classes and the next school day's (`loadPanelClasses`); `classesForPanel` picks the day to show. */
   events: ClassEvent[];
   /** Server time; the list then follows the device clock (Now / Next, the date). */
   now: number;
@@ -115,9 +122,12 @@ interface TodayDrawerProps {
 }
 
 /**
- * Today's classes, part of the dashboard shell (every page). From 900px they dock as a panel on the
- * right, below the page header band: the content narrows to make room, and the panel stays open
- * (remembered in a cookie) until it is closed. Below 900px they open in a temporary drawer instead.
+ * Today's classes, part of the dashboard shell (every page but the calendar, whose today column
+ * already shows them; the stored state is kept for the other pages). Once today's last class has
+ * ended they show the next school day's under "Done for today". From `DOCK_MIN_PX` they dock as a
+ * panel on the right, below the page header band: the content narrows to make room in one step
+ * (only the panel slides), and the panel stays open (remembered in a cookie) until it is closed.
+ * Narrower windows open them in a temporary drawer instead.
  * One round button toggles either. On wide pointer screens it sits mid-right and appears when the
  * pointer nears the right edge (closed) or is over the panel (open, then straddling the panel's left
  * edge as a collapse chevron), and whenever it has focus. On touch screens and narrow windows it is
@@ -126,21 +136,35 @@ interface TodayDrawerProps {
 export default function TodayDrawer({ events, now: serverNow, courses, initialPanelOpen = false }: TodayDrawerProps) {
   const now = useNow(serverNow);
   const docked = useDocked();
+  const hidden = usePathname() === PANEL_HIDDEN_ON;
   const [panelOpen, setPanelOpen] = useState(initialPanelOpen);
-  // The list stays mounted while the panel slides out; it mounts again (and scrolls to Now) on open.
+  // Open or still sliding out: the list stays mounted and the content keeps the panel's space until
+  // the slide ends; on open both return at once (and the list scrolls to Now).
   const [panelBody, setPanelBody] = useState(initialPanelOpen);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const near = useEdgeReveal(buttonRef, docked && panelOpen);
+  const near = useEdgeReveal(buttonRef, docked && panelOpen, !hidden);
   // Any focus keeps it shown, including the focus MUI restores after a mouse close of the drawer.
   const [focused, setFocused] = useState(false);
   const expanded = docked ? panelOpen : drawerOpen;
 
+  const shown = classesForPanel(events, now);
+  const list = (
+    <TodayClasses events={shown.items} now={now} courses={courses} nextDay={shown.label === 'next' ? shown.dayLabel : undefined} />
+  );
+
   function setPanel(open: boolean) {
     document.cookie = todayPanelCookie(open);
-    if (open) setPanelBody(true);
+    // No slide under reduced motion, so no transitionend to wait for.
+    if (open || window.matchMedia?.(REDUCED_MOTION_QUERY).matches) setPanelBody(open);
     setPanelOpen(open);
   }
+
+  // Unmounted (on the calendar) or not shown (an undocked window), the panel cannot finish a slide,
+  // so a pending slide-out ends here rather than leaving the content narrowed for a closed panel.
+  if ((hidden || !docked) && panelBody !== panelOpen) setPanelBody(panelOpen);
+
+  if (hidden) return null;
 
   return (
     <>
@@ -224,7 +248,7 @@ export default function TodayDrawer({ events, now: serverNow, courses, initialPa
         </Stack>
         <Divider />
         <Box sx={{ p: 2, overflowY: 'auto' }}>
-          <TodayClasses events={events} now={now} courses={courses} />
+          {list}
         </Box>
       </Drawer>
 
@@ -234,6 +258,7 @@ export default function TodayDrawer({ events, now: serverNow, courses, initialPa
         aria-labelledby={PANEL_TITLE_ID}
         {...{ [TODAY_PANEL_ATTR]: '' }}
         data-open={panelOpen}
+        data-takes-space={panelOpen || panelBody}
         inert={!panelOpen}
         onTransitionEnd={(e) => {
           if (e.target === e.currentTarget && e.propertyName === 'transform' && !panelOpen) setPanelBody(false);
@@ -244,7 +269,7 @@ export default function TodayDrawer({ events, now: serverNow, courses, initialPa
           return {
             display: 'flex',
             // Narrow windows use the drawer; a stored open state never forces the panel there.
-            [theme.breakpoints.down('md')]: { display: 'none' },
+            [UNDOCKED_MEDIA]: { display: 'none' },
             flexDirection: 'column',
             position: 'fixed',
             // Below the app bar and the page header band, beside the content.
@@ -279,7 +304,7 @@ export default function TodayDrawer({ events, now: serverNow, courses, initialPa
               {chinaShortDate(now)}
             </Typography>
           </Stack>
-          {panelBody && <TodayClasses events={events} now={now} courses={courses} />}
+          {panelBody && list}
         </Box>
       </Box>
     </>

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useTheme } from '@mui/material/styles';
 import AppShell, { initials } from './AppShell';
+import PageHeader from './PageHeader';
 import StyleProvider from './StyleProvider';
 
 const nav = vi.hoisted(() => ({ pathname: '/assignments', replace: vi.fn() }));
@@ -54,6 +55,21 @@ describe('AppShell', () => {
       unmount();
     }
     nav.pathname = '/assignments';
+  });
+
+  it('never animates the content, header or toolbar padding and margins as the panel slides (they change once)', () => {
+    render(
+      <AppShell userName="Bruce Zheng">
+        <PageHeader>tabs</PageHeader>
+      </AppShell>,
+    );
+    const header = document.querySelector('[data-page-header]') as HTMLElement;
+    const animated = [screen.getByRole('main'), header, screen.getByRole('banner').firstElementChild as HTMLElement];
+    for (const el of animated) {
+      const { transition } = getComputedStyle(el);
+      expect(transition).toBeDefined();
+      expect(transition).not.toMatch(/margin|padding/);
+    }
   });
 
   it('signs out through the avatar menu', async () => {

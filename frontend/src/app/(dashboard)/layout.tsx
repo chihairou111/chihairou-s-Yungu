@@ -4,8 +4,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth';
 import { data } from '@/lib/data';
-import { todaysClasses } from '@/lib/schedule';
-import { weekStartOf } from '@/lib/time';
+import { loadPanelClasses } from '@/lib/schedule';
 import { TODAY_PANEL_COOKIE, parseTodayPanel } from '@/lib/today-panel';
 import AppShell from '@/components/AppShell';
 import NavRail from '@/components/NavRail';
@@ -15,12 +14,12 @@ import TodayDrawer from '@/components/TodayDrawer';
 // request and may block navigation into it (reading a cookie is instant).
 export const instant = false;
 
-/** Today's classes for the shell's panel; the clock is read once per request. */
+/** Today's and the next school day's classes for the shell's panel; the clock is read once per request. */
 async function loadToday() {
   await io();
   const now = Date.now();
-  const [courses, week] = await Promise.all([data.getCourses(), data.getWeek(weekStartOf(now))]);
-  return { now, courses, events: todaysClasses(week, now) };
+  const [courses, events] = await Promise.all([data.getCourses(), loadPanelClasses(now, (weekStart) => data.getWeek(weekStart))]);
+  return { now, courses, events };
 }
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
@@ -28,7 +27,8 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   if (!session) redirect('/login');
   const [{ now, courses, events }, cookieStore] = await Promise.all([loadToday(), cookies()]);
   // Read on the server, so a reload paints the panel in its stored state with no flash or slide.
-  // The layout persists across pages, so moving between them never re-animates the panel.
+  // The layout persists across pages, so moving between them never re-animates the panel. The panel
+  // itself leaves out the calendar (from the pathname, also on the server), keeping this state.
   const panelOpen = parseTodayPanel(cookieStore.get(TODAY_PANEL_COOKIE)?.value);
 
   return (
