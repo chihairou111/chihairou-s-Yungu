@@ -489,7 +489,7 @@ test('your work: upload files, submit, and the task moves to Submitted', async (
 
   // A trip to the writer and back keeps the list (and what the server has as the draft).
   await work.getByRole('button', { name: 'Write' }).click();
-  await page.getByRole('button', { name: 'Back to the assignment' }).click();
+  await page.getByRole('button', { name: 'Back to assignment' }).click();
   await expect(work.getByRole('button', { name: /^answers\.txt/ })).toBeVisible();
 
   await work.getByRole('button', { name: 'Submit' }).click();
@@ -504,4 +504,36 @@ test('your work: upload files, submit, and the task moves to Submitted', async (
   await page.keyboard.press('Escape');
   await page.getByRole('tab', { name: 'Submitted' }).click();
   await expect(page.getByText('Unit 4 Problem Set')).toBeVisible();
+});
+
+test('write: format text, keep the draft across a reload, Done adds a PDF to Your work', async ({ page }) => {
+  await signIn(page);
+  await page.goto('/assignments?task=104');
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('region', { name: 'Your work' }).getByRole('button', { name: 'Write' }).click();
+  await expect(page).toHaveURL(/write=1/);
+
+  const doc = dialog.getByRole('textbox', { name: 'Your writing' });
+  await doc.click();
+  await page.keyboard.press('ControlOrMeta+b');
+  await page.keyboard.type('观察记录');
+  await expect(dialog.getByRole('button', { name: 'Bold' })).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('ControlOrMeta+b');
+  await page.keyboard.type(' — first visit');
+  await expect(dialog.getByText('Draft saved')).toBeVisible();
+
+  // The draft lives in this browser: a reload brings it back.
+  await page.reload();
+  await expect(doc.locator('strong')).toHaveText('观察记录');
+
+  const title = dialog.getByRole('textbox', { name: 'Title' });
+  await title.fill('Field notes');
+  await dialog.getByRole('button', { name: 'Done' }).click();
+  await expect(page.getByText('Added Field notes.pdf to Your work')).toBeVisible();
+  await expect(page).not.toHaveURL(/write=1/);
+  await expect(dialog.getByRole('region', { name: 'Your work' }).getByRole('button', { name: /^Field notes\.pdf/ })).toBeVisible();
+
+  // The draft was used up: the writer opens empty again.
+  await dialog.getByRole('region', { name: 'Your work' }).getByRole('button', { name: 'Write' }).click();
+  await expect(doc).toHaveText('');
 });

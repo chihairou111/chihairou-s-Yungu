@@ -120,7 +120,7 @@ describe('useWork', () => {
     let saved!: () => void;
     api.saveDraft.mockReturnValueOnce(new Promise<void>((r) => (saved = r)));
     const { result, rerender } = setup(detail());
-    let pending!: Promise<void>;
+    let pending!: Promise<unknown>;
     act(() => {
       pending = result.current.add(ref('a'));
     });

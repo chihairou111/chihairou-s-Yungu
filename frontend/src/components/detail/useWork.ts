@@ -35,7 +35,8 @@ export interface Work {
   error: string | null;
   /** The last failure was a 401: the error says so and the panel offers a way to sign in. */
   sessionEnded: boolean;
-  add(file: FileRef): Promise<void>;
+  /** Adds a file made elsewhere (the writer's PDF); resolves false when the draft save failed and it was taken back out. */
+  add(file: FileRef): Promise<boolean>;
   addLocal(file: File): Promise<void>;
   /** Uploads several local files at once; failures are collected, each naming its file. */
   addFiles(files: File[]): Promise<void>;
@@ -105,7 +106,7 @@ export function useWork(detail: AssignmentDetail): Work {
   }, []);
 
   const change = useCallback(
-    async (next: FileRef[], undo: (current: FileRef[]) => FileRef[]) => {
+    async (next: FileRef[], undo: (current: FileRef[]) => FileRef[]): Promise<boolean> => {
       filesRef.current = next;
       setFiles(next);
       const ids = next.map((f) => f.id);
@@ -114,11 +115,13 @@ export function useWork(detail: AssignmentDetail): Work {
       saves.current = save.catch(() => {});
       try {
         await save;
+        return true;
       } catch (error) {
         const reverted = undo(filesRef.current);
         filesRef.current = reverted;
         setFiles(reverted);
         fail(error);
+        return false;
       } finally {
         setSaving((n) => n - 1);
       }
@@ -129,7 +132,7 @@ export function useWork(detail: AssignmentDetail): Work {
   const add = useCallback(
     async (file: FileRef) => {
       setFailure(null);
-      await change([...filesRef.current, file], (current) => current.filter((f) => f.id !== file.id));
+      return change([...filesRef.current, file], (current) => current.filter((f) => f.id !== file.id));
     },
     [change],
   );

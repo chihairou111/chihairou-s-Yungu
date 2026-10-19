@@ -163,7 +163,7 @@ describe('AssignmentDialog', () => {
     openTask(94616);
     param.writing = true;
     render(<AssignmentDialog now={NOW} />);
-    await userEvent.click(await screen.findByRole('button', { name: 'Back to the assignment' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Back to assignment' }));
     expect(param.closeWriter).toHaveBeenCalled();
   });
 

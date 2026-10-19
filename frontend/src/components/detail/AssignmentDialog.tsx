@@ -7,8 +7,10 @@ import Dialog from '@mui/material/Dialog';
 import IconButton from '@mui/material/IconButton';
 import Paper from '@mui/material/Paper';
 import Skeleton from '@mui/material/Skeleton';
+import Snackbar from '@mui/material/Snackbar';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
+import useMediaQuery from '@mui/material/useMediaQuery';
 import Close from '@mui/icons-material/Close';
 import CloudOffOutlined from '@mui/icons-material/CloudOffOutlined';
 import LockClockOutlined from '@mui/icons-material/LockClockOutlined';
@@ -53,6 +55,10 @@ function fromError(error: unknown): Loaded {
 export default function AssignmentDialog({ now }: { now: number }) {
   const { taskId, isOpen, writing, close, openWriter, closeWriter } = useTaskParam();
   const titleId = useId();
+  const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
+  // A short confirmation after the writer's PDF lands in Your work.
+  const [notice, setNotice] = useState<string | null>(null);
+  if (!isOpen && notice !== null) setNotice(null);
   const [result, setResult] = useState<{ key: string; loaded: Loaded } | null>(null);
 
   // While the dialog fades out the URL no longer names the task; keep showing what was open.
@@ -149,7 +155,15 @@ export default function AssignmentDialog({ now }: { now: number }) {
           {/* Above the view switch, so the work (and anything still uploading) outlives a trip to the writer. */}
           <WorkProvider key={loaded.detail.id} detail={loaded.detail}>
             {view.writing ? (
-              <WriteView detail={loaded.detail} onBack={closeWriter} />
+              <WriteView
+                detail={loaded.detail}
+                titleId={titleId}
+                onBack={closeWriter}
+                onDone={(file) => {
+                  setNotice(`Added ${file.name} to Your work`);
+                  closeWriter();
+                }}
+              />
             ) : (
               <DetailView detail={loaded.detail} now={now} titleId={titleId} onClose={close} onWrite={openWriter} />
             )}
@@ -194,6 +208,14 @@ export default function AssignmentDialog({ now }: { now: number }) {
           }
         />
       )}
+      <Snackbar
+        open={notice !== null}
+        message={notice}
+        autoHideDuration={4000}
+        onClose={(_, reason) => reason !== 'clickaway' && setNotice(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        slotProps={{ transition: reduceMotion ? { timeout: 0 } : undefined }}
+      />
     </Dialog>
   );
 }
