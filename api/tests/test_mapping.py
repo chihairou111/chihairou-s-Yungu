@@ -306,3 +306,32 @@ def test_detail_takes_group_and_submitted_at_from_the_listing(load):
     listed = {"schoolGroup": "Delayed", "submittedAt": 123}
     d = mapping.detail(load("mixed_93251.json"), load("achievement_93251.json"), [], ME, None, listed=listed)
     assert d["schoolGroup"] == "Delayed" and d["submittedAt"] == 123
+
+
+# ------------------------------------------------------------- no deadline
+def test_submitted_item_without_a_deadline_is_due_at_its_hand_in_and_never_late(load):
+    raw = {**tasks(load("submitted_page1.json"))[0], "deadlineTimeMillis": None, "deadline": None}
+    for late in (True, False, None):
+        a = mapping.assignment({**raw, "ifTimeout": late}, "list", NOW)
+        assert a["submittedAt"] == mapping.china_ms(raw["modifiedTime"]) == a["dueAt"]
+        assert isinstance(a["assignedAt"], int)
+    a = mapping.assignment({**raw, "modifiedTime": None}, "list", NOW)
+    assert a["submittedAt"] == a["dueAt"] == NOW                      # no hand-in time either: now
+
+
+def test_todo_item_without_a_deadline_sorts_last_and_is_never_overdue(load):
+    raw = {**tasks(load("todo_page.json"))[0], "deadlineTimeMillis": None, "deadline": None}
+    a = mapping.assignment(raw, raw["group"], NOW)
+    assert a["dueAt"] == mapping.NO_DEADLINE_MS > NOW and isinstance(a["dueAt"], int)
+    assert mapping.NO_DEADLINE_MS == ms(2099, 12, 31, 23, 59, 59)
+    a = mapping.assignment({**raw, "publishTimeMillis": None}, raw["group"], NOW)
+    assert a["assignedAt"] == mapping.NO_DEADLINE_MS
+
+
+def test_detail_without_an_end_time_takes_the_listed_due_or_no_deadline(load):
+    mixed = {**load("mixed_93251.json"), "endTime": None}
+    d = mapping.detail(mixed, load("achievement_93251.json"), [], ME, None, listed={"dueAt": 5, "submittedAt": 5})
+    assert d["dueAt"] == 5 and d["submittedAt"] == 5
+    d = mapping.detail(mixed, load("achievement_93251.json"), [], ME, None)
+    assert d["dueAt"] == mapping.NO_DEADLINE_MS
+

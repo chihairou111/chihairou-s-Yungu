@@ -778,7 +778,7 @@ def test_code_1035_outside_an_id_lookup_is_not_a_404(real):
 @pytest.mark.parametrize("path,breaker", [
     ("/courses", lambda w: setattr(w, "courses", [{"courseName": "no id"}])),
     ("/todo", lambda w: w.lists[TODO].__setitem__(0, {"title": "no id"})),
-    ("/submitted", lambda w: w.lists[SUBMITTED].__setitem__(0, {**w.lists[SUBMITTED][0], "deadlineTimeMillis": None})),
+    ("/submitted", lambda w: w.lists[SUBMITTED].__setitem__(0, {"doTaskStatus": "Submitted", "title": "no id"})),
     ("/week?start=1792339200000", lambda w: setattr(w, "week", [[{"name": "no times"}]])),
     ("/assignments/93251", lambda w: w.mixed[93251].pop("taskTitle")),
 ])
@@ -786,6 +786,14 @@ def test_malformed_yungu_data_is_a_502_with_the_error_shape(api, world, auth, pa
     breaker(world)
     r = api.get(path, headers=auth)
     assert r.status_code == 502 and r.json() == {"error": UNREACHABLE}
+
+
+@pytest.mark.parametrize("status", [TODO, SUBMITTED])
+def test_one_item_without_a_deadline_does_not_take_the_list_down(api, world, auth, status):
+    world.lists[status][0] = {**world.lists[status][0], "deadlineTimeMillis": None, "deadline": None}
+    r = api.get("/todo" if status == TODO else "/submitted", headers=auth)
+    assert r.status_code == 200 and len(r.json()) == len(world.lists[status])
+    assert all(isinstance(a["dueAt"], int) for a in r.json())
 
 
 def test_unexpected_errors_are_logged_by_type_only(api, auth, monkeypatch, caplog):

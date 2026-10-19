@@ -11,6 +11,9 @@ Field decisions (chosen from recorded fixtures, tests/fixtures/):
   * Assignment.schoolGroup: only the three To-do group names survive; the Submitted/Archived
     group is literally "list" and maps to null.
   * AssignmentDetail.submitted: achievementStatus == 4 (the mixed detail's doTaskStatusId only if that is absent).
+  * No deadline (`deadlineTimeMillis` / `endTime` null; the dashboard's dueAt is always a number): a
+    Submitted item is due at its hand-in time (never late, filed under the week it was handed in); a
+    To-do item gets NO_DEADLINE_MS (2099-12-31 23:59:59 China), so it sorts last and is never overdue.
   * FileRef.kind: from the extension / guessed mime (mirrors the frontend's fileKind); Yungu's own
     `type` is only a fallback because it calls .numbers files "pdf". Apple iWork files count as
     office, so they get the PDF rendition Yungu's preview endpoint serves for them.
@@ -44,6 +47,9 @@ def china_ms(text) -> Optional[int]:
     return int(datetime(y, mo, d, h, mi, s, tzinfo=CST).timestamp() * 1000) + frac
 
 
+NO_DEADLINE_MS = china_ms("2099-12-31 23:59:59")
+
+
 # ---------------------------------------------------------------- assignments
 def _status(submitted: bool) -> str:
     return "Submitted" if submitted else "To submit"
@@ -52,7 +58,12 @@ def _status(submitted: bool) -> str:
 def assignment(raw: dict, group: Optional[str], now_ms: int) -> dict:
     """One getAllTasks task item -> Assignment. `group` is the item's groupName."""
     submitted = raw.get("doTaskStatus") == "Submitted" or raw.get("doTaskStatusId") == ACHIEVEMENT_SUBMITTED
-    due = raw["deadlineTimeMillis"]
+    due = raw.get("deadlineTimeMillis")
+    handed_in = None
+    if submitted:
+        handed_in = china_ms(raw.get("modifiedTime")) or min(due if due is not None else now_ms, now_ms)
+    if due is None:
+        due = handed_in if submitted else NO_DEADLINE_MS
     minutes = raw.get("expectFinishTime")
     out = {
         "id": raw["taskPublishId"],
@@ -66,10 +77,12 @@ def assignment(raw: dict, group: Optional[str], now_ms: int) -> dict:
         "schoolGroup": group if group in SCHOOL_GROUPS else None,
     }
     if submitted:
-        at = china_ms(raw.get("modifiedTime")) or min(due, now_ms)
+        at = handed_in
         # modifiedTime also moves on later comments, so `ifTimeout` (Yungu's own late flag) decides
         # which side of the deadline the hand-in time sits on: the UI shows "late" iff submittedAt > dueAt.
-        if raw.get("ifTimeout") is False and at > due:
+        if raw.get("deadlineTimeMillis") is None:
+            pass                         # no deadline to be on either side of: dueAt is the hand-in time
+        elif raw.get("ifTimeout") is False and at > due:
             at = due
         elif raw.get("ifTimeout") is True and at <= due:
             at = due + 1
@@ -175,7 +188,7 @@ def detail(mixed: dict, achievement: dict, comments: List[dict], me: int,
     else:
         handed_in = list(submitted_ids)
     minutes = mixed.get("useTime")
-    due = china_ms(mixed.get("endTime"))
+    due = china_ms(mixed.get("endTime")) or (listed or {}).get("dueAt") or NO_DEADLINE_MS
     out = {
         "id": mixed["taskPublishId"],
         "title": mixed["taskTitle"],
