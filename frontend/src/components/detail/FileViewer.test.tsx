@@ -82,6 +82,17 @@ describe('FileViewer', () => {
     expect(within(viewer()).getByText('No preview for this file type.')).toBeInTheDocument();
   });
 
+  it('sends a Yungu online document to Yungu: it has no file to download or open', () => {
+    const doc = file('g', 'my favorite department', 'other', { online: true, size: 0 });
+    render(<FileViewer files={[doc]} index={0} onIndexChange={() => {}} onClose={() => {}} />);
+    expect(title()).toHaveTextContent('my favorite department');
+    expect(within(viewer()).getByText('Open this online document on Yungu.')).toBeInTheDocument();
+    expect(within(viewer()).queryByText('No preview for this file type.')).toBeNull();
+    expect(within(viewer()).queryByRole('link', { name: 'Download' })).toBeNull();
+    expect(within(viewer()).queryByRole('link', { name: 'Open in new tab' })).toBeNull();
+    expect(within(viewer()).getByText('Online document')).toBeInTheDocument();
+  });
+
   it('closes with Escape and the close button', async () => {
     const onClose = vi.fn();
     render(<Harness onClose={onClose} />);

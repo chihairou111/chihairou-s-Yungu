@@ -760,6 +760,27 @@ def test_writes_on_an_unknown_assignment_id_are_a_404(real, method, path, body):
 
 
 @responses.activate
+@pytest.mark.parametrize("preview", ["0", "1"])
+def test_a_file_yungu_has_no_bytes_for_is_a_422_not_a_502(real, preview):
+    """Live, Yungu answers an empty HTTP 200 (no 302) on preview_file / new_download_file for an online
+    document (type "onlineDocument", its text kept in Yungu) and for an id it has no file for."""
+    api, auth = real
+    path = "/api/preview_file" if preview == "1" else "/api/new_download_file"
+    responses.get(BASE + path, status=200, body="")
+    r = api.get(f"/files/11117133?preview={preview}", headers=auth)
+    assert r.status_code == 422 and r.json() == {"error": "Open this online document on Yungu."}
+    assert OfflineLogin.logins == 1
+
+
+@responses.activate
+def test_other_file_answers_stay_a_502(real):
+    api, auth = real
+    responses.get(BASE + "/api/new_download_file", status=500, body="busy")
+    r = api.get("/files/11117133", headers=auth)
+    assert r.status_code == 502 and r.json() == {"error": UNREACHABLE}
+
+
+@responses.activate
 def test_other_nonzero_codes_on_the_detail_lookup_stay_a_502(real):
     api, auth = real
     responses.get(BASE + "/api/getMixedPublishDetail", json={"code": 1036, "message": "x"})

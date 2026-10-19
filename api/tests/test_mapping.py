@@ -335,3 +335,12 @@ def test_detail_without_an_end_time_takes_the_listed_due_or_no_deadline(load):
     d = mapping.detail(mixed, load("achievement_93251.json"), [], ME, None)
     assert d["dueAt"] == mapping.NO_DEADLINE_MS
 
+
+# --------------------------------------------------------- online documents
+def test_online_document_is_marked_and_has_no_preview():
+    raw = {"fileId": 11117133, "fileName": "my favorite department", "type": "onlineDocument",
+           "url": '{"ops":[{"insert":"text"}]}', "fileCreateTime": None, "fileSizeByte": None}
+    f = mapping.file_ref(raw)
+    assert f["online"] is True and f["kind"] == "other" and "previewPdfUrl" not in f
+    assert f["url"] == "/api/files/11117133" and f["size"] == 0
+    assert "online" not in mapping.file_ref({"fileId": 1, "fileName": "a.pdf", "type": "pdf"})

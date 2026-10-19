@@ -207,33 +207,36 @@ function TopBar({ file, titleId, at, count, onClose, onStep }: TopBarProps) {
           </IconButton>
         </Stack>
       )}
-      <Stack direction="row" sx={{ gap: 1, flexShrink: 0 }}>
-        <Button
-          variant="outlined"
-          href={downloadUrl(file.url)}
-          download={file.name}
-          aria-label="Download"
-          startIcon={<DownloadOutlined />}
-          sx={darkOutlined}
-        >
-          <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
-            Download
-          </Box>
-        </Button>
-        <Button
-          variant="outlined"
-          href={viewUrl(file)}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Open in new tab"
-          startIcon={<OpenInNew />}
-          sx={darkOutlined}
-        >
-          <Box component="span" sx={{ display: { xs: 'none', md: 'inline' } }}>
-            Open in new tab
-          </Box>
-        </Button>
-      </Stack>
+      {/* An online document has no file behind it: both links would only meet an error. */}
+      {!file.online && (
+        <Stack direction="row" sx={{ gap: 1, flexShrink: 0 }}>
+          <Button
+            variant="outlined"
+            href={downloadUrl(file.url)}
+            download={file.name}
+            aria-label="Download"
+            startIcon={<DownloadOutlined />}
+            sx={darkOutlined}
+          >
+            <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
+              Download
+            </Box>
+          </Button>
+          <Button
+            variant="outlined"
+            href={viewUrl(file)}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Open in new tab"
+            startIcon={<OpenInNew />}
+            sx={darkOutlined}
+          >
+            <Box component="span" sx={{ display: { xs: 'none', md: 'inline' } }}>
+              Open in new tab
+            </Box>
+          </Button>
+        </Stack>
+      )}
     </Stack>
   );
 }
@@ -368,6 +371,17 @@ function Stage({ file }: { file: FileRef }) {
       <Stack sx={{ ...fill, flexDirection: 'column', gap: 2, px: 2 }}>
         <FileKindIcon file={file} sx={{ fontSize: 64, color: V.muted }} />
         <Box component="audio" src={file.url} controls sx={{ width: 'min(480px, 100%)' }} />
+      </Stack>
+    );
+  }
+  if (file.online) {
+    return (
+      <Stack sx={{ ...fill, flexDirection: 'column', gap: 1.5, px: 3, textAlign: 'center' }}>
+        <FileKindIcon file={file} sx={{ fontSize: 64, color: V.muted }} />
+        <Typography variant="body1">Open this online document on Yungu.</Typography>
+        <Typography variant="body2" sx={{ color: V.muted, maxWidth: 360 }}>
+          Its text is kept on Yungu, so there is no file to download here.
+        </Typography>
       </Stack>
     );
   }

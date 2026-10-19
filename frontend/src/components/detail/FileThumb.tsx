@@ -72,6 +72,7 @@ export function fileTypeLabel(file: FileRef): string {
 
 /** "PDF · 75 MB", or with the page count once known: "PDF · 3 pages · 17 KB", "Word · 1 page · 47 KB". */
 export function fileCaption(file: FileRef, pages?: number): string {
+  if (file.online) return 'Online document';
   const count = pages === undefined ? '' : ` · ${pages} ${pages === 1 ? 'page' : 'pages'}`;
   return `${fileTypeLabel(file)}${count} · ${formatBytes(file.size)}`;
 }

@@ -49,6 +49,7 @@ describe('file captions', () => {
     expect(fileCaption(FOUR[1])).toBe('Video · 54 MB');
     expect(fileCaption(FOUR[2])).toBe('Image · 200 KB');
     expect(fileCaption(FOUR[3])).toBe('Word · 130 KB');
+    expect(fileCaption({ ...FOUR[3], kind: 'other', name: 'Notes', size: 0, online: true })).toBe('Online document');
     expect(fileCaption(file('e', '表.numbers', 'office', 1024))).toBe('Numbers · 1 KB');
     expect(fileCaption(file('f', 'data.zip', 'other', 2048))).toBe('ZIP · 2 KB');
   });

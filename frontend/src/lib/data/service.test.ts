@@ -265,6 +265,14 @@ describe('serviceData files', () => {
     expect(call(1).headers.get('authorization')).toBe('Bearer tok-123');
   });
 
+  it("getFile passes the service's 422 for an online document through with its message", async () => {
+    reply(json(422, { error: 'Open this online document on Yungu.' }));
+    const error = await data.getFile('11117133').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ServiceError);
+    expect(error).not.toBeInstanceOf(YunguUnavailable);
+    expect(error).toMatchObject({ status: 422, message: 'Open this online document on Yungu.' });
+  });
+
   it('getFile encodes the id and returns null on a 404', async () => {
     reply(json(404, { error: 'Not found.' }));
     expect(await data.getFile('a/b?c')).toBeNull();

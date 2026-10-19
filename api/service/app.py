@@ -45,6 +45,7 @@ YUNGU_TIMEOUT_SECONDS = 15
 # getAllTasks page size. Yungu honours 50 (checked live, read-only: 90 Submitted items, total 90, the same
 # ids as with 10), so a cold Submitted list is 2 calls instead of 9.
 LIST_PAGE_SIZE = 50
+ONLINE_DOCUMENT = "Open this online document on Yungu."
 COMMENT_NOT_FOUND = "Comment not found."
 
 
@@ -60,6 +61,15 @@ class BadRequest(ServiceError):
 
     def __init__(self, message: str = "Bad request."):
         super().__init__(message)
+
+
+class NoStoredFile(ServiceError):
+    """Yungu keeps no bytes behind this file id: an online document (its text lives in Yungu), or an id it
+    does not know. Both answer preview_file / new_download_file with an empty HTTP 200 instead of a 302."""
+    status = 422
+
+    def __init__(self):
+        super().__init__(ONLINE_DOCUMENT)
 
 
 class TooLarge(ServiceError):
@@ -125,6 +135,17 @@ def _known(lookup: Callable[[], T]) -> T:
 
 def yungu_client(login_id: str, password: str) -> YunguTask:
     return YunguTask(login_id, password, timeout=YUNGU_TIMEOUT_SECONDS)
+
+
+def _redirect(client, file_id: int, preview: bool) -> str:
+    try:
+        url = client.file_redirect(file_id, preview)
+    except YunguError as e:
+        resp = e.resp
+        if resp is not None and resp.status_code == 200 and not resp.content:
+            raise NoStoredFile() from None
+        raise
+    return checked_redirect(url)
 
 
 def _file_ids(ids: List[str]) -> List[int]:
@@ -244,7 +265,7 @@ class Service:
 
     def file_redirect(self, file_id: int, preview: bool, refresh=False) -> dict:
         def compute():
-            return {"redirect": self.yungu.call(lambda c: checked_redirect(c.file_redirect(file_id, preview)))}
+            return {"redirect": self.yungu.call(lambda c: _redirect(c, file_id, preview))}
         return self.cache.get(("file", file_id, preview), compute, refresh)
 
     # ------------------------------------------------------------- writes

@@ -57,6 +57,8 @@ export interface FileRef {
   url: string;
   /** A PDF rendition to show for files the browser cannot open itself (Office documents). */
   previewPdfUrl?: string;
+  /** A Yungu online document: its text lives on Yungu, which keeps no file to download, view or open. */
+  online?: boolean;
   createdAt: number;
 }
 

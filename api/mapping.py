@@ -14,6 +14,7 @@ Field decisions (chosen from recorded fixtures, tests/fixtures/):
   * No deadline (`deadlineTimeMillis` / `endTime` null; the dashboard's dueAt is always a number): a
     Submitted item is due at its hand-in time (never late, filed under the week it was handed in); a
     To-do item gets NO_DEADLINE_MS (2099-12-31 23:59:59 China), so it sorts last and is never overdue.
+  * FileRef.online: true for Yungu online documents (type "onlineDocument"); Yungu serves no file for them.
   * FileRef.kind: from the extension / guessed mime (mirrors the frontend's fileKind); Yungu's own
     `type` is only a fallback because it calls .numbers files "pdf". Apple iWork files count as
     office, so they get the PDF rendition Yungu's preview endpoint serves for them.
@@ -28,6 +29,7 @@ SCHOOL_GROUPS = ("Due today", "Due recently", "Delayed")
 PALETTE = ["Tomato", "Flamingo", "Tangerine", "Banana", "Sage", "Basil", "Peacock", "Blueberry",
            "Lavender", "Grape", "Graphite"]
 ACHIEVEMENT_SUBMITTED = 4
+ONLINE_DOCUMENT_TYPE = "onlineDocument"     # a Yungu online document: its text lives in Yungu, no stored file
 
 _IMAGE = {"png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic"}
 _VIDEO = {"mp4", "mov", "m4v", "webm", "avi", "mkv"}
@@ -150,6 +152,8 @@ def file_ref(raw: dict) -> dict:
     }
     if kind == "office":
         out["previewPdfUrl"] = f"/api/files/{fid}?preview=1"
+    if raw.get("type") == ONLINE_DOCUMENT_TYPE:
+        out["online"] = True
     return out
 
 
