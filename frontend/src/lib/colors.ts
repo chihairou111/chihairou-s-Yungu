@@ -59,3 +59,32 @@ export function readableTextOn(hex: string): string {
   const dark = bg.map((c) => Math.round(c * (1 - DARK_ALPHA))) as Rgb;
   return ratio([255, 255, 255], bg) >= ratio(dark, bg) ? WHITE : DARK;
 }
+
+function toHex(rgb: Rgb): string {
+  return `#${rgb.map((c) => Math.round(c).toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** `amount` of `hex` laid over `surface` (0 = the surface, 1 = the color). */
+export function tint(hex: string, surface: string, amount: number): string {
+  const c = parseHex(hex);
+  const s = parseHex(surface);
+  return toHex(c.map((v, i) => v * amount + s[i] * (1 - amount)) as Rgb);
+}
+
+/** Share of the course color in a light event fill. */
+export const EVENT_TINT = 0.18;
+/** Ink contrast on the tint; above AA's 4.5 so small calendar text stays comfortable. */
+const EVENT_INK_CONTRAST = 5.5;
+
+/**
+ * Google Calendar's light event style: a light tint of the course color over `surface`, with text in
+ * a dark shade of the same hue (darkened just until it reads well on the tint).
+ */
+export function lightEventColors(hex: string, surface: string): { bg: string; fg: string } {
+  const bg = tint(hex, surface, EVENT_TINT);
+  let fg = toHex(parseHex(hex));
+  for (let k = 0.05; contrastRatio(fg, bg) < EVENT_INK_CONTRAST && k <= 1; k += 0.05) {
+    fg = tint(hex, '#000000', 1 - k);
+  }
+  return { bg, fg };
+}

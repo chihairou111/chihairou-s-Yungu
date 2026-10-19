@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { todaysClasses } from './schedule';
+import { classTimeline, nowLineHours, todaysClasses } from './schedule';
 import type { ClassEvent } from './types';
 
 const HOUR = 3600_000;
@@ -39,5 +39,44 @@ describe('todaysClasses', () => {
     const events = [ev('B', MONDAY + 9 * HOUR), ev('A', MONDAY + 8 * HOUR)];
     todaysClasses(events, NOW);
     expect(events.map((e) => e.name)).toEqual(['B', 'A']);
+  });
+});
+
+describe('classTimeline', () => {
+  const day = [ev('A', MONDAY + 8 * HOUR), ev('B', MONDAY + 9 * HOUR), ev('C', MONDAY + 10 * HOUR), ev('D', MONDAY + 11 * HOUR)];
+
+  it('marks ended classes, the one in progress and the next one', () => {
+    // 09:10: A ended, B runs until 09:40, C is next.
+    expect(classTimeline(day, MONDAY + 9 * HOUR + 10 * MIN)).toEqual(['ended', 'now', 'next', 'later']);
+  });
+
+  it('marks only the next class between classes', () => {
+    expect(classTimeline(day, MONDAY + 9 * HOUR + 50 * MIN)).toEqual(['ended', 'ended', 'next', 'later']);
+    expect(classTimeline(day, MONDAY)).toEqual(['next', 'later', 'later', 'later']);
+  });
+
+  it('treats a class as ended at its end time, and everything as ended after the last class', () => {
+    expect(classTimeline(day, MONDAY + 8 * HOUR + 40 * MIN)).toEqual(['ended', 'next', 'later', 'later']);
+    expect(classTimeline(day, MONDAY + 20 * HOUR)).toEqual(['ended', 'ended', 'ended', 'ended']);
+  });
+});
+
+describe('nowLineHours', () => {
+  const WEEK = MONDAY; // Mon Oct 19 00:00 China
+
+  it('gives the hours since the first grid hour on the current day', () => {
+    // Wed 10:30, grid 08:00–16:00.
+    expect(nowLineHours(WEEK + 2 * 24 * HOUR + 10.5 * HOUR, WEEK, 8, 8)).toEqual({ day: 2, hours: 2.5 });
+  });
+
+  it('hides outside the hour range', () => {
+    expect(nowLineHours(WEEK + 7.5 * HOUR, WEEK, 8, 8)).toBeNull();
+    expect(nowLineHours(WEEK + 16 * HOUR + MIN, WEEK, 8, 8)).toBeNull();
+    expect(nowLineHours(WEEK + 16 * HOUR, WEEK, 8, 8)).toEqual({ day: 0, hours: 8 });
+  });
+
+  it('hides when now is not in the shown week', () => {
+    expect(nowLineHours(WEEK - HOUR, WEEK, 0, 24)).toBeNull();
+    expect(nowLineHours(WEEK + 7 * 24 * HOUR + 9 * HOUR, WEEK, 8, 8)).toBeNull();
   });
 });

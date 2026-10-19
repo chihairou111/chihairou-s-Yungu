@@ -85,3 +85,12 @@ export function weekRangeLabel(weekStart: number): string {
 export function dayIndex(ms: number, weekStart: number): number {
   return Math.floor((ms - weekStart) / DAY);
 }
+
+/** Compact range for narrow screens: "Oct 19–25", "Oct 26–Nov 1", "Dec 28–Jan 3". */
+export function weekRangeShortLabel(weekStart: number): string {
+  const s = chinaFields(weekStart);
+  const e = chinaFields(weekStart + 6 * DAY);
+  const sm = MONTHS[s.getUTCMonth()];
+  const em = MONTHS[e.getUTCMonth()];
+  return sm === em ? `${sm} ${s.getUTCDate()}–${e.getUTCDate()}` : `${sm} ${s.getUTCDate()}–${em} ${e.getUTCDate()}`;
+}

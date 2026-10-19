@@ -10,6 +10,7 @@ import {
   parseWeekParam,
   shiftWeek,
   weekRangeLabel,
+  weekRangeShortLabel,
   weekStartOf,
 } from './time';
 
@@ -67,5 +68,16 @@ describe('china time', () => {
     const mon0030 = Date.UTC(2026, 9, 18, 16, 30); // Mon Oct 19 00:30 China, same LA date
     expect(chinaDayNumber(mon0030) - chinaDayNumber(sun2330)).toBe(1);
     expect(chinaDayNumber(oct12) - chinaDayNumber(oct12 + 23 * 3600_000)).toBe(0);
+  });
+});
+
+describe('weekRangeShortLabel', () => {
+  const weekOf = (y: number, m: number, d: number) => weekStartOf(Date.UTC(y, m, d, 4, 0));
+  it('uses one month name within a month', () => {
+    expect(weekRangeShortLabel(weekOf(2026, 9, 19))).toBe('Oct 19–25');
+  });
+  it('names both months across a month or a year', () => {
+    expect(weekRangeShortLabel(weekOf(2026, 9, 26))).toBe('Oct 26–Nov 1');
+    expect(weekRangeShortLabel(weekOf(2026, 11, 28))).toBe('Dec 28–Jan 3');
   });
 });

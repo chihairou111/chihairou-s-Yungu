@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { COURSE_COLORS, contrastRatio, courseColorHex, readableTextOn } from './colors';
+import { COURSE_COLORS, EVENT_TINT, contrastRatio, courseColorHex, lightEventColors, readableTextOn, tint } from './colors';
 
 const DARK = 'rgba(0,0,0,0.87)';
 
@@ -66,5 +66,34 @@ describe('courseColorHex', () => {
       expect(courseColorHex(bad), bad).toBe('#616161');
       expect(() => readableTextOn(courseColorHex(bad))).not.toThrow();
     }
+  });
+});
+
+describe('lightEventColors (Google Calendar light event style)', () => {
+  const SURFACES = ['#ffffff', '#f3f3fa', '#f9f9ff', '#f5f7fa'];
+
+  it('fills with a light tint of the course color over the surface', () => {
+    expect(tint('#D50000', '#ffffff', 0.18)).toBe('#f7d1d1');
+    expect(lightEventColors('#D50000', '#ffffff').bg).toBe(tint('#D50000', '#ffffff', EVENT_TINT));
+    expect(EVENT_TINT).toBeGreaterThanOrEqual(0.15);
+    expect(EVENT_TINT).toBeLessThanOrEqual(0.2);
+  });
+
+  it('writes in a dark shade of the course color that meets WCAG AA on the tint, on every surface', () => {
+    for (const surface of SURFACES) {
+      for (const [name, hex] of Object.entries(COURSE_COLORS)) {
+        const { bg, fg } = lightEventColors(hex, surface);
+        expect(contrastRatio(fg, bg), `${name} on ${surface}`).toBeGreaterThanOrEqual(4.5);
+        // Still recognisably a light fill, not the saturated color.
+        expect(contrastRatio(bg, surface), `${name} tint on ${surface}`).toBeLessThan(1.6);
+      }
+    }
+  });
+
+  it('keeps the hue: the ink of a red course is red-dominant, of a blue course blue-dominant', () => {
+    const red = lightEventColors(COURSE_COLORS.Tomato, '#ffffff').fg;
+    const blue = lightEventColors(COURSE_COLORS.Blueberry, '#ffffff').fg;
+    expect(parseInt(red.slice(1, 3), 16)).toBeGreaterThan(parseInt(red.slice(5, 7), 16));
+    expect(parseInt(blue.slice(5, 7), 16)).toBeGreaterThan(parseInt(blue.slice(1, 3), 16));
   });
 });
