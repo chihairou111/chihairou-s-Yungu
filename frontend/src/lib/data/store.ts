@@ -30,7 +30,10 @@ export function fileKind(mime: string, name: string): FileKind {
 
 interface AssignmentState {
   seed: DetailSeed;
+  /** The draft: what the student's file list holds now. */
   myFileIds: string[];
+  /** What was handed in at the last submit; draft saves leave it alone. */
+  submittedFileIds: string[];
   comments: Comment[];
   /** Set once the student hands in (or re-submits); overrides the fixture's own submission time. */
   submittedAt?: number;
@@ -67,7 +70,9 @@ function stateFor(id: number, now: number): AssignmentState | undefined {
   const seed = buildDetailSeed(id, now);
   if (!seed) return undefined;
   for (const ref of [...seed.attachments, ...seed.myFiles]) s.refs.set(ref.id, ref);
-  const state: AssignmentState = { seed, myFileIds: seed.myFiles.map((f) => f.id), comments: [...seed.comments] };
+  const fixtureIds = seed.myFiles.map((f) => f.id);
+  // Fixture files exist only on submitted fixtures, where they are what was handed in.
+  const state: AssignmentState = { seed, myFileIds: fixtureIds, submittedFileIds: [...fixtureIds], comments: [...seed.comments] };
   s.assignments.set(id, state);
   return state;
 }
@@ -105,6 +110,7 @@ export function getDetail(id: number, now: number): AssignmentDetail | null {
     instructionsHtml: sanitizeInstructions(state.seed.instructionsHtml),
     attachments: state.seed.attachments,
     myFiles: state.myFileIds.flatMap((fid) => refs.get(fid) ?? []),
+    submittedFileIds: [...state.submittedFileIds],
     submitted: a.status === 'Submitted',
     comments: [...state.comments].sort((x, y) => x.createdAt - y.createdAt),
   };
@@ -124,7 +130,7 @@ export function loadFile(id: string): { ref: FileRef; bytes: Uint8Array } | null
   return ref && bytes ? { ref, bytes } : null;
 }
 
-/** Replaces the file list, keeping only ids the store knows. Returns false for an unknown assignment. */
+/** Replaces the draft file list, keeping only ids the store knows. Returns false for an unknown assignment. */
 export function setFiles(id: number, fileIds: string[], now: number): boolean {
   const state = stateFor(id, now);
   if (!state) return false;
@@ -133,9 +139,12 @@ export function setFiles(id: number, fileIds: string[], now: number): boolean {
   return true;
 }
 
+/** Hands in the current draft: it becomes the submitted list, stamped with `now`. */
 export function markSubmitted(id: number, now: number): void {
   const state = stateFor(id, now);
-  if (state) state.submittedAt = now;
+  if (!state) return;
+  state.submittedAt = now;
+  state.submittedFileIds = [...state.myFileIds];
 }
 
 export function putComment(id: number, text: string, now: number): Comment | null {

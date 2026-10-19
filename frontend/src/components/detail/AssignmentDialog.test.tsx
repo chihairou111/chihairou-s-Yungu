@@ -57,6 +57,7 @@ function detail(extra: Partial<AssignmentDetail> = {}): AssignmentDetail {
     instructionsHtml: '<p>本周任务：完成第一次城中村观察。</p>',
     attachments: [],
     myFiles: [],
+    submittedFileIds: [],
     submitted: false,
     comments: [],
     ...extra,

@@ -28,7 +28,7 @@ describe('mock store', () => {
     expect(ref.id).toMatch(/^[0-9a-f-]{36}$/);
     const got = await data.getFile(ref.id);
     expect(got?.ref).toEqual(ref);
-    expect(Array.from(got!.bytes)).toEqual(Array.from(b));
+    expect(got && 'bytes' in got ? Array.from(got.bytes) : null).toEqual(Array.from(b));
     expect(await data.getFile('missing')).toBeNull();
   });
 
@@ -59,6 +59,28 @@ describe('mock store', () => {
     expect(detail?.myFiles.map((f) => f.id)).toEqual([ref.id]);
     expect(detail?.submitted).toBe(false);
     expect((await data.getTodo()).some((a) => a.id === 103)).toBe(true);
+  });
+
+  it('before any submit nothing is handed in; submitted fixtures list their handed-in files', async () => {
+    expect((await data.getAssignmentDetail(102))?.submittedFileIds).toEqual([]);
+    const done = (await data.getAssignmentDetail(201))!;
+    expect(done.submittedFileIds).toEqual(done.myFiles.map((f) => f.id));
+    expect(done.submittedFileIds.length).toBeGreaterThan(0);
+  });
+
+  it('draft edits after a submit leave the handed-in list alone; only submit changes it', async () => {
+    const a = await data.uploadFile('a.pdf', 'application/pdf', bytes());
+    const b = await data.uploadFile('b.pdf', 'application/pdf', bytes());
+    await data.submit(102, [a.id]);
+    await data.saveDraft(102, [b.id]);
+    let detail = (await data.getAssignmentDetail(102))!;
+    expect(detail.myFiles.map((f) => f.id)).toEqual([b.id]);
+    expect(detail.submittedFileIds).toEqual([a.id]);
+    expect(detail.submitted).toBe(true);
+    await data.submit(102, [a.id, b.id]);
+    detail = (await data.getAssignmentDetail(102))!;
+    expect(detail.myFiles.map((f) => f.id)).toEqual([a.id, b.id]);
+    expect(detail.submittedFileIds).toEqual([a.id, b.id]);
   });
 
   it('adds and deletes my comments', async () => {

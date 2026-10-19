@@ -26,6 +26,8 @@ export interface Work {
   status: WorkStatus;
   /** When the work was last handed in (undefined before the first submit). */
   submittedAt: number | undefined;
+  /** After a submit: the draft differs from what was handed in, so Update has something to hand in. */
+  changed: boolean;
   /** Anything on its way to the server: an upload, a draft save, or the submit itself. */
   busy: boolean;
   submitting: boolean;
@@ -59,12 +61,19 @@ function uploadMessage(name: string, error: unknown): string {
   return `${name}: ${messageOf(error)}`;
 }
 
+/** The same files, in any order: order is not something the student can change or hand in. */
+function sameIds(files: FileRef[], ids: string[]): boolean {
+  const set = new Set(ids);
+  return files.length === set.size && files.every((f) => set.has(f.id));
+}
+
 let uploadSeq = 0;
 
 /**
  * The student's work on one assignment, with task.yungu.org's draft model: the file list is the draft,
  * and every add or remove saves the whole list (`saveDraft`) so it survives closing the pop-up.
- * Submit hands the list in; afterwards the same list can be changed and handed in again (Update).
+ * Submit hands the list in; afterwards the same list can be changed (only the draft changes) and handed
+ * in again (Update). `changed` says when the draft and the handed-in list (`submittedFileIds`) differ.
  * A newer detail (after `refresh()`) replaces the list. After a submit the status changes at once and
  * stays changed while the pop-up and the list behind it refetch, so it never flashes "Not submitted".
  */
@@ -81,11 +90,14 @@ export function useWork(detail: AssignmentDetail): Work {
   const [source, setSource] = useState(detail);
   const [files, setFiles] = useState(detail.myFiles);
   const [handedIn, setHandedIn] = useState<number | undefined>(undefined);
+  const [handedInIds, setHandedInIds] = useState(detail.submittedFileIds);
   if (source !== detail) {
     setSource(detail);
     // While anything is on its way the local list is ahead of the server's; it wins (the queued save
     // writes it), so a refetch that started earlier never drops a file.
-    if (saving === 0 && uploads.length === 0 && !submitting) setFiles(detail.myFiles);
+    const idle = saving === 0 && uploads.length === 0 && !submitting;
+    if (idle) setFiles(detail.myFiles);
+    if (idle || source.id !== detail.id) setHandedInIds(detail.submittedFileIds);
     if (source.id !== detail.id) setHandedIn(undefined);
   }
 
@@ -192,6 +204,7 @@ export function useWork(detail: AssignmentDetail): Work {
       await saves.current;
       const { submittedAt } = await submitWork(id, ids);
       setHandedIn(submittedAt);
+      setHandedInIds(ids);
       router.refresh();
       // The status already reads "Submitted"; a failed refetch only leaves the older detail in place
       // (and a 401 turns the whole pop-up into its signed-out message).
@@ -211,11 +224,14 @@ export function useWork(detail: AssignmentDetail): Work {
   const status: WorkStatus =
     submittedAt === undefined ? 'not-submitted' : submittedAt > detail.dueAt ? 'late' : 'submitted';
 
+  const changed = status !== 'not-submitted' && !sameIds(files, handedInIds);
+
   return {
     files,
     uploads,
     status,
     submittedAt: submittedAt || undefined,
+    changed,
     busy: submitting || saving > 0 || uploads.length > 0,
     submitting,
     errors: failure?.messages ?? [],

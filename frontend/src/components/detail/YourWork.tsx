@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState, type DragEvent, type ReactElement, type ReactNode, type Ref } from 'react';
+import { useEffect, useId, useRef, useState, type DragEvent, type ReactElement, type ReactNode, type Ref } from 'react';
 import Link from 'next/link';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -40,7 +40,8 @@ export type WorkFocus = { kind: 'write' } | { kind: 'file'; id: string };
  * The student's side of the assignment: status, the files added so far (each opens in the viewer and
  * can be removed), the four ways to add work (Record, Camera, Write, Upload) and Submit, which reads
  * Update once the work has been handed in. Record and Camera open their own small dialogs on top of the
- * pop-up, which add what they made like an upload. Files can also be dropped anywhere on the panel. The work
+ * pop-up, which add what they made like an upload. After a submit, edits only change the draft: a notice says
+ * they are not handed in, and Update is available only then. Files can also be dropped anywhere on the panel. The work
  * itself lives in the `WorkProvider` above, so it survives a trip to the writer.
  */
 export default function YourWork({ onWrite, focusOnMount = null }: YourWorkProps) {
@@ -94,6 +95,9 @@ export default function YourWork({ onWrite, focusOnMount = null }: YourWorkProps
 
   const submitted = work.status !== 'not-submitted';
   const empty = work.files.length === 0 && work.uploads.length === 0;
+  // After a submit, Update only has something to do once the draft differs from what was handed in.
+  const nothingToUpdate = submitted && !work.changed;
+  const hintId = useId();
 
   return (
     <Box
@@ -226,21 +230,48 @@ export default function YourWork({ onWrite, focusOnMount = null }: YourWorkProps
         }}
       />
 
-      {/* While it works the button stays focusable (aria-disabled), so focus is not thrown to the page. */}
+      {/* Draft edits after a submit are not handed in until Update (task.yungu.org's Edit → Confirm model). */}
+      <Box role="status">
+        {submitted && work.changed && (
+          <Alert severity="info" role="none" sx={{ mt: 2 }}>
+            {work.files.length === 0
+              ? 'Changes not handed in — add a file, then press Update.'
+              : 'Changes not handed in — press Update to hand them in.'}
+          </Alert>
+        )}
+      </Box>
+
+      {/* While it works, or while there is nothing to update, the button stays focusable (aria-disabled), so focus is not thrown to the page. */}
       <Button
         variant="contained"
         size="large"
         fullWidth
         disabled={work.files.length === 0 || work.uploads.length > 0}
-        aria-disabled={work.submitting || undefined}
+        aria-disabled={work.submitting || nothingToUpdate || undefined}
+        aria-describedby={nothingToUpdate && !work.submitting ? hintId : undefined}
         onClick={() => {
-          if (!work.submitting) void work.submit();
+          if (!work.submitting && !nothingToUpdate) void work.submit();
         }}
         startIcon={work.submitting ? <CircularProgress size={18} color="inherit" aria-hidden /> : undefined}
-        sx={{ mt: 2 }}
+        sx={(theme) => ({
+          mt: 2,
+          ...(nothingToUpdate &&
+            !work.submitting && {
+              color: theme.palette.action.disabled,
+              bgcolor: theme.palette.action.disabledBackground,
+              boxShadow: 'none',
+              cursor: 'default',
+              '&:hover': { bgcolor: theme.palette.action.disabledBackground, boxShadow: 'none' },
+            }),
+        })}
       >
         {work.submitting ? (submitted ? 'Updating…' : 'Submitting…') : submitted ? 'Update' : 'Submit'}
       </Button>
+      {nothingToUpdate && !work.submitting && (
+        <Typography id={hintId} variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75, textAlign: 'center' }}>
+          No changes to hand in
+        </Typography>
+      )}
 
       <CameraDialog open={capture === 'camera'} onClose={() => setCapture(null)} onAdd={(photos) => void work.addFiles(photos)} />
       <RecorderDialog open={capture === 'recorder'} onClose={() => setCapture(null)} onAdd={(file) => void work.addFiles([file])} />

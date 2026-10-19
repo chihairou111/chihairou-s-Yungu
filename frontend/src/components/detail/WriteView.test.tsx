@@ -34,6 +34,7 @@ function detail(): AssignmentDetail {
     instructionsHtml: '',
     attachments: [],
     myFiles: [],
+    submittedFileIds: [],
     submitted: false,
     comments: [],
   };

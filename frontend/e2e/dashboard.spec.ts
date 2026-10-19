@@ -499,7 +499,25 @@ test('your work: upload files, submit, and the task moves to Submitted', async (
   // The draft and the hand-in live on the server: a reload shows the same.
   await page.reload();
   await expect(work.getByRole('button', { name: /^answers\.txt/ })).toBeVisible();
-  await expect(work.getByRole('button', { name: 'Update' })).toBeVisible();
+  const update = work.getByRole('button', { name: 'Update' });
+  await expect(update).toHaveAttribute('aria-disabled', 'true');
+  await expect(work.getByText('No changes to hand in')).toBeVisible();
+
+  // An edit after the submit only changes the draft: it says so, survives a reload, and Update hands it in.
+  const notHandedIn = work.getByText('Changes not handed in — press Update to hand them in.');
+  const draftSaved = page.waitForResponse((r) => r.url().endsWith('/api/assignments/104/draft') && r.request().method() === 'PUT');
+  await work.locator('input[type="file"]').setInputFiles({ name: 'more.txt', mimeType: 'text/plain', buffer: Buffer.from('2') });
+  await expect(work.getByRole('button', { name: /^more\.txt/ })).toBeVisible();
+  await draftSaved;
+  await expect(notHandedIn).toBeVisible();
+  await expect(update).not.toHaveAttribute('aria-disabled', 'true');
+  await expect(work.getByText('Submitted', { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(work.getByRole('button', { name: /^more\.txt/ })).toBeVisible();
+  await expect(notHandedIn).toBeVisible();
+  await update.click();
+  await expect(notHandedIn).toBeHidden();
+  await expect(update).toHaveAttribute('aria-disabled', 'true');
 
   await page.keyboard.press('Escape');
   await page.getByRole('tab', { name: 'Submitted' }).click();

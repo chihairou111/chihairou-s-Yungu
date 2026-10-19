@@ -17,6 +17,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (denied) return denied;
   const file = await data.getFile((await params).id);
   if (!file) return NextResponse.json({ error: 'File not found' }, { status: 404 });
+  if ('redirect' in file) {
+    // The real service hands back a short-lived signed OSS link; the browser fetches (and ranges) from there.
+    return new Response(null, {
+      status: 302,
+      headers: { Location: file.redirect, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-store' },
+    });
+  }
   const baseType = file.ref.mime.split(';')[0].trim().toLowerCase();
   const active = ACTIVE_TYPES.has(baseType);
   const disposition = active || new URL(request.url).searchParams.get('download') === '1' ? 'attachment' : 'inline';

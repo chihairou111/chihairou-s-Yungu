@@ -25,7 +25,9 @@ describe('GET /api/assignments/[id]', () => {
   it('returns the detail', async () => {
     const res = await GET(new Request('http://localhost/x'), ctx({ id: '102' }));
     expect(res.status).toBe(200);
-    expect((await res.json()).attachments).toHaveLength(4);
+    const body = await res.json();
+    expect(body.attachments).toHaveLength(4);
+    expect(body.submittedFileIds).toEqual([]);
   });
   it('404s for an unknown id', async () => {
     const res = await GET(new Request('http://localhost/x'), ctx({ id: '999999' }));

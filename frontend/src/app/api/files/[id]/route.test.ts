@@ -64,6 +64,26 @@ describe('GET /api/files/[id]', () => {
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
   });
 
+  describe('a file the service hands back as a signed link', () => {
+    const SIGNED = 'https://yungu-common.oss-cn-hangzhou.aliyuncs.com/taskFile/1_a.pdf?Expires=1&OSSAccessKeyId=k&Signature=s';
+    const ref = { id: '11128597', name: 'a.pdf', kind: 'pdf' as const, mime: 'application/pdf', size: 9, url: '/api/files/11128597', createdAt: 0 };
+
+    it('302s to the signed link, with nosniff and no caching, ranges left to the store', async () => {
+      const spy = vi.spyOn(data, 'getFile').mockResolvedValueOnce({ ref, redirect: SIGNED });
+      try {
+        const res = await GET(new Request('http://localhost/x', { headers: { range: 'bytes=0-1' } }), ctx({ id: ref.id }));
+        expect(spy).toHaveBeenCalledWith('11128597');
+        expect(res.status).toBe(302);
+        expect(res.headers.get('location')).toBe(SIGNED);
+        expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+        expect(res.headers.get('cache-control')).toBe('private, no-store');
+        expect(await res.text()).toBe('');
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
+
   describe('byte ranges', () => {
     const upload = () => data.uploadFile('clip.mp4', 'video/mp4', new TextEncoder().encode('0123456789'));
     const get = (id: string, range?: string) =>

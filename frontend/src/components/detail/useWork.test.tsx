@@ -31,6 +31,7 @@ function detail(extra: Partial<AssignmentDetail> = {}): AssignmentDetail {
     instructionsHtml: '',
     attachments: [],
     myFiles: [],
+    submittedFileIds: [],
     submitted: false,
     comments: [],
     ...extra,

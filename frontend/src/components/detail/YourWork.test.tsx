@@ -34,6 +34,7 @@ function detail(extra: Partial<AssignmentDetail> = {}): AssignmentDetail {
     instructionsHtml: '',
     attachments: [],
     myFiles: [],
+    submittedFileIds: [],
     submitted: false,
     comments: [],
     ...extra,
@@ -41,6 +42,7 @@ function detail(extra: Partial<AssignmentDetail> = {}): AssignmentDetail {
 }
 
 const handlers = { onWrite: vi.fn() };
+const NOT_HANDED_IN = 'Changes not handed in — press Update to hand them in.';
 
 /** A stand-in for the writer: Your work is unmounted meanwhile; it adds its PDF through the context. */
 function Writer() {
@@ -294,10 +296,53 @@ describe('YourWork', () => {
     expect(await screen.findByText('Submitted late')).toBeInTheDocument();
   });
 
-  it('already submitted work offers Update', () => {
-    setup(detail({ myFiles: [ref('a', 'one.txt')], submitted: true, submittedAt: NOW }));
+  it('already submitted work with nothing changed: Update is unavailable and says why', async () => {
+    const user = userEvent.setup();
+    setup(detail({ myFiles: [ref('a', 'one.txt')], submittedFileIds: ['a'], submitted: true, submittedAt: NOW }));
     expect(screen.getByText('Submitted')).toBeInTheDocument();
+    const update = screen.getByRole('button', { name: 'Update' });
+    expect(update).toHaveAttribute('aria-disabled', 'true');
+    expect(update).toHaveAccessibleDescription('No changes to hand in');
+    expect(screen.queryByText(NOT_HANDED_IN)).not.toBeInTheDocument();
+    await user.click(update);
+    expect(api.submit).not.toHaveBeenCalled();
+  });
+
+  it('an edit after a submit shows that it is not handed in and enables Update; Update hands it in', async () => {
+    api.submit.mockImplementation(async () => ({ submittedAt: NOW }));
+    const user = userEvent.setup();
+    setup(detail({ myFiles: [ref('a', 'one.txt')] }));
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    const update = await screen.findByRole('button', { name: 'Update' });
+    expect(update).toHaveAttribute('aria-disabled', 'true');
+
+    await user.upload(uploadInput(), new File(['b'], 'two.txt'));
+    expect(await screen.findByRole('status')).toHaveTextContent(NOT_HANDED_IN);
+    expect(screen.getByText('Submitted')).toBeInTheDocument();
+    expect(update).not.toHaveAttribute('aria-disabled');
+    expect(update).toBeEnabled();
+
+    await user.click(update);
+    await waitFor(() => expect(api.submit).toHaveBeenLastCalledWith(94616, ['a', 'id-two.txt']));
+    await waitFor(() => expect(screen.queryByText(NOT_HANDED_IN)).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Update' })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByText('Submitted')).toBeInTheDocument();
+  });
+
+  it('removing a handed-in file after a submit also counts as a change', async () => {
+    const user = userEvent.setup();
+    setup(detail({ myFiles: [ref('a', 'one.txt'), ref('b', 'two.txt')], submittedFileIds: ['a', 'b'], submitted: true, submittedAt: NOW }));
+    await user.click(screen.getByRole('button', { name: 'Remove two.txt' }));
+    expect(await screen.findByRole('status')).toHaveTextContent(NOT_HANDED_IN);
+    expect(screen.getByRole('button', { name: 'Update' })).not.toHaveAttribute('aria-disabled');
+  });
+
+  it('on reopen, a saved draft that differs from what was handed in shows as not handed in', () => {
+    setup(detail({ myFiles: [ref('a', 'one.txt'), ref('b', 'two.txt')], submittedFileIds: ['a'], submitted: true, submittedAt: NOW }));
+    expect(screen.getByText('Submitted')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(NOT_HANDED_IN);
     expect(screen.getByRole('button', { name: 'Update' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Update' })).not.toHaveAttribute('aria-disabled');
   });
 
   it('a 401 says the session ended, with a way to sign in', async () => {

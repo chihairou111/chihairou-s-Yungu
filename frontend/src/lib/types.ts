@@ -75,8 +75,13 @@ export interface AssignmentDetail extends Assignment {
   instructionsHtml: string;
   /** Files the teacher attached. */
   attachments: FileRef[];
-  /** The student's own files: a draft before submitting, the handed-in files after. */
+  /**
+   * The student's draft: the file list as last saved (task.yungu.org's `submitAchievementForDrafts`).
+   * After a submit it can be edited without handing anything in.
+   */
   myFiles: FileRef[];
+  /** Ids of the files handed in at the last submit or update; empty before the first. Only a submit changes it. */
+  submittedFileIds: string[];
   submitted: boolean;
   comments: Comment[];
 }
