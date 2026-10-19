@@ -45,3 +45,38 @@ export interface Course {
   name: string;
   color: CourseColor;
 }
+
+export type FileKind = 'pdf' | 'image' | 'video' | 'audio' | 'office' | 'other';
+
+export interface FileRef {
+  id: string;
+  name: string;
+  kind: FileKind;
+  mime: string;
+  size: number;
+  url: string;
+  /** A PDF rendition to show for files the browser cannot open itself (Office documents). */
+  previewPdfUrl?: string;
+  createdAt: number;
+}
+
+export interface Comment {
+  id: string;
+  author: string;
+  /** True for comments the signed-in student wrote, which they may delete. */
+  mine: boolean;
+  createdAt: number;
+  text: string;
+}
+
+export interface AssignmentDetail extends Assignment {
+  teacher: string;
+  /** Teacher-authored HTML, already sanitised with `sanitizeInstructions`. */
+  instructionsHtml: string;
+  /** Files the teacher attached. */
+  attachments: FileRef[];
+  /** The student's own files: a draft before submitting, the handed-in files after. */
+  myFiles: FileRef[];
+  submitted: boolean;
+  comments: Comment[];
+}

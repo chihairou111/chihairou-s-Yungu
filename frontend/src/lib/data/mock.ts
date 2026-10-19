@@ -2,8 +2,9 @@ import 'server-only';
 import { weekStartOf } from '../time';
 import type { ClassEvent } from '../types';
 import type { YunguData } from './index';
-import { TIMETABLE, buildCourses, buildSubmitted, buildTodo } from './fixtures';
+import { TIMETABLE, buildCourses } from './fixtures';
 import { BLANK_CREDENTIALS_ERROR } from './messages';
+import { getDetail, listSubmitted, listTodo, loadFile, markSubmitted, putComment, removeComment, setFiles, storeFile } from './store';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -19,10 +20,10 @@ function clockToMs(hhmm: string): number {
 
 export const mockData: YunguData = {
   async getTodo() {
-    return buildTodo(Date.now());
+    return listTodo(Date.now());
   },
   async getSubmitted() {
-    return buildSubmitted(Date.now());
+    return listSubmitted(Date.now());
   },
   async getCourses() {
     return buildCourses();
@@ -38,6 +39,32 @@ export const mockData: YunguData = {
       courseId: slot.courseId,
     }));
     return events.sort((a, b) => a.start - b.start);
+  },
+  async getAssignmentDetail(id) {
+    return getDetail(id, Date.now());
+  },
+  async uploadFile(name, mime, bytes) {
+    return storeFile(name, mime, bytes, Date.now());
+  },
+  async getFile(id) {
+    return loadFile(id);
+  },
+  async saveDraft(id, fileIds) {
+    setFiles(id, fileIds, Date.now());
+  },
+  async submit(id, fileIds) {
+    const now = Date.now();
+    if (!setFiles(id, fileIds, now)) throw new Error(`Unknown assignment ${id}`);
+    markSubmitted(id, now);
+    return { submittedAt: now };
+  },
+  async addComment(id, text) {
+    const c = putComment(id, text, Date.now());
+    if (!c) throw new Error(`Unknown assignment ${id}`);
+    return c;
+  },
+  async deleteComment(id, commentId) {
+    removeComment(id, commentId, Date.now());
   },
   async signIn(loginId, password) {
     if (!loginId.trim() || !password.trim()) return { ok: false, error: BLANK_CREDENTIALS_ERROR };

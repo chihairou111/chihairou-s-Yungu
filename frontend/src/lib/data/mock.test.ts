@@ -120,3 +120,32 @@ describe('mock data', () => {
     await expect(data.signOut('any-token')).resolves.toBeUndefined();
   });
 });
+
+describe('assignment detail fixtures', () => {
+  it('every to-do and submitted assignment has instructions', async () => {
+    const all = [...(await data.getTodo()), ...(await data.getSubmitted())];
+    for (const a of all) {
+      const d = await data.getAssignmentDetail(a.id);
+      expect(d, a.title).not.toBeNull();
+      expect(d!.instructionsHtml.length, a.title).toBeGreaterThan(0);
+      expect(d!.teacher.length).toBeGreaterThan(0);
+      expect(d!.title).toBe(a.title);
+    }
+  });
+
+  it('one assignment has pdf, video, image and office attachments, another has comments', async () => {
+    const all = [...(await data.getTodo()), ...(await data.getSubmitted())];
+    const details = await Promise.all(all.map((a) => data.getAssignmentDetail(a.id)));
+    const rich = details.find((d) => d!.attachments.length >= 4)!;
+    const kinds = rich.attachments.map((f) => f.kind);
+    for (const k of ['pdf', 'video', 'image', 'office']) expect(kinds).toContain(k);
+    for (const f of rich.attachments.filter((f) => f.kind === 'office')) expect(f.previewPdfUrl).toBe('/mock/sample.pdf');
+    expect(details.some((d) => d!.comments.length > 0)).toBe(true);
+  });
+
+  it('submitted assignments show the files already handed in', async () => {
+    const d = await data.getAssignmentDetail(201);
+    expect(d!.submitted).toBe(true);
+    expect(d!.myFiles.length).toBeGreaterThan(0);
+  });
+});
