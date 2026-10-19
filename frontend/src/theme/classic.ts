@@ -31,8 +31,8 @@ const theme = createTheme({
       defaultProps: { elevation: 0, color: 'inherit' },
       styleOverrides: {
         root: ({ theme }) => ({
-          backgroundColor: theme.palette.background.paper,
-          borderBottom: `1px solid ${theme.palette.divider}`,
+          backgroundColor: theme.yungu.header.bg,
+          borderBottom: theme.yungu.header.edge,
         }),
       },
     },
@@ -102,6 +102,8 @@ const tokens: YunguTokens = {
     activeFocus: { outlineColor: theme.palette.primary.contrastText, outlineOffset: -4 },
   },
   segmentedCheck: false,
+  // MD2 app bar: white, closed by a hairline.
+  header: { bg: theme.palette.background.paper, edge: `1px solid ${theme.palette.divider}` },
   loginCard: { radius: 4, shadow: '0 1px 2px rgba(16, 24, 40, 0.04), 0 12px 32px rgba(16, 24, 40, 0.06)' },
 };
 theme.yungu = tokens;

@@ -1,4 +1,4 @@
-import { render, screen } from './test-render';
+import { render, screen, within } from './test-render';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Course } from '@/lib/types';
@@ -75,5 +75,21 @@ describe('AssignmentsView', () => {
     renderView();
     expect(screen.getAllByRole('button', { name: "Today's classes" })).toHaveLength(2);
     expect(screen.getAllByRole('button', { name: 'By course' })).toHaveLength(1);
+  });
+
+  it('puts the view switch in the tab row of the page header, on To-do only', () => {
+    const { unmount } = renderView();
+    const header = screen.getByRole('tablist').closest('[data-page-header]');
+    expect(header).not.toBeNull();
+    const views = within(header as HTMLElement).getByRole('group', { name: 'Group to-do work' });
+    expect(within(views).getByRole('button', { name: 'By priority' })).toBeInTheDocument();
+    // The content below the header holds no controls of its own.
+    expect(within(screen.getByRole('tabpanel')).queryByRole('group')).not.toBeInTheDocument();
+    unmount();
+
+    nav.search = 'tab=submitted';
+    renderView();
+    expect(screen.getByRole('tablist').closest('[data-page-header]')).not.toBeNull();
+    expect(screen.queryByRole('group', { name: 'Group to-do work' })).not.toBeInTheDocument();
   });
 });

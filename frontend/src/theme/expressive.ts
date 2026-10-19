@@ -61,6 +61,9 @@ const tokens: YunguTokens = {
     activeFocus: { outlineOffset: -2 },
   },
   segmentedCheck: true,
+  // M3 top app bar in its scrolled-under tone: the header reads as one tonal band above the
+  // surface, with no line.
+  header: { bg: color.surfaceContainer, edge: 'none' },
   loginCard: { radius: shape.extraLarge, shadow: 'none' },
 };
 
@@ -90,10 +93,10 @@ const theme = createTheme({
     overline: { textTransform: 'none', fontSize: '0.875rem', fontWeight: 500, letterSpacing: '0.00714em' },
   },
   components: {
-    // M3 top app bar: the page surface, flat.
+    // M3 top app bar: flat, one tonal band with the page header below it.
     MuiAppBar: {
       defaultProps: { elevation: 0, color: 'inherit' },
-      styleOverrides: { root: { backgroundColor: color.surface, color: color.onSurface } },
+      styleOverrides: { root: { backgroundColor: tokens.header.bg, color: color.onSurface } },
     },
     MuiButtonBase: {
       styleOverrides: {

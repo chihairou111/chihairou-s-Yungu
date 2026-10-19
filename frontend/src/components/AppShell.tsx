@@ -12,16 +12,10 @@ import MenuList from '@mui/material/MenuList';
 import Popover from '@mui/material/Popover';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
-import type { Theme } from '@mui/material/styles';
 import Logout from '@mui/icons-material/Logout';
 import { sectionFor } from './nav-items';
-import { RAIL_EDGE_XS } from './NavRail';
+import { PAGE_HEADER_ATTR, PAGE_PR, contentInset } from './PageHeader';
 import SettingsMenu from './SettingsMenu';
-
-/** Left inset that keeps content and the title clear of the collapsed nav rail. */
-function contentInset({ yungu: { rail } }: Theme) {
-  return { xs: `${RAIL_EDGE_XS + rail.width + 12}px`, sm: `${rail.gap + rail.width + 24}px` };
-}
 
 /** "Bruce Zheng" -> "BZ"; "郑博" -> "郑"; blank -> "?". */
 export function initials(name: string): string {
@@ -37,7 +31,11 @@ interface AppShellProps {
   children: ReactNode;
 }
 
-/** Material app bar (section title, settings and account menus) over the page content. */
+/**
+ * Material app bar (section title, settings and account menus) over the page content. A page may
+ * extend the bar with a `PageHeader` (tabs, page controls); the bar then gives up its bottom edge
+ * so the two read as one header.
+ */
 export default function AppShell({ userName, children }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -61,9 +59,15 @@ export default function AppShell({ userName, children }: AppShellProps) {
   }
 
   return (
-    <Box sx={{ minHeight: '100dvh', bgcolor: 'background.default' }}>
+    <Box
+      sx={{
+        minHeight: '100dvh',
+        bgcolor: 'background.default',
+        [`&:has([${PAGE_HEADER_ATTR}]) > .MuiAppBar-root`]: { borderBottom: 'none' },
+      }}
+    >
       <AppBar position="sticky">
-        <Toolbar sx={(theme) => ({ pl: contentInset(theme), pr: { xs: 2, sm: 3 } })}>
+        <Toolbar sx={(theme) => ({ pl: contentInset(theme), pr: PAGE_PR })}>
           <Typography variant="h1" sx={{ flexGrow: 1, minWidth: 0 }} noWrap>
             {title}
           </Typography>
@@ -122,7 +126,17 @@ export default function AppShell({ userName, children }: AppShellProps) {
           </Popover>
         </Toolbar>
       </AppBar>
-      <Box component="main" sx={(theme) => ({ pl: contentInset(theme), pr: { xs: 2, sm: 3 }, pt: 2, pb: 3 })}>
+      <Box
+        component="main"
+        sx={(theme) => ({
+          pl: contentInset(theme),
+          pr: PAGE_PR,
+          pt: 2,
+          pb: 3,
+          // A page header sits flush under the app bar and sets the content's top spacing itself.
+          [`&:has([${PAGE_HEADER_ATTR}])`]: { pt: 0 },
+        })}
+      >
         {children}
       </Box>
     </Box>

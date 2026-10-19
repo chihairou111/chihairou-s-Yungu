@@ -9,6 +9,7 @@ import { useTheme } from '@mui/material/styles';
 import Check from '@mui/icons-material/Check';
 import type { Assignment, ClassEvent, Course } from '@/lib/types';
 import CourseBoard from './CourseBoard';
+import PageHeader from './PageHeader';
 import PriorityBoard from './PriorityBoard';
 import SubmittedList from './SubmittedList';
 import TodayDrawer, { BOTTOM_FAB_MEDIA } from './TodayDrawer';
@@ -26,7 +27,8 @@ interface AssignmentsViewProps {
 }
 
 /**
- * To-do | Submitted tabs, and on To-do a By priority | By course view. Both choices live in the URL
+ * To-do | Submitted tabs attached to the app bar, and on To-do a By priority | By course switch at the
+ * right end of the tab row. Both choices live in the URL
  * (`?tab=submitted`, `?view=course`) so they survive reloads.
  */
 export default function AssignmentsView({ todo, submitted, courses, todayClasses, now }: AssignmentsViewProps) {
@@ -49,49 +51,47 @@ export default function AssignmentsView({ todo, submitted, courses, todayClasses
 
   return (
     <>
-      <Tabs
-        value={tab}
-        onChange={(_, next: TabKey) => go(next, view)}
-        aria-label="Assignment lists"
-        sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
-      >
-        {/* Only the open tab's panel is mounted, so only that tab may point at it. */}
-        <Tab value="todo" label="To-do" id="tab-todo" aria-controls={tab === 'todo' ? 'panel-todo' : undefined} />
-        <Tab
-          value="submitted"
-          label="Submitted"
-          id="tab-submitted"
-          aria-controls={tab === 'submitted' ? 'panel-submitted' : undefined}
-        />
-      </Tabs>
+      <PageHeader>
+        <Tabs value={tab} onChange={(_, next: TabKey) => go(next, view)} aria-label="Assignment lists">
+          {/* Only the open tab's panel is mounted, so only that tab may point at it. */}
+          <Tab value="todo" label="To-do" id="tab-todo" aria-controls={tab === 'todo' ? 'panel-todo' : undefined} />
+          <Tab
+            value="submitted"
+            label="Submitted"
+            id="tab-submitted"
+            aria-controls={tab === 'submitted' ? 'panel-submitted' : undefined}
+          />
+        </Tabs>
+        {/* Right end of the tab row; below 600px a full-width segmented row under the tabs. */}
+        {tab === 'todo' && (
+          <ToggleButtonGroup
+            exclusive
+            size="small"
+            color="primary"
+            value={view}
+            onChange={(_, next: ViewKey | null) => next && go(tab, next)}
+            aria-label="Group to-do work"
+            sx={{ ml: { sm: 'auto' }, width: { xs: '100%', sm: 'auto' }, mb: { xs: 1.5, sm: 0 } }}
+          >
+            <ToggleButton value="priority" sx={{ px: 2, flex: { xs: 1, sm: 'none' } }}>
+              {check('priority')}
+              By priority
+            </ToggleButton>
+            <ToggleButton value="course" sx={{ px: 2, flex: { xs: 1, sm: 'none' } }}>
+              {check('course')}
+              By course
+            </ToggleButton>
+          </ToggleButtonGroup>
+        )}
+      </PageHeader>
       {/* Room below the last card for the bottom-right button (40px + 16px inset + margin). */}
       <Box role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} sx={{ [BOTTOM_FAB_MEDIA]: { pb: 9 } }}>
         {tab === 'todo' ? (
-          <>
-            <ToggleButtonGroup
-              exclusive
-              size="small"
-              color="primary"
-              value={view}
-              onChange={(_, next: ViewKey | null) => next && go(tab, next)}
-              aria-label="Group to-do work"
-              sx={{ mb: 3 }}
-            >
-              <ToggleButton value="priority" sx={{ px: 2 }}>
-                {check('priority')}
-                By priority
-              </ToggleButton>
-              <ToggleButton value="course" sx={{ px: 2 }}>
-                {check('course')}
-                By course
-              </ToggleButton>
-            </ToggleButtonGroup>
-            {view === 'course' ? (
-              <CourseBoard courses={courses} items={todo} now={now} />
-            ) : (
-              <PriorityBoard items={todo} now={now} />
-            )}
-          </>
+          view === 'course' ? (
+            <CourseBoard courses={courses} items={todo} now={now} />
+          ) : (
+            <PriorityBoard items={todo} now={now} />
+          )
         ) : (
           <SubmittedList items={submitted} now={now} />
         )}

@@ -11,6 +11,7 @@ import ChevronRight from '@mui/icons-material/ChevronRight';
 import { chinaClock, chinaDateLabel, dayIndex, formatWeekParam, shiftWeek, weekRangeLabel } from '@/lib/time';
 import { COURSE_COLORS, courseColorHex, readableTextOn } from '@/lib/colors';
 import type { ClassEvent, Course } from '@/lib/types';
+import PageHeader from './PageHeader';
 
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
@@ -100,7 +101,8 @@ export default function WeekCalendar({ weekStart, events, courses, now }: WeekCa
 
   return (
     <>
-      <Stack direction="row" sx={{ alignItems: 'center', flexWrap: 'wrap', columnGap: 2, rowGap: 1, mb: 2.5 }}>
+      {/* Week navigation on the app bar's surface, like the Assignments tabs. */}
+      <PageHeader>
         <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
           <Button component={Link} href="/calendar" variant="outlined" color="inherit" size="small" sx={{ mr: 1, borderColor: 'divider' }}>
             Today
@@ -112,10 +114,10 @@ export default function WeekCalendar({ weekStart, events, courses, now }: WeekCa
             <ChevronRight />
           </IconButton>
         </Stack>
-        <Typography variant="h2" sx={{ whiteSpace: 'nowrap' }}>
+        <Typography variant="h2" sx={{ whiteSpace: 'nowrap', py: 1 }}>
           {weekRangeLabel(weekStart)}
         </Typography>
-      </Stack>
+      </PageHeader>
 
       {classes.length === 0 ? (
         <Typography
