@@ -132,7 +132,9 @@ const darkOutlined = {
   color: V.text,
   borderColor: 'rgba(255, 255, 255, 0.32)',
   whiteSpace: 'nowrap',
-  minWidth: { xs: 40, sm: 64 },
+  // Icon-only on phones: a full 48px touch target.
+  minWidth: { xs: 48, sm: 64 },
+  minHeight: { xs: 48, sm: 0 },
   px: { xs: 1, sm: 2 },
   '&:hover': { borderColor: V.text, bgcolor: V.hover },
   '& .MuiButton-startIcon': { m: { xs: 0, sm: '0 8px 0 -4px' } },
@@ -154,7 +156,7 @@ function TopBar({ file, titleId, at, count, onClose, onStep }: TopBarProps) {
         borderBottom: `1px solid ${V.line}`,
       }}
     >
-      <IconButton onClick={onClose} aria-label="Close" sx={{ color: V.text, '&:hover': { bgcolor: V.hover } }}>
+      <IconButton onClick={onClose} aria-label="Close" sx={{ p: { xs: 1.5, sm: 1 }, color: V.text, '&:hover': { bgcolor: V.hover } }}>
         <Close />
       </IconButton>
       <Box aria-live="polite" sx={{ flex: 1, minWidth: 0 }}>

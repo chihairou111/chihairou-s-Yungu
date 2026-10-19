@@ -431,6 +431,11 @@ test('keyboard: Tab reaches a card, which shows a focus ring and opens the pop-u
 });
 
 test('attachments: rendered previews, and a full-screen viewer that steps through the files', async ({ page }) => {
+  // pdf.js fetches its fonts and CMaps from the app on demand; none may be missing.
+  const pdfjsAssets: string[] = [];
+  page.on('response', (r) => {
+    if (r.url().includes('/pdfjs/')) pdfjsAssets.push(`${r.status()} ${new URL(r.url()).pathname}`);
+  });
   await signIn(page);
   await page.goto('/assignments?task=102');
   const detail = page.getByRole('dialog');
@@ -448,6 +453,7 @@ test('attachments: rendered previews, and a full-screen viewer that steps throug
       }),
     )
     .toBe(true);
+  expect(pdfjsAssets.filter((line) => !line.startsWith('200 '))).toEqual([]);
 
   await detail.getByRole('button', { name: /Field notes example\.png/ }).click();
   const viewer = page.getByRole('dialog', { name: 'Field notes example.png' });

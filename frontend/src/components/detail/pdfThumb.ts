@@ -22,21 +22,60 @@ function loadPdfJs() {
 }
 
 /**
- * Draws the first page of the PDF at `url` into `canvas`, `width` CSS pixels wide (sharp on high-density
- * screens). Rejects when the file cannot be fetched or parsed, so the caller can show a fallback.
+ * Fetched on demand by pdf.js from public/pdfjs/ (copied from the installed pdfjs-dist by
+ * scripts/copy-pdfjs-assets.mjs): CMaps for CJK text in fonts that are not embedded, the standard 14
+ * fonts, decoders for JPEG 2000 / JBIG2 images and ICC colour profiles.
  */
-export async function renderFirstPage(url: string, canvas: HTMLCanvasElement, width: number): Promise<void> {
+const ASSETS = {
+  cMapUrl: '/pdfjs/cmaps/',
+  cMapPacked: true,
+  standardFontDataUrl: '/pdfjs/standard_fonts/',
+  wasmUrl: '/pdfjs/wasm/',
+  iccUrl: '/pdfjs/iccs/',
+};
+
+function abortError(): DOMException {
+  return new DOMException('The thumbnail render was cancelled.', 'AbortError');
+}
+
+/** True for the rejection `renderFirstPage` gives when its signal aborts: neither a result nor a failure. */
+export function isAbort(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
+/**
+ * Draws the first page of the PDF at `url` into `canvas`, `width` CSS pixels wide (sharp on high-density
+ * screens). Rejects when the file cannot be fetched or parsed, so the caller can show a fallback. Aborting
+ * `signal` stops the download or the drawing and rejects with an `AbortError` (see `isAbort`).
+ */
+export async function renderFirstPage(url: string, canvas: HTMLCanvasElement, width: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) throw abortError();
   const { lib, worker } = await loadPdfJs();
-  const task = lib.getDocument({ url, worker });
+  if (signal?.aborted) throw abortError();
+  const task = lib.getDocument({ url, worker, ...ASSETS });
+  let renderTask: { cancel(): void } | null = null;
+  const onAbort = () => {
+    renderTask?.cancel();
+    void task.destroy();
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
   try {
     const doc = await task.promise;
     const page = await doc.getPage(1);
+    if (signal?.aborted) throw abortError();
     const scale = (width / page.getViewport({ scale: 1 }).width) * Math.min(window.devicePixelRatio || 1, 2);
     const viewport = page.getViewport({ scale });
     canvas.width = Math.floor(viewport.width);
     canvas.height = Math.floor(viewport.height);
-    await page.render({ canvas, viewport }).promise;
+    const rendering = page.render({ canvas, viewport });
+    renderTask = rendering;
+    await rendering.promise;
+  } catch (error) {
+    // pdf.js rejects a cancelled render or a destroyed task with its own errors; report them as the abort.
+    if (signal?.aborted) throw abortError();
+    throw error;
   } finally {
+    signal?.removeEventListener('abort', onAbort);
     await task.destroy();
   }
 }

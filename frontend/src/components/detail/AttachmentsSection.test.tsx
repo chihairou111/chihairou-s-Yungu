@@ -6,7 +6,10 @@ import AttachmentsSection from './AttachmentsSection';
 import { fileCaption, formatBytes } from './FileThumb';
 import { renderFirstPage } from './pdfThumb';
 
-vi.mock('./pdfThumb', () => ({ renderFirstPage: vi.fn(() => Promise.resolve()) }));
+vi.mock('./pdfThumb', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./pdfThumb')>()),
+  renderFirstPage: vi.fn(() => Promise.resolve()),
+}));
 
 const MB = 1024 * 1024;
 const file = (id: string, name: string, kind: FileRef['kind'], size: number, extra: Partial<FileRef> = {}): FileRef => ({
@@ -27,7 +30,9 @@ const FOUR: FileRef[] = [
   file('d', '信息整理表.docx', 'office', 130 * 1024, { previewPdfUrl: '/api/files/d-preview' }),
 ];
 
-beforeEach(() => vi.mocked(renderFirstPage).mockClear());
+beforeEach(() => {
+  vi.mocked(renderFirstPage).mockClear();
+});
 afterEach(() => vi.restoreAllMocks());
 
 describe('file captions', () => {

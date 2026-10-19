@@ -4,6 +4,7 @@ import Box from '@mui/material/Box';
 import ButtonBase from '@mui/material/ButtonBase';
 import Skeleton from '@mui/material/Skeleton';
 import Typography from '@mui/material/Typography';
+import useMediaQuery from '@mui/material/useMediaQuery';
 import { alpha, type Theme } from '@mui/material/styles';
 import type { SvgIconProps } from '@mui/material/SvgIcon';
 import AudioFileOutlined from '@mui/icons-material/AudioFileOutlined';
@@ -16,7 +17,7 @@ import PlayArrowRounded from '@mui/icons-material/PlayArrowRounded';
 import SlideshowOutlined from '@mui/icons-material/SlideshowOutlined';
 import TableChartOutlined from '@mui/icons-material/TableChartOutlined';
 import type { FileRef } from '@/lib/types';
-import { renderFirstPage } from './pdfThumb';
+import { isAbort, renderFirstPage } from './pdfThumb';
 
 const UNITS = ['KB', 'MB', 'GB'];
 
@@ -140,14 +141,15 @@ function PdfPage({ url, onLoad }: { url: string; onLoad: (load: Load) => void })
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!near || !canvas) return;
-    let live = true;
-    renderFirstPage(url, canvas, canvas.clientWidth || 240).then(
-      () => live && onLoad('ready'),
-      () => live && onLoad('error'),
+    // Unmounting (or StrictMode's rehearsal) cancels the render, so two never draw into one canvas.
+    const controller = new AbortController();
+    renderFirstPage(url, canvas, canvas.clientWidth || 240, controller.signal).then(
+      () => onLoad('ready'),
+      (error: unknown) => {
+        if (!isAbort(error) && !controller.signal.aborted) onLoad('error');
+      },
     );
-    return () => {
-      live = false;
-    };
+    return () => controller.abort();
   }, [near, url, onLoad]);
 
   return (
@@ -159,7 +161,6 @@ function PdfPage({ url, onLoad }: { url: string; onLoad: (load: Load) => void })
       <Box
         component="canvas"
         ref={canvasRef}
-        aria-hidden
         sx={(theme) => ({
           display: 'block',
           width: '78%',
@@ -255,47 +256,72 @@ function Preview({ file, load, onLoad }: { file: FileRef; load: Load; onLoad: (l
         />
       );
     case 'video':
-      return (
-        <>
-          <Box
-            component="video"
-            // The frame at 0.1 s stands in for a poster; nothing plays here.
-            src={`${file.url}#t=0.1`}
-            preload="metadata"
-            muted
-            playsInline
-            aria-hidden
-            tabIndex={-1}
-            onLoadedData={() => onLoad('ready')}
-            onError={() => onLoad('error')}
-            sx={FILL_SX}
-          />
-          <Box
-            component="span"
-            sx={(theme) => ({
-              position: 'absolute',
-              left: '50%',
-              top: '50%',
-              width: 44,
-              height: 44,
-              m: '-22px 0 0 -22px',
-              borderRadius: '50%',
-              display: 'grid',
-              placeItems: 'center',
-              color: theme.palette.common.white,
-              bgcolor: alpha(theme.palette.common.black, 0.55),
-              boxShadow: `0 2px 8px ${alpha(theme.palette.common.black, 0.25)}`,
-            })}
-          >
-            <PlayArrowRounded sx={{ fontSize: 28 }} />
-          </Box>
-        </>
-      );
+      return <VideoFrame url={file.url} onLoad={onLoad} />;
     case 'audio':
       return <AudioPreview file={file} onLoad={onLoad} />;
     default:
       return <TypeTile file={file} />;
   }
+}
+
+/** Without metadata after this long, a video tile gives up and shows the type icon. */
+export const VIDEO_TIMEOUT_MS = 8000;
+
+/**
+ * A frame of the video with a play badge. Loads only near the viewport; the skeleton clears once the
+ * metadata arrives (the frame paints when its data follows), and the type icon replaces it after
+ * `VIDEO_TIMEOUT_MS` with no metadata.
+ */
+function VideoFrame({ url, onLoad }: { url: string; onLoad: (load: Load) => void }) {
+  const [boxRef, near] = useNearViewport<HTMLSpanElement>();
+  const [hasMetadata, setHasMetadata] = useState(false);
+
+  useEffect(() => {
+    if (!near || hasMetadata) return;
+    const timer = window.setTimeout(() => onLoad('error'), VIDEO_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [near, hasMetadata, onLoad]);
+
+  return (
+    <Box component="span" ref={boxRef} sx={{ position: 'absolute', inset: 0, display: 'block' }}>
+      {near && (
+        <Box
+          component="video"
+          // The frame at 0.1 s stands in for a poster; nothing plays here.
+          src={`${url}#t=0.1`}
+          preload="metadata"
+          muted
+          playsInline
+          tabIndex={-1}
+          onLoadedMetadata={() => {
+            setHasMetadata(true);
+            onLoad('ready');
+          }}
+          onError={() => onLoad('error')}
+          sx={FILL_SX}
+        />
+      )}
+      <Box
+        component="span"
+        sx={(theme) => ({
+          position: 'absolute',
+          left: '50%',
+          top: '50%',
+          width: 44,
+          height: 44,
+          m: '-22px 0 0 -22px',
+          borderRadius: '50%',
+          display: 'grid',
+          placeItems: 'center',
+          color: theme.palette.common.white,
+          bgcolor: alpha(theme.palette.common.black, 0.55),
+          boxShadow: `0 2px 8px ${alpha(theme.palette.common.black, 0.25)}`,
+        })}
+      >
+        <PlayArrowRounded sx={{ fontSize: 28 }} />
+      </Box>
+    </Box>
+  );
 }
 
 /** Kinds whose preview paints something that takes a moment to arrive (shown over a skeleton). */
@@ -343,11 +369,15 @@ export default function FileThumb({ file, onOpen }: { file: FileRef; onOpen: () 
   const key = `${file.id}:${previewPdf(file) ?? file.url}`;
   const load = state.key === key ? state.load : 'loading';
   const onLoad = useCallback((next: Load) => setState({ key, load: next }), [key]);
+  const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
+  const caption = fileCaption(file);
 
   return (
-    <ButtonBase onClick={onOpen} data-file-id={file.id} sx={tileSx}>
+    <ButtonBase onClick={onOpen} data-file-id={file.id} aria-label={`${file.name}, ${caption}`} sx={tileSx}>
       <Box
         component="span"
+        // Decorative: the tile is named by the file name and caption alone.
+        aria-hidden
         sx={{
           position: 'relative',
           display: 'block',
@@ -362,7 +392,7 @@ export default function FileThumb({ file, onOpen }: { file: FileRef; onOpen: () 
           <Preview file={file} load={load} onLoad={onLoad} />
         </Box>
         {load === 'loading' && hasRenderedPreview(file) && (
-          <Skeleton variant="rectangular" animation="wave" sx={{ position: 'absolute', inset: 0, height: '100%', transform: 'none' }} />
+          <Skeleton variant="rectangular" animation={reduceMotion ? false : 'wave'} data-testid="thumb-skeleton" sx={{ position: 'absolute', inset: 0, height: '100%', transform: 'none' }} />
         )}
       </Box>
       <Box component="span" sx={{ display: 'block', px: 1.5, pt: 1.25, pb: 1.5 }}>
@@ -383,7 +413,7 @@ export default function FileThumb({ file, onOpen }: { file: FileRef; onOpen: () 
           {file.name}
         </Typography>
         <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
-          {fileCaption(file)}
+          {caption}
         </Typography>
       </Box>
     </ButtonBase>

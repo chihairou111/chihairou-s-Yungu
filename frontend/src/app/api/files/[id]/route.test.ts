@@ -63,4 +63,66 @@ describe('GET /api/files/[id]', () => {
     expect(res.headers.get('content-security-policy')).toContain('sandbox');
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
   });
+
+  describe('byte ranges', () => {
+    const upload = () => data.uploadFile('clip.mp4', 'video/mp4', new TextEncoder().encode('0123456789'));
+    const get = (id: string, range?: string) =>
+      GET(new Request('http://localhost/x', range ? { headers: { range } } : undefined), ctx({ id }));
+
+    it('serves the whole file with 200 and advertises ranges when none is asked for', async () => {
+      const f = await upload();
+      const res = await get(f.id);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('accept-ranges')).toBe('bytes');
+      expect(res.headers.get('content-length')).toBe('10');
+      expect(res.headers.get('content-range')).toBeNull();
+      expect(await res.text()).toBe('0123456789');
+    });
+
+    it('answers start-end and start- with 206 and the slice', async () => {
+      const f = await upload();
+      const res = await get(f.id, 'bytes=2-5');
+      expect(res.status).toBe(206);
+      expect(res.headers.get('content-range')).toBe('bytes 2-5/10');
+      expect(res.headers.get('content-length')).toBe('4');
+      expect(await res.text()).toBe('2345');
+      const open = await get(f.id, 'bytes=7-');
+      expect(open.headers.get('content-range')).toBe('bytes 7-9/10');
+      expect(await open.text()).toBe('789');
+      const past = await get(f.id, 'bytes=8-99');
+      expect(past.headers.get('content-range')).toBe('bytes 8-9/10');
+    });
+
+    it('answers a suffix range with the last bytes', async () => {
+      const f = await upload();
+      const res = await get(f.id, 'bytes=-3');
+      expect(res.status).toBe(206);
+      expect(res.headers.get('content-range')).toBe('bytes 7-9/10');
+      expect(await res.text()).toBe('789');
+    });
+
+    it('416s a range past the end, keeping the security headers', async () => {
+      const f = await upload();
+      const res = await get(f.id, 'bytes=10-');
+      expect(res.status).toBe(416);
+      expect(res.headers.get('content-range')).toBe('bytes */10');
+      expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(res.headers.get('content-disposition')).toMatch(/^inline;/);
+    });
+
+    it('keeps the sandbox on a partial response of an active type', async () => {
+      const f = await data.uploadFile('x.html', 'text/html', new TextEncoder().encode('<p>hi</p>'));
+      const res = await get(f.id, 'bytes=0-1');
+      expect(res.status).toBe(206);
+      expect(res.headers.get('content-security-policy')).toContain('sandbox');
+      expect(res.headers.get('content-type')).toBe('application/octet-stream');
+      expect(res.headers.get('content-disposition')).toMatch(/^attachment;/);
+    });
+
+    it('ignores several ranges or other units and serves everything', async () => {
+      const f = await upload();
+      expect((await get(f.id, 'bytes=0-1,4-5')).status).toBe(200);
+      expect((await get(f.id, 'items=0-1')).status).toBe(200);
+    });
+  });
 });
