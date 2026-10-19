@@ -31,7 +31,8 @@ describe('CourseBoard', () => {
     expect(cardNames(due)).toEqual(['EL-AI Create the Future', 'Product Design I', 'H Algebra 2 I']);
     const none = screen.getByRole('region', { name: 'No work due' });
     expect(cardNames(none)).toEqual(['Chinese I']);
-    expect(within(none).getByRole('article', { name: 'Chinese I' })).toHaveTextContent('No work due');
+    // A compact name-only card: the section label already says "No work due".
+    expect(within(none).getByRole('article', { name: 'Chinese I' })).toHaveTextContent(/^Chinese I$/);
   });
 
   it('labels each item by China date and lists it most urgent first', () => {
@@ -39,10 +40,14 @@ describe('CourseBoard', () => {
     const design = screen.getByRole('article', { name: 'Product Design I' });
     const lines = within(design).getAllByRole('listitem');
     expect(within(lines[0]).getByText('Due today')).toBeInTheDocument();
-    expect(lines[0]).toHaveTextContent('Task 3：开始第一次观察');
+    expect(lines[0]).toHaveTextContent(/^Due today · 22:00Task 3：开始第一次观察$/);
     expect(within(lines[1]).getByText('Due tomorrow')).toBeInTheDocument();
-    expect(within(screen.getByRole('article', { name: 'EL-AI Create the Future' })).getByText('2 days late')).toBeInTheDocument();
+    // Late work: how late (the urgency, in words) and the same due label as the priority view.
+    const late = within(screen.getByRole('article', { name: 'EL-AI Create the Future' })).getByRole('listitem');
+    expect(within(late).getByText('2 days late')).toBeInTheDocument();
+    expect(late).toHaveTextContent(/^2 days late · Due Fri, Oct 16/);
     expect(within(screen.getByRole('article', { name: 'H Algebra 2 I' })).getByText('Due Wed, Oct 21')).toBeInTheDocument();
+    expect(within(screen.getByRole('article', { name: 'H Algebra 2 I' })).getByRole('listitem')).toHaveTextContent(/^Due Wed, Oct 21 · 22:00/);
   });
 
   it('fills the header band with the course color and readable text', () => {
@@ -60,6 +65,11 @@ describe('CourseBoard', () => {
     render(<CourseBoard courses={[odd]} items={[]} now={NOW} />);
     const band = within(screen.getByRole('article', { name: 'Robotics' })).getByRole('heading').parentElement!;
     expect(band.style.getPropertyValue('--course-bg')).toBe('#616161');
+  });
+
+  it('offers the full course name of a one-line compact card as a tooltip', () => {
+    render(<CourseBoard courses={COURSES} items={items} now={NOW} />);
+    expect(within(screen.getByRole('article', { name: 'Chinese I' })).getByRole('heading')).toHaveAttribute('title', 'Chinese I');
   });
 
   it('omits the "No work due" section when every course has work', () => {

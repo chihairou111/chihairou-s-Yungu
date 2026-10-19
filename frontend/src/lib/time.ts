@@ -94,3 +94,9 @@ export function weekRangeShortLabel(weekStart: number): string {
   const em = MONTHS[e.getUTCMonth()];
   return sm === em ? `${sm} ${s.getUTCDate()}–${e.getUTCDate()}` : `${sm} ${s.getUTCDate()}–${em} ${e.getUTCDate()}`;
 }
+
+/** "Oct 16" in China time. */
+export function chinaMonthDay(ms: number): string {
+  const d = chinaFields(ms);
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
+}

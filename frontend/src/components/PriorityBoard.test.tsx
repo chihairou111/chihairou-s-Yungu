@@ -33,3 +33,34 @@ describe('PriorityBoard', () => {
     expect(within(screen.getByRole('region', { name: 'Overdue' })).getByText('Nothing overdue')).toBeInTheDocument();
   });
 });
+
+describe('PriorityBoard all clear', () => {
+  it('replaces the three columns with one message when nothing is due', () => {
+    render(<PriorityBoard items={[]} now={NOW} />);
+    expect(screen.getByRole('heading', { name: 'Nothing to do' })).toBeInTheDocument();
+    expect(screen.getByText('New work from task.yungu.org will appear here.')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Overdue' })).not.toBeInTheDocument();
+  });
+});
+
+describe('PriorityBoard upcoming date groups', () => {
+  // NOW is Sun Oct 18 17:00 China; due times 22:00.
+  const later = (title: string, days: number) => todo(title, days * DAY + 5 * HOUR);
+
+  it('sub-groups Upcoming by date once it has four or more items', () => {
+    render(<PriorityBoard items={[later('Mon', 1), later('Wed', 3), later('Sun', 7), later('Far', 20)]} now={NOW} />);
+    const upcoming = screen.getByRole('region', { name: 'Upcoming' });
+    expect(within(upcoming).getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual(['Tomorrow', 'Next week', 'Later']);
+    expect(within(within(upcoming).getByRole('region', { name: 'Next week' })).getAllByRole('heading', { level: 4 }).map((h) => h.textContent)).toEqual([
+      'Wed',
+      'Sun',
+    ]);
+  });
+
+  it('keeps a short Upcoming list flat', () => {
+    render(<PriorityBoard items={[later('Mon', 1), later('Wed', 3), later('Sun', 7)]} now={NOW} />);
+    const upcoming = screen.getByRole('region', { name: 'Upcoming' });
+    expect(within(upcoming).queryAllByRole('heading', { level: 4 })).toHaveLength(0);
+    expect(within(upcoming).getAllByRole('heading', { level: 3 })).toHaveLength(3);
+  });
+});

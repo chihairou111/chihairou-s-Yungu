@@ -4,6 +4,7 @@ import {
   chinaDateLabel,
   chinaDayNumber,
   chinaDueLabel,
+  chinaMonthDay,
   chinaShortDate,
   dayIndex,
   formatWeekParam,
@@ -79,5 +80,12 @@ describe('weekRangeShortLabel', () => {
   it('names both months across a month or a year', () => {
     expect(weekRangeShortLabel(weekOf(2026, 9, 26))).toBe('Oct 26–Nov 1');
     expect(weekRangeShortLabel(weekOf(2026, 11, 28))).toBe('Dec 28–Jan 3');
+  });
+});
+
+describe('chinaMonthDay', () => {
+  it('gives the China-time month and day', () => {
+    expect(chinaMonthDay(Date.UTC(2026, 9, 16, 14, 0))).toBe('Oct 16');
+    expect(chinaMonthDay(Date.UTC(2026, 9, 16, 17, 30))).toBe('Oct 17');
   });
 });

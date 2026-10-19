@@ -64,7 +64,7 @@ describe('AssignmentsView', () => {
     renderView();
     expect(screen.getByRole('button', { name: 'By course' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('article', { name: 'Product Design I' })).toHaveTextContent('Observation task');
-    expect(screen.getByRole('article', { name: 'Chinese I' })).toHaveTextContent('No work due');
+    expect(screen.getByRole('article', { name: 'Chinese I' })).toHaveTextContent(/^Chinese I$/);
     expect(screen.queryByRole('region', { name: 'Overdue' })).not.toBeInTheDocument();
   });
 
