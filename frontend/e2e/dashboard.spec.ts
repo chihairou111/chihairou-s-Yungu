@@ -429,3 +429,40 @@ test('keyboard: Tab reaches a card, which shows a focus ring and opens the pop-u
   await expect(page).toHaveURL(/\/assignments$/);
   await expect(page.getByRole('dialog')).toBeHidden();
 });
+
+test('attachments: rendered previews, and a full-screen viewer that steps through the files', async ({ page }) => {
+  await signIn(page);
+  await page.goto('/assignments?task=102');
+  const detail = page.getByRole('dialog');
+  await expect(detail.getByRole('heading', { name: 'Attachments (4)' })).toBeVisible();
+
+  // The PDF's first page is drawn by pdf.js (its worker served by the app), not left blank.
+  const pdfTile = detail.getByRole('button', { name: /Observation worksheet\.pdf/ });
+  await expect
+    .poll(() =>
+      pdfTile.locator('canvas').evaluate((canvas: HTMLCanvasElement) => {
+        if (canvas.width === 0) return false;
+        const { data } = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height);
+        for (let i = 0; i < data.length; i += 4) if (data[i] < 128) return true; // some dark text pixels
+        return false;
+      }),
+    )
+    .toBe(true);
+
+  await detail.getByRole('button', { name: /Field notes example\.png/ }).click();
+  const viewer = page.getByRole('dialog', { name: 'Field notes example.png' });
+  await expect(viewer).toBeVisible();
+  await expect(viewer.getByText('3 / 4')).toBeVisible();
+  await expect(viewer.getByRole('link', { name: 'Download' })).toHaveAttribute('href', /\?download=1$/);
+
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.getByRole('dialog', { name: 'Example observation.mp4' }).locator('video')).toBeVisible();
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.getByRole('dialog', { name: 'Observation worksheet.pdf' }).locator('iframe')).toHaveAttribute('src', '/mock/sample.pdf');
+
+  // Esc closes only the viewer; focus is back on the tile that opened it.
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: /Observation worksheet\.pdf/ })).toBeHidden();
+  await expect(detail.getByRole('button', { name: /Field notes example\.png/ })).toBeFocused();
+  await expect(page).toHaveURL(/task=102/);
+});

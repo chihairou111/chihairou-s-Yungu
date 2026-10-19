@@ -1,0 +1,391 @@
+'use client';
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import Box from '@mui/material/Box';
+import ButtonBase from '@mui/material/ButtonBase';
+import Skeleton from '@mui/material/Skeleton';
+import Typography from '@mui/material/Typography';
+import { alpha, type Theme } from '@mui/material/styles';
+import type { SvgIconProps } from '@mui/material/SvgIcon';
+import AudioFileOutlined from '@mui/icons-material/AudioFileOutlined';
+import DescriptionOutlined from '@mui/icons-material/DescriptionOutlined';
+import ImageOutlined from '@mui/icons-material/ImageOutlined';
+import InsertDriveFileOutlined from '@mui/icons-material/InsertDriveFileOutlined';
+import MovieOutlined from '@mui/icons-material/MovieOutlined';
+import PictureAsPdfOutlined from '@mui/icons-material/PictureAsPdfOutlined';
+import PlayArrowRounded from '@mui/icons-material/PlayArrowRounded';
+import SlideshowOutlined from '@mui/icons-material/SlideshowOutlined';
+import TableChartOutlined from '@mui/icons-material/TableChartOutlined';
+import type { FileRef } from '@/lib/types';
+import { renderFirstPage } from './pdfThumb';
+
+const UNITS = ['KB', 'MB', 'GB'];
+
+/** "900 B", "17 KB", "4.3 MB", "75 MB": one decimal below 10, whole numbers above. */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${Math.max(0, Math.round(bytes))} B`;
+  let value = bytes / 1024;
+  let unit = 0;
+  while (unit < UNITS.length - 1 && Math.round(value) >= 1024) {
+    value /= 1024;
+    unit += 1;
+  }
+  const shown = unit > 0 && value < 10 ? value.toFixed(1).replace(/\.0$/, '') : String(Math.round(value));
+  return `${shown} ${UNITS[unit]}`;
+}
+
+function extension(name: string): string {
+  const match = /\.([a-z0-9]{1,8})$/i.exec(name);
+  return match ? match[1].toLowerCase() : '';
+}
+
+const OFFICE_LABELS: Record<string, string> = {
+  doc: 'Word',
+  docx: 'Word',
+  xls: 'Excel',
+  xlsx: 'Excel',
+  ppt: 'PowerPoint',
+  pptx: 'PowerPoint',
+  numbers: 'Numbers',
+  pages: 'Pages',
+  key: 'Keynote',
+};
+
+/** What kind of file this is, in words: "PDF", "Video", "Word", "Numbers", "ZIP", "File". */
+export function fileTypeLabel(file: FileRef): string {
+  switch (file.kind) {
+    case 'pdf':
+      return 'PDF';
+    case 'image':
+      return 'Image';
+    case 'video':
+      return 'Video';
+    case 'audio':
+      return 'Audio';
+    case 'office':
+      return OFFICE_LABELS[extension(file.name)] ?? 'Document';
+    default:
+      return extension(file.name).toUpperCase() || 'File';
+  }
+}
+
+/** "PDF · 75 MB". */
+export function fileCaption(file: FileRef): string {
+  return `${fileTypeLabel(file)} · ${formatBytes(file.size)}`;
+}
+
+/** The icon for a file's type; spreadsheets and slides get their own among Office files. */
+export function FileKindIcon({ file, ...props }: { file: FileRef } & SvgIconProps) {
+  const ext = extension(file.name);
+  const Icon =
+    file.kind === 'pdf'
+      ? PictureAsPdfOutlined
+      : file.kind === 'image'
+        ? ImageOutlined
+        : file.kind === 'video'
+          ? MovieOutlined
+          : file.kind === 'audio'
+            ? AudioFileOutlined
+            : file.kind === 'office'
+              ? ['xls', 'xlsx', 'numbers'].includes(ext)
+                ? TableChartOutlined
+                : ['ppt', 'pptx', 'key'].includes(ext)
+                  ? SlideshowOutlined
+                  : DescriptionOutlined
+              : InsertDriveFileOutlined;
+  return <Icon {...props} />;
+}
+
+/** The PDF whose first page previews this file: the file itself, or an Office file's PDF rendition. */
+export function previewPdf(file: FileRef): string | null {
+  if (file.kind === 'pdf') return file.url;
+  if (file.kind === 'office') return file.previewPdfUrl ?? null;
+  return null;
+}
+
+/** "0:42", "12:05", "1:02:03". */
+export function formatDuration(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, '0');
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+}
+
+type Load = 'loading' | 'ready' | 'error';
+
+/** True once the element has come near the viewport (at once where that cannot be observed). */
+function useNearViewport<T extends Element>(): [RefObject<T | null>, boolean] {
+  const ref = useRef<T>(null);
+  const [near, setNear] = useState(() => typeof IntersectionObserver === 'undefined');
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || near) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) {
+        setNear(true);
+        observer.disconnect();
+      }
+    }, { rootMargin: '200px' });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [near]);
+  return [ref, near];
+}
+
+/** The first page of a PDF on a sheet of paper, cropped at the bottom of the preview. */
+function PdfPage({ url, onLoad }: { url: string; onLoad: (load: Load) => void }) {
+  const [boxRef, near] = useNearViewport<HTMLSpanElement>();
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!near || !canvas) return;
+    let live = true;
+    renderFirstPage(url, canvas, canvas.clientWidth || 240).then(
+      () => live && onLoad('ready'),
+      () => live && onLoad('error'),
+    );
+    return () => {
+      live = false;
+    };
+  }, [near, url, onLoad]);
+
+  return (
+    <Box
+      component="span"
+      ref={boxRef}
+      sx={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'center', pt: '10%' }}
+    >
+      <Box
+        component="canvas"
+        ref={canvasRef}
+        aria-hidden
+        sx={(theme) => ({
+          display: 'block',
+          width: '78%',
+          height: 'auto',
+          alignSelf: 'flex-start',
+          bgcolor: '#fff',
+          borderRadius: '2px',
+          boxShadow: `0 1px 2px ${alpha(theme.palette.common.black, 0.12)}, 0 4px 12px ${alpha(theme.palette.common.black, 0.08)}`,
+        })}
+      />
+    </Box>
+  );
+}
+
+const FILL_SX = { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' } as const;
+
+function AudioPreview({ file, onLoad }: { file: FileRef; onLoad: (load: Load) => void }) {
+  const [duration, setDuration] = useState<number | null>(null);
+  return (
+    <Centered>
+      <AudioFileOutlined sx={{ fontSize: 36 }} />
+      <Typography component="span" variant="body2" sx={{ fontVariantNumeric: 'tabular-nums', fontWeight: 500 }}>
+        {duration === null ? 'Audio' : formatDuration(duration)}
+      </Typography>
+      <audio
+        preload="metadata"
+        src={file.url}
+        hidden
+        onLoadedMetadata={(e) => {
+          const d = e.currentTarget.duration;
+          // A fresh recording (WebM) reports Infinity until played through; leave the label as "Audio".
+          if (Number.isFinite(d)) setDuration(d);
+          onLoad('ready');
+        }}
+        onError={() => onLoad('ready')}
+      />
+    </Centered>
+  );
+}
+
+function Centered({ children }: { children: ReactNode }) {
+  return (
+    <Box
+      component="span"
+      sx={{
+        position: 'absolute',
+        inset: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 0.5,
+        color: 'text.secondary',
+      }}
+    >
+      {children}
+    </Box>
+  );
+}
+
+/** The type icon and extension, for files with no rendered preview (or one that failed). */
+function TypeTile({ file }: { file: FileRef }) {
+  const ext = extension(file.name);
+  return (
+    <Centered>
+      <FileKindIcon file={file} sx={{ fontSize: 40 }} />
+      {ext && (
+        <Typography component="span" variant="caption" sx={{ fontWeight: 600, letterSpacing: '0.04em' }}>
+          .{ext.toUpperCase()}
+        </Typography>
+      )}
+    </Centered>
+  );
+}
+
+/** The rendered preview inside a tile, by kind; reports when it has painted (or failed). */
+function Preview({ file, load, onLoad }: { file: FileRef; load: Load; onLoad: (load: Load) => void }) {
+  if (load === 'error') return <TypeTile file={file} />;
+  const pdf = previewPdf(file);
+  if (pdf) return <PdfPage url={pdf} onLoad={onLoad} />;
+  switch (file.kind) {
+    case 'image':
+      return (
+        <Box
+          component="img"
+          src={file.url}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          onLoad={() => onLoad('ready')}
+          onError={() => onLoad('error')}
+          sx={FILL_SX}
+        />
+      );
+    case 'video':
+      return (
+        <>
+          <Box
+            component="video"
+            // The frame at 0.1 s stands in for a poster; nothing plays here.
+            src={`${file.url}#t=0.1`}
+            preload="metadata"
+            muted
+            playsInline
+            aria-hidden
+            tabIndex={-1}
+            onLoadedData={() => onLoad('ready')}
+            onError={() => onLoad('error')}
+            sx={FILL_SX}
+          />
+          <Box
+            component="span"
+            sx={(theme) => ({
+              position: 'absolute',
+              left: '50%',
+              top: '50%',
+              width: 44,
+              height: 44,
+              m: '-22px 0 0 -22px',
+              borderRadius: '50%',
+              display: 'grid',
+              placeItems: 'center',
+              color: theme.palette.common.white,
+              bgcolor: alpha(theme.palette.common.black, 0.55),
+              boxShadow: `0 2px 8px ${alpha(theme.palette.common.black, 0.25)}`,
+            })}
+          >
+            <PlayArrowRounded sx={{ fontSize: 28 }} />
+          </Box>
+        </>
+      );
+    case 'audio':
+      return <AudioPreview file={file} onLoad={onLoad} />;
+    default:
+      return <TypeTile file={file} />;
+  }
+}
+
+/** Kinds whose preview paints something that takes a moment to arrive (shown over a skeleton). */
+function hasRenderedPreview(file: FileRef): boolean {
+  return previewPdf(file) !== null || file.kind === 'image' || file.kind === 'video';
+}
+
+const tileSx = (theme: Theme) => ({
+  width: '100%',
+  height: '100%',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'stretch',
+  textAlign: 'left',
+  overflow: 'hidden',
+  borderRadius: `${theme.yungu.shape.medium}px`,
+  border: `1px solid ${theme.yungu.color.outlineVariant}`,
+  bgcolor: theme.yungu.color.surfaceContainerLowest,
+  transition: theme.transitions.create(['border-color', 'box-shadow'], { duration: theme.transitions.duration.shorter }),
+  '& .thumb-media': {
+    transition: theme.transitions.create('transform', { duration: theme.transitions.duration.standard, easing: 'cubic-bezier(0.2, 0, 0, 1)' }),
+  },
+  '@media (hover: hover)': {
+    '&:hover': {
+      borderColor: theme.yungu.color.outline,
+      boxShadow: `0 1px 2px ${alpha(theme.palette.common.black, 0.06)}, 0 4px 12px ${alpha(theme.palette.common.black, 0.06)}`,
+      '& .thumb-media': { transform: 'scale(1.03)' },
+    },
+  },
+  '&.Mui-focusVisible': { outline: `2px solid ${theme.palette.primary.main}`, outlineOffset: '2px' },
+  '@media (prefers-reduced-motion: reduce)': {
+    transition: 'none',
+    '& .thumb-media': { transition: 'none' },
+    '&:hover .thumb-media': { transform: 'none' },
+  },
+});
+
+/**
+ * One file as a tile: a rendered preview (a PDF's first page, the image, a frame of the video, an
+ * audio icon with its length, or the type icon) over its name and "PDF · 75 MB". A skeleton holds the
+ * space while the preview loads; the type icon takes over if it fails. The whole tile opens the file.
+ */
+export default function FileThumb({ file, onOpen }: { file: FileRef; onOpen: () => void }) {
+  const [state, setState] = useState<{ key: string; load: Load }>({ key: '', load: 'loading' });
+  const key = `${file.id}:${previewPdf(file) ?? file.url}`;
+  const load = state.key === key ? state.load : 'loading';
+  const onLoad = useCallback((next: Load) => setState({ key, load: next }), [key]);
+
+  return (
+    <ButtonBase onClick={onOpen} data-file-id={file.id} sx={tileSx}>
+      <Box
+        component="span"
+        sx={{
+          position: 'relative',
+          display: 'block',
+          aspectRatio: '4 / 3',
+          overflow: 'hidden',
+          bgcolor: (theme) => alpha(theme.palette.text.primary, 0.05),
+          borderBottom: 1,
+          borderColor: (theme) => theme.yungu.color.outlineVariant,
+        }}
+      >
+        <Box component="span" className="thumb-media" sx={{ position: 'absolute', inset: 0, display: 'block' }}>
+          <Preview file={file} load={load} onLoad={onLoad} />
+        </Box>
+        {load === 'loading' && hasRenderedPreview(file) && (
+          <Skeleton variant="rectangular" animation="wave" sx={{ position: 'absolute', inset: 0, height: '100%', transform: 'none' }} />
+        )}
+      </Box>
+      <Box component="span" sx={{ display: 'block', px: 1.5, pt: 1.25, pb: 1.5 }}>
+        <Typography
+          component="span"
+          variant="body2"
+          title={file.name}
+          sx={{
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+            overflowWrap: 'anywhere',
+            fontWeight: 500,
+            lineHeight: 1.4,
+          }}
+        >
+          {file.name}
+        </Typography>
+        <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
+          {fileCaption(file)}
+        </Typography>
+      </Box>
+    </ButtonBase>
+  );
+}
