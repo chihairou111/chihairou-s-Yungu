@@ -173,11 +173,14 @@ def comment(raw: dict, me: int) -> dict:
 
 
 # --------------------------------------------------------------------- detail
-def is_submitted(mixed: dict, achievement: dict) -> bool:
+def achievement_status(mixed: dict, achievement: dict) -> Optional[int]:
+    """The student's status on the task: the achievement's, else the task-level one (None if neither)."""
     status_id = achievement.get("achievementStatus")
-    if status_id is None:
-        status_id = mixed.get("doTaskStatusId")
-    return status_id == ACHIEVEMENT_SUBMITTED
+    return mixed.get("doTaskStatusId") if status_id is None else status_id
+
+
+def is_submitted(mixed: dict, achievement: dict) -> bool:
+    return achievement_status(mixed, achievement) == ACHIEVEMENT_SUBMITTED
 
 
 def handed_in_ids(mixed: dict, achievement: dict, submitted_ids: Optional[List[str]]) -> List[str]:

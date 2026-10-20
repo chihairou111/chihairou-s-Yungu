@@ -8,6 +8,7 @@ from api/, with YUNGU_STATE_DIR (default /var/lib/yungu-lms).
 import logging
 import mimetypes
 import os
+import re
 import threading
 import time
 from datetime import datetime
@@ -23,7 +24,7 @@ from starlette.exceptions import HTTPException
 from starlette.requests import ClientDisconnect
 
 import mapping
-from yungu_task import CST, ONLINE_DOC_MAX_BYTES, SUBMITTED, TODO, YunguError, YunguTask
+from yungu_task import ACHIEVEMENT_NOT_SUBMITTED, CST, ONLINE_DOC_MAX_BYTES, SUBMITTED, TODO, YunguError, YunguTask
 
 from .auth import Auth
 from .cache import ReadCache
@@ -39,6 +40,7 @@ T = TypeVar("T")
 BLANK_CREDENTIALS = "Enter your student ID and password."
 UNKNOWN_TASK = 1035          # Yungu's answer (HTTP 200, JSON code 1035) for a taskPublishId that does not exist
 DOC_TOO_LONG = 1008          # Yungu's answer (HTTP 200, JSON code 1008) for an online document over the limit
+                             # (its message is only "system error", so under the limit it means something else)
 # Per socket operation (connect, each read) of every Yungu call. The client's own default (60 s) let a
 # stalled Yungu hold a page for minutes: a cold Submitted list is several sequential page calls and a
 # login is five calls under the login lock other requests wait on. The OSS upload keeps its own
@@ -53,6 +55,8 @@ NO_TITLE = "Give the document a title."
 HANDED_IN_DOC = "This document was handed in — save it as a new one."
 ADD_A_FILE = "Add at least one file."
 NOT_CONFIRMED = "Yungu didn't confirm the hand-in. Check on Yungu."
+DOC_NOT_SAVED = "Yungu couldn't save the document. Try again."
+ASCII_ID = re.compile(r"[0-9]+")
 
 
 class NotFound(ServiceError):
@@ -96,7 +100,7 @@ class DocTooLong(ServiceError):
         size, chars = len(content.encode("utf-8")), len(content)
         excess = size - ONLINE_DOC_MAX_BYTES
         n = max(1, -(-excess * chars // size)) if size else 1          # ceil, without floats
-        super().__init__(f"Too long for Yungu — cut about {n} characters.")
+        super().__init__(f"Too long for Yungu — cut about {n} character{'' if n == 1 else 's'}.")
 
 
 class Conflict(ServiceError):
@@ -104,6 +108,14 @@ class Conflict(ServiceError):
 
     def __init__(self, message: str):
         super().__init__(message)
+
+
+class DocNotSaved(ServiceError):
+    """Yungu refused an online document that is within the limit (code 1008 not about length)."""
+    status = 502
+
+    def __init__(self):
+        super().__init__(DOC_NOT_SAVED)
 
 
 class NotConfirmed(ServiceError):
@@ -174,12 +186,17 @@ def _known(lookup: Callable[[], T]) -> T:
 
 
 def _doc_write(write: Callable[[], T], content: str) -> T:
-    """Run an online-document create/update; Yungu's "too long" answer (code 1008) becomes the 413."""
+    """Run an online-document create/update. Yungu's code 1008 is its "too long" answer, but content over
+    the limit is refused before any call (_checked_doc), so here it cannot be about length: a 502 that
+    says the save failed, logged by code only."""
     try:
         return write()
     except YunguError as e:
         if error_code(e) == DOC_TOO_LONG:
-            raise DocTooLong(content) from None
+            if len(content.encode("utf-8")) > ONLINE_DOC_MAX_BYTES:
+                raise DocTooLong(content) from None
+            log.warning("online document refused by Yungu: code=%d", DOC_TOO_LONG)
+            raise DocNotSaved() from None
         raise
 
 
@@ -382,8 +399,9 @@ class Service:
         with self._marking:
             try:
                 mixed, achievement = self._fresh(aid)
-                if (mapping.needs_files(mixed, achievement) or mapping.is_submitted(mixed, achievement)
-                        or achievement.get("fileModelList")):
+                # Only "not yet submitted" (status 1): an unknown or any other status is never marked.
+                if (mapping.needs_files(mixed, achievement) or achievement.get("fileModelList")
+                        or mapping.achievement_status(mixed, achievement) != ACHIEVEMENT_NOT_SUBMITTED):
                     raise BadRequest(ADD_A_FILE)
                 task_id = achievement.get("taskId") or mixed.get("taskId")
                 if not task_id:
@@ -585,7 +603,7 @@ def create_app(state_dir: Optional[str] = None, client_factory=yungu_client,
 
     @app.put("/assignments/{assignment_id}/online-docs/{file_id}", dependencies=authed)
     def update_doc(assignment_id: int, file_id: str, body: OnlineDocBody):
-        if not file_id.isdigit():
+        if not ASCII_ID.fullmatch(file_id):
             raise NotFound()
         return service.update_doc(assignment_id, int(file_id), body.title, body.content)
 

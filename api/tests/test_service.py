@@ -1185,7 +1185,7 @@ def delta_of_bytes(n):
 def cut_message(content):
     size, chars = len(content.encode("utf-8")), len(content)
     n = max(1, math.ceil((size - 65535) * chars / size))
-    return f"Too long for Yungu — cut about {n} characters."
+    return f"Too long for Yungu — cut about {n} character{'' if n == 1 else 's'}."
 
 
 def code_1008():
@@ -1262,18 +1262,27 @@ def test_the_cut_count_for_an_all_cjk_text_is_the_excess_in_characters(api, worl
     assert r.json() == {"error": "Too long for Yungu — cut about 155 characters."}
     # Just over the limit: at least one character, never zero.
     r = api.post("/assignments/94929/online-docs", json={"title": "长文", "content": "研" * 21846}, headers=auth)
-    assert r.json() == {"error": "Too long for Yungu — cut about 1 characters."}
+    assert r.json() == {"error": "Too long for Yungu — cut about 1 character."}
     assert world.calls == []
+
+
+def test_the_cut_count_is_plural_from_two(api, world, auth):
+    # 21 847 CJK characters = 65 541 bytes, 6 over: 2 characters.
+    r = api.post("/assignments/94929/online-docs", json={"title": "长文", "content": "研" * 21847}, headers=auth)
+    assert r.json() == {"error": "Too long for Yungu — cut about 2 characters."}
 
 
 @pytest.mark.parametrize("method,path", [
     ("POST", "/assignments/94929/online-docs"), ("PUT", "/assignments/94929/online-docs/11130500")])
-def test_yungus_code_1008_is_the_same_413(api, world, auth, method, path):
+def test_yungus_code_1008_under_the_limit_is_a_502_not_too_long(api, world, auth, method, path, caplog):
+    # Over the limit never reaches Yungu (the 413 above), so a 1008 here is not about length.
     world.doc_error = code_1008()
-    content = delta_of_bytes(60000)
+    content = delta_of_bytes(65535)
+    caplog.set_level("DEBUG")
     r = api.request(method, path, json={"title": "长文", "content": content}, headers=auth)
-    assert r.status_code == 413 and r.json() == {"error": "Too long for Yungu — cut about 1 characters."}
+    assert r.status_code == 502 and r.json() == {"error": "Yungu couldn't save the document. Try again."}
     assert len(writes(world)) == 1                                   # not retried
+    assert "1008" in caplog.text and "system error" not in caplog.text and "研" not in caplog.text
 
 
 def test_other_yungu_failures_on_a_document_are_a_502(api, world, auth):
@@ -1314,9 +1323,10 @@ def test_updating_a_document_of_an_unknown_assignment_is_a_404(api, world, auth)
     assert r.status_code == 404 and writes(world) == []
 
 
-def test_a_bad_document_id_is_a_404(api, world, auth):
-    r = api.put("/assignments/94929/online-docs/abc", json={"title": "t", "content": DELTA}, headers=auth)
-    assert r.status_code == 404 and world.calls == []
+@pytest.mark.parametrize("file_id", ["abc", "²", "١٢٣", "12a"])
+def test_a_bad_document_id_is_a_404(api, world, auth, file_id):
+    r = api.put(f"/assignments/94929/online-docs/{file_id}", json={"title": "t", "content": DELTA}, headers=auth)
+    assert r.status_code == 404 and r.json() == {"error": "Not found."} and world.calls == []
 
 
 @pytest.mark.parametrize("body", [{"title": "t"}, {"content": DELTA}, {"title": 1, "content": DELTA},
@@ -1339,6 +1349,22 @@ def test_mark_as_submitted_hands_in_with_no_files(api, world, auth):
     assert writes(world) == [("mark_submitted", (ach["taskId"],))]
     d = api.get("/assignments/94929", headers=auth).json()
     assert d["submitted"] is True and d["submittedFileIds"] == [] and d["myFiles"] == []
+
+
+def test_mark_as_submitted_falls_back_to_the_task_status(api, world, auth):
+    world.ach[94929]["achievementStatus"] = None                      # mixed doTaskStatusId is 1
+    assert world.mixed[94929]["doTaskStatusId"] == 1
+    orig = FakeClient.mark_submitted
+
+    def confirming(self, task_id):
+        orig(self, task_id)
+        world.ach[94929]["achievementStatus"] = 4
+    FakeClient.mark_submitted = confirming
+    try:
+        r = api.post("/assignments/94929/submit", json={"fileIds": []}, headers=auth)
+    finally:
+        FakeClient.mark_submitted = orig
+    assert r.status_code == 200 and world.count("mark_submitted") == 1
 
 
 def test_mark_as_submitted_reads_the_status_again_after_the_call(api, world, auth):
@@ -1415,9 +1441,19 @@ def test_two_concurrent_mark_as_submitted_requests_send_one(api, world, auth):
     {"needEnclosure": True},                                             # a file is required
     {"needEnclosure": None},                                             # unknown: treated as required
     {"achievementStatus": 4},                                            # already submitted
+    {"achievementStatus": 2},                                            # any status but 1
+    {"achievementStatus": None, "mixedStatus": None},                    # unknown status
+    {"achievementStatus": None, "mixedStatus": 4},                       # task-level status says submitted
     {"fileModelList": [{"fileId": 11128687, "fileName": "draft.txt", "type": "file"}]},   # draft has files
 ])
 def test_any_other_empty_submit_is_a_400_without_a_yungu_write(api, world, auth, change):
+    change = dict(change)
+    if "mixedStatus" in change:
+        mixed_status = change.pop("mixedStatus")
+        if mixed_status is None:
+            world.mixed[94929].pop("doTaskStatusId")
+        else:
+            world.mixed[94929]["doTaskStatusId"] = mixed_status
     world.ach[94929].update(change)
     if "needEnclosure" in change:
         world.mixed[94929].pop("needEnclosure")
