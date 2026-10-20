@@ -44,7 +44,8 @@ class StateDir:
 
 
 class SubmittedFiles:
-    """Per assignment, the file ids handed in at the last submit made through the service.
+    """Per assignment, the file ids of the last hand-in the service saw: a submit made through it, or a
+    Yungu read showing the hand-in (submitted, no draft open), which also catches one made on Yungu.
 
     Yungu's getAchievementDetail has one file list (`fileModelList`, the draft), so it cannot say
     which files were handed in once the draft is edited after a submit; this list can."""

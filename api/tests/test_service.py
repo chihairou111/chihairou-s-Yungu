@@ -1091,6 +1091,7 @@ def test_submitted_file_ids_are_kept_per_assignment_across_restarts(make, api, w
     api.post("/assignments/93251/submit", json={"fileIds": ["11128687"]}, headers=auth)
     world.ach[93251]["fileModelList"].append({**world.ach[93251]["fileModelList"][0], "fileId": 11128999,
                                               "fileName": "draft.txt"})      # draft edited after the hand-in
+    world.ach[93251]["ifEditStatus"] = True
     d = api.get("/assignments/93251", headers=auth).json()
     assert d["submittedFileIds"] == ["11128687"] and [f["id"] for f in d["myFiles"]] == ["11128687", "11128999"]
     assert mode(state_dir / "submitted-files.json") == 0o600
@@ -1302,6 +1303,7 @@ def test_a_handed_in_document_is_never_updated_in_place(api, world, auth):
 
 def test_the_kept_hand_in_list_decides_what_was_handed_in(api, world, auth):
     api.post("/assignments/93251/submit", json={"fileIds": ["11128687"]}, headers=auth)
+    world.ach[93251]["ifEditStatus"] = True                         # a draft is open after the hand-in
     world.calls.clear()
     r = api.put("/assignments/93251/online-docs/11128687", json={"title": "t", "content": DELTA}, headers=auth)
     assert r.status_code == 409 and writes(world) == []
@@ -1309,6 +1311,52 @@ def test_the_kept_hand_in_list_decides_what_was_handed_in(api, world, auth):
     r = api.put("/assignments/93251/online-docs/11130777", json={"title": "t", "content": DELTA}, headers=auth)
     assert r.status_code == 200 and r.json()["id"] == "11130777"
     assert writes(world) == [("update_online_doc", (11130777, "t", DELTA, world.ach[93251]["achievementId"]))]
+
+
+def online_doc(file_id, title="研究计划"):
+    return {"fileId": file_id, "fileName": title, "type": "onlineDocument", "storeMeta": DELTA, "url": None,
+            "fileCreateTime": "2026-10-19 22:00:00"}
+
+
+def test_a_hand_in_made_on_yungu_is_remembered_once_a_draft_replaces_a_document(api, world, auth):
+    # Handed in on task.yungu.org (no kept list): status 4, no draft open, so the files are the hand-in.
+    ach = world.ach[93251]
+    ach["fileModelList"] = [online_doc(11130300), *ach["fileModelList"]]
+    assert ach["ifEditStatus"] is False
+    assert api.get("/assignments/93251", headers=auth).json()["submittedFileIds"] == ["11130300", "11128687"]
+    # The writer saves the edited document as a new one, which replaces it in the draft.
+    ach["fileModelList"] = [online_doc(11130501), ach["fileModelList"][1]]
+    ach["ifEditStatus"] = True
+    d = api.get("/assignments/93251", headers={**auth, "X-Refresh": "1"}).json()
+    assert d["submittedFileIds"] == ["11130300", "11128687"]                    # changed: needs Update
+    assert [f["id"] for f in d["myFiles"]] == ["11130501", "11128687"]
+    world.calls.clear()
+    r = api.put("/assignments/93251/online-docs/11130300", json={"title": "t", "content": DELTA}, headers=auth)
+    assert r.status_code == 409 and writes(world) == []
+
+
+def test_a_later_hand_in_on_yungu_replaces_the_kept_list(api, world, auth):
+    api.post("/assignments/93251/submit", json={"fileIds": ["11128687"]}, headers=auth)
+    # Later, on Yungu's website: document 11130300 added and handed in (no draft open).
+    ach = world.ach[93251]
+    ach["fileModelList"] = [online_doc(11130300), *ach["fileModelList"]]
+    world.calls.clear()
+    r = api.put("/assignments/93251/online-docs/11130300", json={"title": "t", "content": DELTA}, headers=auth)
+    assert r.status_code == 409 and writes(world) == []
+    # A draft opened afterwards still knows the document is with the teacher.
+    ach["ifEditStatus"] = True
+    r = api.put("/assignments/93251/online-docs/11130300", json={"title": "t", "content": DELTA}, headers=auth)
+    assert r.status_code == 409 and writes(world) == []
+    d = api.get("/assignments/93251", headers={**auth, "X-Refresh": "1"}).json()
+    assert d["submittedFileIds"] == ["11130300", "11128687"]
+
+
+def test_with_a_draft_open_and_no_kept_list_every_current_document_counts_as_handed_in(api, world, auth):
+    ach = world.ach[93251]
+    ach["fileModelList"] = [online_doc(11130300), *ach["fileModelList"]]
+    ach["ifEditStatus"] = True                                           # unsure what the teacher has
+    r = api.put("/assignments/93251/online-docs/11130300", json={"title": "t", "content": DELTA}, headers=auth)
+    assert r.status_code == 409 and writes(world) == []
 
 
 def test_the_hand_in_check_reads_yungu_not_the_cache(api, world, auth):
@@ -1458,16 +1506,17 @@ def test_two_concurrent_mark_as_submitted_requests_send_one(api, world, auth):
     first.join(10)
     second.join(10)
     assert world.count("mark_submitted") == 1
-    assert sorted(r.status_code for r in results) == [200, 400]
+    assert sorted(r.status_code for r in results) == [200, 200]           # the second finds it marked
 
 
 @pytest.mark.parametrize("change", [
     {"needEnclosure": True},                                             # a file is required
     {"needEnclosure": None},                                             # unknown: treated as required
-    {"achievementStatus": 4},                                            # already submitted
+    {"achievementStatus": 4, "ifEditStatus": True},                      # submitted, draft emptied since
+    {"achievementStatus": 4, "ifEditStatus": None},                      # submitted, draft state unknown
     {"achievementStatus": 2},                                            # any status but 1
     {"achievementStatus": None, "mixedStatus": None},                    # unknown status
-    {"achievementStatus": None, "mixedStatus": 4},                       # task-level status says submitted
+    {"achievementStatus": None, "mixedStatus": 4, "ifEditStatus": True},  # task-level status says submitted
     {"fileModelList": [{"fileId": 11128687, "fileName": "draft.txt", "type": "file"}]},   # draft has files
 ])
 def test_any_other_empty_submit_is_a_400_without_a_yungu_write(api, world, auth, change):
@@ -1487,7 +1536,7 @@ def test_any_other_empty_submit_is_a_400_without_a_yungu_write(api, world, auth,
 
 
 def test_an_empty_submit_on_a_submitted_assignment_with_no_files_is_a_400(api, world, auth):
-    world.ach[93251]["fileModelList"] = []
+    world.ach[93251].update(fileModelList=[], ifEditStatus=True)       # the draft emptied after a hand-in
     r = api.post("/assignments/93251/submit", json={"fileIds": []}, headers=auth)
     assert r.status_code == 400 and r.json() == {"error": ADD_A_FILE} and writes(world) == []
 
@@ -1496,7 +1545,45 @@ def test_the_mark_as_submitted_check_reads_yungu_not_the_cache(api, world, auth)
     api.get("/assignments/94929", headers=auth)                     # cached as not submitted, no files
     world.ach[94929]["achievementStatus"] = 4
     r = api.post("/assignments/94929/submit", json={"fileIds": []}, headers=auth)
-    assert r.status_code == 400 and writes(world) == []
+    assert r.status_code == 200 and writes(world) == []                  # already marked: nothing sent
+
+
+def test_a_mark_yungu_already_applied_answers_success_without_a_second_mark(api, world, auth):
+    # The first press reached Yungu but its answer timed out; the next press finds it marked.
+    world.ach[94929]["achievementStatus"] = 4
+    assert world.ach[94929]["ifEditStatus"] is False and not world.ach[94929]["fileModelList"]
+    r = api.post("/assignments/94929/submit", json={"fileIds": []}, headers=auth)
+    assert r.status_code == 200 and r.json() == {"submittedAt": int(NOW * 1000)}
+    assert writes(world) == []
+    assert api.get("/assignments/94929", headers=auth).json()["submittedFileIds"] == []
+
+
+def test_a_mark_whose_answer_was_lost_answers_success_on_the_next_press_even_with_a_draft_open(api, world, auth):
+    world.ach[94929]["ifEditStatus"] = True                       # 94929 had a stale empty draft open
+    orig = FakeClient.mark_submitted
+
+    def applied_then_lost(self, task_id):
+        orig(self, task_id)                                        # Yungu applies the mark ...
+        raise requests.ReadTimeout("read timed out")               # ... but its answer never arrives
+    FakeClient.mark_submitted = applied_then_lost
+    try:
+        first = api.post("/assignments/94929/submit", json={"fileIds": []}, headers=auth)
+    finally:
+        FakeClient.mark_submitted = orig
+    assert first.status_code == 502 and world.ach[94929]["achievementStatus"] == 4
+    second = api.post("/assignments/94929/submit", json={"fileIds": []}, headers=auth)
+    assert second.status_code == 200 and second.json() == {"submittedAt": int(NOW * 1000)}
+    assert world.count("mark_submitted") == 1
+
+
+def test_an_already_applied_mark_answers_yungus_hand_in_time_when_listed(api, world, auth):
+    world.ach[94929]["achievementStatus"] = 4
+    row = {**world.lists[SUBMITTED][0], "taskPublishId": 94929, "modifiedTime": "2026-10-20 09:30:00"}
+    world.lists[SUBMITTED].insert(0, row)
+    r = api.post("/assignments/94929/submit", json={"fileIds": []}, headers=auth)
+    listed = next(a for a in api.get("/submitted", headers=auth).json() if a["id"] == 94929)
+    assert r.status_code == 200 and r.json() == {"submittedAt": listed["submittedAt"]}
+    assert writes(world) == []
 
 
 def test_mark_as_submitted_on_an_unknown_assignment_is_a_404(api, world, auth):

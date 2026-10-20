@@ -354,7 +354,15 @@ class Service:
         comments = self.yungu.call(lambda c: c.comments(aid))
         me = self.yungu.call(lambda c: c.user_id)
         listed = self._listed(aid, achievement.get("achievementStatus") == mapping.ACHIEVEMENT_SUBMITTED)
+        self._note_hand_in(aid, mixed, achievement)
         return mapping.detail(mixed, achievement, comments, me, self.submitted.get(aid), listed=listed)
+
+    def _note_hand_in(self, aid: int, mixed: dict, achievement: dict) -> None:
+        """Keep Yungu's hand-in whenever a read shows it (submitted, no draft open): that also covers a
+        hand-in made on Yungu's website, which the service never saw."""
+        shown = mapping.hand_in_on_yungu(mixed, achievement)
+        if shown is not None and self.submitted.get(aid) != shown:
+            self.submitted.put(aid, shown)
 
     def _listed(self, aid: int, submitted: bool) -> Optional[dict]:
         """The task's list row, which alone carries schoolGroup (To-do) and submittedAt (Submitted)."""
@@ -409,6 +417,7 @@ class Service:
         mixed = self.yungu.call(lambda c: _known(lambda: c.task_detail(aid)))
         if not isinstance(mixed, dict) or not mixed.get("taskPublishId"):
             raise NotFound()
+        self._note_hand_in(aid, mixed, achievement)
         return mixed, achievement
 
     def mark_submitted(self, aid: int) -> dict:
@@ -416,29 +425,57 @@ class Service:
         no files is it Yungu's "Mark as submitted" (a real hand-in: the teacher is told); anything else
         is refused with no Yungu write. The call goes through Yungu.call on its own, so the only resend
         is the one after a re-login, when Yungu turned the request away; the lock makes a concurrent
-        second request wait and then find the assignment submitted."""
+        second request wait and then find the assignment submitted. A press that finds it already
+        marked (an earlier answer lost) answers success without sending another."""
         with self._marking:
             try:
                 mixed, achievement = self._fresh(aid)
-                # Only "not yet submitted" (status 1): an unknown or any other status is never marked.
-                if (mapping.needs_files(mixed, achievement) or achievement.get("fileModelList")
-                        or mapping.achievement_status(mixed, achievement) != ACHIEVEMENT_NOT_SUBMITTED):
-                    raise BadRequest(ADD_A_FILE)
-                task_id = achievement.get("taskId") or mixed.get("taskId")
-                if not task_id:
-                    raise Unavailable()
-                answer = self.yungu.call(lambda c: c.mark_submitted(task_id))
-                log.info("Mark as submitted: Yungu answered %s", _shape_text(answer))   # types only (NOTES.md 8)
-                try:
-                    after = self.yungu.call(lambda c: c.achievement(aid))
-                except ServiceError:
-                    raise NotConfirmed() from None
-                if not isinstance(after, dict) or not mapping.is_submitted(mixed, after):
-                    raise NotConfirmed()
+                # An earlier press reached Yungu but its answer (or the re-read) was lost: no second mark.
+                already = self._already_marked(aid, mixed, achievement)
+                if not already:
+                    self._mark(aid, mixed, achievement)
             finally:
                 self.cache.clear()
-            self.submitted.put(aid, [])
+        if already:
+            return {"submittedAt": self._hand_in_time(aid)}
         return {"submittedAt": self.now_ms()}
+
+    def _mark(self, aid: int, mixed: dict, achievement: dict) -> None:
+        # Only "not yet submitted" (status 1): an unknown or any other status is never marked.
+        if (mapping.needs_files(mixed, achievement) or achievement.get("fileModelList")
+                or mapping.achievement_status(mixed, achievement) != ACHIEVEMENT_NOT_SUBMITTED):
+            raise BadRequest(ADD_A_FILE)
+        task_id = achievement.get("taskId") or mixed.get("taskId")
+        if not task_id:
+            raise Unavailable()
+        # Kept before sending: should Yungu apply the mark but its answer be lost, the next
+        # press then knows the hand-in is empty (see _already_marked).
+        self.submitted.put(aid, [])
+        answer = self.yungu.call(lambda c: c.mark_submitted(task_id))
+        log.info("Mark as submitted: Yungu answered %s", _shape_text(answer))   # types only (NOTES.md 8)
+        try:
+            after = self.yungu.call(lambda c: c.achievement(aid))
+        except ServiceError:
+            raise NotConfirmed() from None
+        if not isinstance(after, dict) or not mapping.is_submitted(mixed, after):
+            raise NotConfirmed()
+
+    def _already_marked(self, aid: int, mixed: dict, achievement: dict) -> bool:
+        """Handed in with no files and none required: Yungu shows an empty hand-in (no draft open), or
+        the kept list says the dashboard marked it. An emptied draft after a hand-in with files is not."""
+        if (mapping.needs_files(mixed, achievement) or achievement.get("fileModelList")
+                or not mapping.is_submitted(mixed, achievement)):
+            return False
+        return mapping.hand_in_on_yungu(mixed, achievement) == [] or self.submitted.get(aid) == []
+
+    def _hand_in_time(self, aid: int) -> int:
+        """Yungu's hand-in time from the Submitted list when it has the row, else now."""
+        try:
+            row = self._listed(aid, True)
+        except ServiceError:
+            row = None
+        at = (row or {}).get("submittedAt")
+        return at if isinstance(at, int) else self.now_ms()
 
     def _doc_ref(self, content: Optional[dict], title: str, delta: str, file_id: Optional[int] = None) -> dict:
         raw = {**(content or {}), "type": mapping.ONLINE_DOCUMENT_TYPE}

@@ -281,11 +281,31 @@ def test_detail_of_a_todo_assignment(load):
 
 def test_detail_uses_the_service_kept_submitted_ids(load):
     ach = load("achievement_93251.json")
+    ach["ifEditStatus"] = True                                # a draft differs from the hand-in
     d = mapping.detail(load("mixed_93251.json"), ach, [], ME, ["1", "2"])
     assert d["submittedFileIds"] == ["1", "2"]
     ach["achievementStatus"] = 1
     d = mapping.detail(load("mixed_93251.json"), ach, [], ME, ["1", "2"])
     assert d["submitted"] is False and d["submittedFileIds"] == []        # empty before the first hand-in
+
+
+def test_with_no_draft_open_yungus_file_list_is_the_hand_in(load):
+    ach = load("achievement_93251.json")
+    assert ach["ifEditStatus"] is False and ach["achievementStatus"] == 4
+    d = mapping.detail(load("mixed_93251.json"), ach, [], ME, ["1", "2"])        # a stale kept list
+    assert d["submittedFileIds"] == ["11128687"]
+    assert mapping.hand_in_on_yungu(load("mixed_93251.json"), ach) == ["11128687"]
+
+
+@pytest.mark.parametrize("change", [{"ifEditStatus": True}, {"ifEditStatus": None}, {"achievementStatus": 1}])
+def test_yungu_shows_no_hand_in_while_a_draft_is_open_or_before_one(load, change):
+    ach = {**load("achievement_93251.json"), **change}
+    assert mapping.hand_in_on_yungu(load("mixed_93251.json"), ach) is None
+
+
+def test_with_a_draft_open_and_no_kept_list_every_current_file_counts_as_handed_in(load):
+    ach = {**load("achievement_93251.json"), "ifEditStatus": True}
+    assert mapping.detail(load("mixed_93251.json"), ach, [], ME, None)["submittedFileIds"] == ["11128687"]
 
 
 def test_detail_comments_are_oldest_first(load):

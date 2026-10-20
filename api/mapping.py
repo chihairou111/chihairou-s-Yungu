@@ -183,11 +183,24 @@ def is_submitted(mixed: dict, achievement: dict) -> bool:
     return achievement_status(mixed, achievement) == ACHIEVEMENT_SUBMITTED
 
 
+def hand_in_on_yungu(mixed: dict, achievement: dict) -> Optional[List[str]]:
+    """What the teacher has, when Yungu's own read says so: once submitted and with no draft open
+    (`ifEditStatus` false), `fileModelList` IS the hand-in. None while a draft differs from it
+    (`ifEditStatus` true or unknown) or before a hand-in."""
+    if not is_submitted(mixed, achievement) or achievement.get("ifEditStatus") is not False:
+        return None
+    return [str(f["fileId"]) for f in achievement.get("fileModelList") or []]
+
+
 def handed_in_ids(mixed: dict, achievement: dict, submitted_ids: Optional[List[str]]) -> List[str]:
-    """File ids with the teacher: none before a hand-in; the kept list of the last dashboard submit,
-    or (unknown) the current files."""
+    """File ids with the teacher: none before a hand-in; Yungu's list when no draft is open; else the
+    kept list (the last hand-in the service saw), or, unknown, every current file (when unsure, a
+    file counts as handed in)."""
     if not is_submitted(mixed, achievement):
         return []
+    shown = hand_in_on_yungu(mixed, achievement)
+    if shown is not None:
+        return shown
     if submitted_ids is None:
         return [str(f["fileId"]) for f in achievement.get("fileModelList") or []]
     return list(submitted_ids)
@@ -207,8 +220,8 @@ def detail(mixed: dict, achievement: dict, comments: List[dict], me: int,
            submitted_ids: Optional[List[str]], listed: Optional[dict] = None) -> dict:
     """getMixedPublishDetail + getAchievementDetail + comments -> AssignmentDetail.
 
-    `submitted_ids`: file ids handed in at the last submit made through the dashboard, or None when
-    unknown (then the current files stand in for it once submitted). `listed`: the mapped list
+    `submitted_ids`: the kept hand-in list (the last hand-in the service saw), or None when unknown;
+    Yungu's own list wins whenever no draft is open (see handed_in_ids). `listed`: the mapped list
     Assignment for the same task, if the caller has it, which supplies schoolGroup and submittedAt
     (the detail endpoints carry neither). `instructionsHtml` is raw; Next sanitises it."""
     submitted = is_submitted(mixed, achievement)
