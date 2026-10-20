@@ -62,4 +62,23 @@ describe('writer schema: kept but not offered', () => {
       ],
     });
   });
+
+  it('pasted data-quill-* attributes can’t write formats the writer owns', () => {
+    editor = new Editor({ extensions: WRITER_EXTENSIONS });
+    editor.view.pasteHTML(
+      `<p><span data-quill-inline='{"link":"javascript:alert(1)","bold":false,"color":"\\"><script>alert(1)</script>"}'>click</span>` +
+        `<span data-quill-inline='{"link":"https://evil.example","italic":true}'>only owned</span></p>` +
+        `<p data-quill-block='{"list":"bullet","indent":1}'>para</p>` +
+        `<p data-quill-block='{"header":1,"blockquote":true,"align":"center"}'>two</p>`,
+      new Event('paste') as ClipboardEvent,
+    );
+    const { ops } = saved();
+    expect(ops).toEqual([
+      { attributes: { color: '"><script>alert(1)</script>' }, insert: 'click' },
+      { insert: 'only owned\npara' },
+      { attributes: { indent: 1 }, insert: '\n' },
+      { insert: 'two\n' },
+    ]);
+    expect(editor.getJSON().content?.map((n) => n.type)).toEqual(['paragraph', 'paragraph', 'paragraph']);
+  });
 });

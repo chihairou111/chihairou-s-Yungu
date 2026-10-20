@@ -30,6 +30,20 @@ const ALIGNMENTS = ['center', 'right', 'justify'];
 /** Inline marks with a Quill attribute of the same name and the value `true`. */
 const FLAG_MARKS = ['bold', 'italic', 'underline', 'strike'] as const;
 
+/**
+ * Attributes the writer edits itself. A passthrough never carries them, whatever their value: what is saved
+ * is what the writer shows, and a link always goes through the Link mark's address check.
+ */
+export const OWNED_INLINE_ATTRIBUTES = [...FLAG_MARKS, 'link'] as const;
+export const OWNED_LINE_ATTRIBUTES = ['header', 'list', 'bullet', 'blockquote', 'align'] as const;
+
+/** A passthrough object without the attributes the writer owns, or null when nothing else is left. */
+export function passthroughOf(value: unknown, owned: readonly string[]): Attributes | null {
+  if (!isObject(value)) return null;
+  const rest = Object.fromEntries(Object.entries(value).filter(([key]) => !owned.includes(key)));
+  return Object.keys(rest).length ? rest : null;
+}
+
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isEmpty = (o: object) => Object.keys(o).length === 0;
 
@@ -152,7 +166,7 @@ function classify(attrs: Attributes): Pick<TextLine, 'block' | 'align' | 'rest'>
     align = attrs.align;
     delete rest.align;
   }
-  return { block, align, rest: isEmpty(rest) ? null : rest };
+  return { block, align, rest: passthroughOf(rest, OWNED_LINE_ATTRIBUTES) };
 }
 
 function toLines(delta: Delta): Line[] {
@@ -213,7 +227,8 @@ function marksOf(attributes?: Attributes): JSONContent['marks'] {
     marks.push({ type: 'link', attrs: { href: rest.link } });
     delete rest.link;
   }
-  if (!isEmpty(rest)) marks.push({ type: INLINE_PASSTHROUGH, attrs: { attributes: rest } });
+  const passthrough = passthroughOf(rest, OWNED_INLINE_ATTRIBUTES);
+  if (passthrough) marks.push({ type: INLINE_PASSTHROUGH, attrs: { attributes: passthrough } });
   return marks.length ? marks : undefined;
 }
 
@@ -277,8 +292,7 @@ export function docToDelta(doc: JSONContent): { delta: Delta; flattened: boolean
     ops.push(attributes && !isEmpty(attributes) ? { insert, attributes } : { insert });
 
   function lineAttributes(node: JSONContent, ctx: Context): Attributes {
-    const passthrough = node.attrs?.[BLOCK_PASSTHROUGH];
-    const attrs: Attributes = isObject(passthrough) ? { ...passthrough } : {};
+    const attrs: Attributes = { ...passthroughOf(node.attrs?.[BLOCK_PASSTHROUGH], OWNED_LINE_ATTRIBUTES) };
     if (node.type === 'heading' && (node.attrs?.level === 1 || node.attrs?.level === 2)) attrs.header = node.attrs.level;
     if (ctx.list) attrs.list = ctx.list;
     else if (ctx.quote) attrs.blockquote = true;
@@ -290,7 +304,7 @@ export function docToDelta(doc: JSONContent): { delta: Delta; flattened: boolean
   function inlineAttributes(marks: JSONContent['marks']): Attributes | undefined {
     const attrs: Attributes = {};
     for (const mark of marks ?? []) {
-      if (mark.type === INLINE_PASSTHROUGH && isObject(mark.attrs?.attributes)) Object.assign(attrs, mark.attrs.attributes);
+      if (mark.type === INLINE_PASSTHROUGH) Object.assign(attrs, passthroughOf(mark.attrs?.attributes, OWNED_INLINE_ATTRIBUTES));
     }
     for (const mark of marks ?? []) {
       if ((FLAG_MARKS as readonly string[]).includes(mark.type)) attrs[mark.type] = true;

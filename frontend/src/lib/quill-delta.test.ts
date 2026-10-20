@@ -125,8 +125,6 @@ describe('round trip of Yungu-written documents (Review Focus 3)', () => {
         { insert: ' plain ' },
         { attributes: { script: 'sub' }, insert: 'x' },
         { attributes: { indent: 1, list: 'bullet' }, insert: '\n' },
-        { insert: 'Small heading' },
-        { attributes: { header: 3 }, insert: '\n' },
         { insert: 'code' },
         { attributes: { 'code-block': true }, insert: '\n' },
         { insert: 'Quoted heading' },
@@ -137,6 +135,30 @@ describe('round trip of Yungu-written documents (Review Focus 3)', () => {
       ],
     };
     expectEquivalent(throughEditor(delta).delta, delta);
+  });
+
+  it('saves formats it owns as the writer shows them, even with values it can’t show', () => {
+    const delta: Delta = {
+      ops: [
+        { attributes: { bold: false, link: 42, italic: 'yes', color: 'red' }, insert: 'odd' },
+        { attributes: { header: 3 }, insert: '\n' },
+        { insert: 'checked' },
+        { attributes: { list: 'checked' }, insert: '\n' },
+        { insert: 'both' },
+        { attributes: { list: 'bullet', blockquote: true, header: 1 }, insert: '\n' },
+        { insert: 'left' },
+        { attributes: { align: 'left', indent: 1 }, insert: '\n' },
+      ],
+    };
+    expect(throughEditor(delta).delta).toEqual({
+      ops: [
+        { attributes: { color: 'red' }, insert: 'odd' },
+        { insert: '\nchecked\nboth' },
+        { attributes: { list: 'bullet' }, insert: '\n' },
+        { insert: 'left' },
+        { attributes: { indent: 1 }, insert: '\n' },
+      ],
+    });
   });
 
   it('treats a delta with only text after the last newline as a final line', () => {
@@ -155,11 +177,11 @@ describe('the writer’s HTML draft and the clipboard keep what we don’t edit'
       { attributes: { color: '#e60000' }, insert: 'red 红' },
       { attributes: { indent: 1, list: 'bullet' }, insert: '\n' },
       { insert: 'quoted item' },
-      { attributes: { list: 'ordered', blockquote: true }, insert: '\n' },
+      { attributes: { list: 'ordered', direction: 'rtl' }, insert: '\n' },
       { insert: OSS_IMAGE },
       { insert: { file: { url: 'https://x.aliyuncs.com/f.pdf', name: '报告 "a".pdf', uid: 'f' } }, attributes: { width: '50%' } },
       { insert: 'end' },
-      { attributes: { align: 'center', header: 3 }, insert: '\n' },
+      { attributes: { align: 'center', indent: 2 }, insert: '\n' },
     ],
   };
 
@@ -275,6 +297,27 @@ describe('our toolbar’s formats → Yungu delta', () => {
         { insert: 'right' },
         { attributes: { align: 'right' }, insert: '\n' },
         { insert: 'left\n\n' },
+      ],
+    });
+  });
+
+  it('never lets a passthrough set a format the writer owns (Review Focus 5)', () => {
+    const doc: JSONContent = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          attrs: { quillBlock: { list: 'bullet', bullet: true, header: 1, blockquote: true, align: 'center', indent: 2 } },
+          content: [
+            text('click', [{ type: 'quillInline', attrs: { attributes: { link: 'javascript:alert(1)', bold: true, italic: true, underline: true, strike: true, color: 'red' } } }]),
+          ],
+        },
+      ],
+    };
+    expect(docToDelta(doc).delta).toEqual({
+      ops: [
+        { attributes: { color: 'red' }, insert: 'click' },
+        { attributes: { indent: 2 }, insert: '\n' },
       ],
     });
   });

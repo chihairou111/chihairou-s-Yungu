@@ -4,7 +4,16 @@ import Underline from '@tiptap/extension-underline';
 import LinkMark from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
 import TextAlign from '@tiptap/extension-text-align';
-import { BLOCK_PASSTHROUGH, EMBED_NODE, INLINE_PASSTHROUGH, embedKind, embedLabel } from '@/lib/quill-delta';
+import {
+  BLOCK_PASSTHROUGH,
+  EMBED_NODE,
+  INLINE_PASSTHROUGH,
+  OWNED_INLINE_ATTRIBUTES,
+  OWNED_LINE_ATTRIBUTES,
+  embedKind,
+  embedLabel,
+  passthroughOf,
+} from '@/lib/quill-delta';
 
 /** A JSON object stored in a data attribute, or null if it is missing or isn't one. */
 function jsonObject(raw: string | null): Record<string, unknown> | null {
@@ -65,7 +74,8 @@ const QuillBlockPassthrough = Extension.create({
         attributes: {
           [BLOCK_PASSTHROUGH]: {
             default: null,
-            parseHTML: (el) => jsonObject(el.getAttribute('data-quill-block')),
+            // Pasted HTML can't make a line a list, heading, quote or aligned behind the writer's back.
+            parseHTML: (el) => passthroughOf(jsonObject(el.getAttribute('data-quill-block')), OWNED_LINE_ATTRIBUTES),
             renderHTML: (attrs) => ({ 'data-quill-block': jsonAttribute(attrs[BLOCK_PASSTHROUGH]) }),
           },
         },
@@ -74,6 +84,9 @@ const QuillBlockPassthrough = Extension.create({
   },
 });
 
+/** Pasted HTML can't set bold, italic, underline, strike or a link (which would skip the address check). */
+const inlinePassthrough = (el: HTMLElement) => passthroughOf(jsonObject(el.getAttribute('data-quill-inline')), OWNED_INLINE_ATTRIBUTES);
+
 /** Quill inline attributes the writer doesn't edit (color, script, …), carried on the text. */
 const QuillInlinePassthrough = Mark.create({
   name: INLINE_PASSTHROUGH,
@@ -81,13 +94,13 @@ const QuillInlinePassthrough = Mark.create({
     return {
       attributes: {
         default: null,
-        parseHTML: (el) => jsonObject(el.getAttribute('data-quill-inline')),
+        parseHTML: (el) => inlinePassthrough(el),
         renderHTML: (attrs) => ({ 'data-quill-inline': jsonAttribute(attrs.attributes) }),
       },
     };
   },
   parseHTML() {
-    return [{ tag: 'span[data-quill-inline]', getAttrs: (el) => (jsonObject(el.getAttribute('data-quill-inline')) ? null : false) }];
+    return [{ tag: 'span[data-quill-inline]', getAttrs: (el) => (inlinePassthrough(el) ? null : false) }];
   },
   renderHTML({ HTMLAttributes }) {
     return ['span', HTMLAttributes, 0];
