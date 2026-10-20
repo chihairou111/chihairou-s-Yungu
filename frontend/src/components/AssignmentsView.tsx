@@ -20,19 +20,30 @@ interface AssignmentsViewProps {
 }
 
 /**
- * To-do | Submitted tabs attached to the app bar. To-do shows the work in priority columns. The tab
- * lives in the URL (`?tab=submitted`) so it survives reloads. Cards open their assignment in the
- * detail pop-up (`?task=ID`), mounted here over the lists.
+ * To-do | Submitted tabs attached to the app bar. To-do shows the work in priority columns. The tab and
+ * the Submitted course filter live in the URL (`?tab=submitted&course=ID`) so they survive reloads. Cards
+ * open their assignment in the detail pop-up (`?task=ID`), mounted here over the lists.
  */
 export default function AssignmentsView({ todo, submitted, now }: AssignmentsViewProps) {
   const pathname = usePathname();
   const params = useSearchParams();
   const tab: TabKey = params.get('tab') === 'submitted' ? 'submitted' : 'todo';
+  const rawCourse = params.get('course');
+  const courseId = rawCourse !== null && /^[0-9]+$/.test(rawCourse) ? Number(rawCourse) : null;
   const { open } = useTaskParam();
 
   function go(nextTab: TabKey) {
     // The native History API keeps useSearchParams in sync without a server round trip.
     window.history.replaceState(null, '', nextTab === 'submitted' ? `${pathname}?tab=submitted` : pathname);
+  }
+
+  /** Keeps the Submitted course filter in the URL (`&course=ID`) beside whatever else is there. */
+  function chooseCourse(next: number | null) {
+    const query = new URLSearchParams(params.toString());
+    if (next === null) query.delete('course');
+    else query.set('course', String(next));
+    const search = query.toString();
+    window.history.replaceState(null, '', search ? `${pathname}?${search}` : pathname);
   }
 
   return (
@@ -59,7 +70,7 @@ export default function AssignmentsView({ todo, submitted, now }: AssignmentsVie
         {tab === 'todo' ? (
           <PriorityBoard items={todo} now={now} />
         ) : (
-          <SubmittedList items={submitted} now={now} />
+          <SubmittedList items={submitted} now={now} courseId={courseId} onCourseChange={chooseCourse} />
         )}
       </Box>
       <AssignmentDialog now={now} />
