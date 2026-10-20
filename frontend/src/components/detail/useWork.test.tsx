@@ -135,6 +135,64 @@ describe('useWork', () => {
     expect(result.current.files.map((f) => f.id)).toEqual(['a']);
   });
 
+  describe('submit with no files (Mark as submitted)', () => {
+    it('canMarkSubmitted needs optional files, not submitted, and nothing in Your work', () => {
+      expect(setup(detail({ needsFiles: false })).result.current.canMarkSubmitted).toBe(true);
+      expect(setup(detail({ needsFiles: true })).result.current.canMarkSubmitted).toBe(false);
+      expect(setup(detail({ needsFiles: false, myFiles: [ref('a')] })).result.current.canMarkSubmitted).toBe(false);
+      expect(setup(detail({ needsFiles: false, submitted: true, submittedAt: NOW })).result.current.canMarkSubmitted).toBe(false);
+    });
+
+    it('sends an empty list when allowed, and reads "submitted" afterwards', async () => {
+      api.submit.mockResolvedValue({ submittedAt: NOW });
+      const { result } = setup(detail({ needsFiles: false }));
+      await act(() => result.current.submit());
+      expect(api.submit).toHaveBeenCalledOnce();
+      expect(api.submit).toHaveBeenCalledWith(94616, []);
+      expect(result.current.status).toBe('submitted');
+      expect(result.current.canMarkSubmitted).toBe(false);
+      expect(result.current.changed).toBe(false);
+      expect(refresh).toHaveBeenCalled();
+    });
+
+    it('sends nothing when files are required', async () => {
+      const { result } = setup(detail({ needsFiles: true }));
+      await act(() => result.current.submit());
+      expect(api.submit).not.toHaveBeenCalled();
+    });
+
+    it('sends nothing for an already submitted assignment with an emptied list', async () => {
+      const { result } = setup(detail({ needsFiles: false, submitted: true, submittedAt: NOW, myFiles: [ref('a')], submittedFileIds: ['a'] }));
+      await act(() => result.current.remove('a'));
+      await act(() => result.current.submit());
+      expect(api.submit).not.toHaveBeenCalled();
+    });
+
+    it('two calls at once send one request', async () => {
+      let finish!: (v: { submittedAt: number }) => void;
+      api.submit.mockReturnValue(new Promise((r) => (finish = r)));
+      const { result } = setup(detail({ needsFiles: false }));
+      let both!: Promise<unknown>;
+      act(() => {
+        both = Promise.all([result.current.submit(), result.current.submit()]);
+      });
+      await act(async () => {
+        finish({ submittedAt: NOW });
+        await both;
+      });
+      expect(api.submit).toHaveBeenCalledOnce();
+    });
+
+    it('a failure shows the error and stays not submitted', async () => {
+      api.submit.mockRejectedValue(new ApiError(502, "Yungu didn't confirm the hand-in. Check on Yungu."));
+      const { result } = setup(detail({ needsFiles: false }));
+      await act(() => result.current.submit());
+      expect(result.current.error).toBe("Yungu didn't confirm the hand-in. Check on Yungu.");
+      expect(result.current.status).toBe('not-submitted');
+      expect(result.current.canMarkSubmitted).toBe(true);
+    });
+  });
+
   it('a 401 ends the session', async () => {
     api.submit.mockRejectedValue(new ApiError(401, 'Sign in again.'));
     const { result } = setup(detail({ myFiles: [ref('a')] }));

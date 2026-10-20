@@ -28,6 +28,11 @@ export interface Work {
   submittedAt: number | undefined;
   /** After a submit: the draft differs from what was handed in, so Update has something to hand in. */
   changed: boolean;
+  /**
+   * "Mark as submitted": the assignment takes no files, is not handed in, and Your work is empty — so
+   * `submit()` hands in an empty list (the server decides again and answers 400/502 when it disagrees).
+   */
+  canMarkSubmitted: boolean;
   /** Anything on its way to the server: an upload, a draft save, or the submit itself. */
   busy: boolean;
   submitting: boolean;
@@ -195,9 +200,15 @@ export function useWork(detail: AssignmentDetail): Work {
     [change],
   );
 
+  // True from the moment a submit starts until it ends: a second call in the same tick (a double click)
+  // is dropped before the render that shows "Submitting…".
+  const inFlight = useRef(false);
+  const markable = useRef(false);
+
   const submit = useCallback(async () => {
     const ids = filesRef.current.map((f) => f.id);
-    if (ids.length === 0) return;
+    if (inFlight.current || (ids.length === 0 && !markable.current)) return;
+    inFlight.current = true;
     setFailure(null);
     setSubmitting(true);
     try {
@@ -212,6 +223,7 @@ export function useWork(detail: AssignmentDetail): Work {
     } catch (error) {
       fail(error);
     } finally {
+      inFlight.current = false;
       setSubmitting(false);
     }
   }, [id, router, refresh, fail]);
@@ -225,6 +237,10 @@ export function useWork(detail: AssignmentDetail): Work {
     submittedAt === undefined ? 'not-submitted' : submittedAt > detail.dueAt ? 'late' : 'submitted';
 
   const changed = status !== 'not-submitted' && !sameIds(files, handedInIds);
+  const canMarkSubmitted = status === 'not-submitted' && !detail.needsFiles && files.length === 0 && uploads.length === 0;
+  useLayoutEffect(() => {
+    markable.current = canMarkSubmitted;
+  }, [canMarkSubmitted]);
 
   return {
     files,
@@ -232,6 +248,7 @@ export function useWork(detail: AssignmentDetail): Work {
     status,
     submittedAt: submittedAt || undefined,
     changed,
+    canMarkSubmitted,
     busy: submitting || saving > 0 || uploads.length > 0,
     submitting,
     errors: failure?.messages ?? [],

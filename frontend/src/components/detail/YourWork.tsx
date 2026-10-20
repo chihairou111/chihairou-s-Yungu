@@ -39,7 +39,8 @@ export type WorkFocus = { kind: 'write' } | { kind: 'file'; id: string };
 /**
  * The student's side of the assignment: status, the files added so far (each opens in the viewer and
  * can be removed), the four ways to add work (Record, Camera, Write, Upload) and Submit, which reads
- * Update once the work has been handed in. Record and Camera open their own small dialogs on top of the
+ * Update once the work has been handed in, and "Mark as submitted" where the assignment takes no files and
+ * none are added. Record and Camera open their own small dialogs on top of the
  * pop-up, which add what they made like an upload. After a submit, edits only change the draft: a notice says
  * they are not handed in, and Update is available only then. Files can also be dropped anywhere on the panel. The work
  * itself lives in the `WorkProvider` above, so it survives a trip to the writer.
@@ -97,6 +98,7 @@ export default function YourWork({ onWrite, focusOnMount = null }: YourWorkProps
   const empty = work.files.length === 0 && work.uploads.length === 0;
   // After a submit, Update only has something to do once the draft differs from what was handed in.
   const nothingToUpdate = submitted && !work.changed;
+  const canMark = work.canMarkSubmitted;
   const hintId = useId();
 
   return (
@@ -246,7 +248,8 @@ export default function YourWork({ onWrite, focusOnMount = null }: YourWorkProps
         variant="contained"
         size="large"
         fullWidth
-        disabled={work.files.length === 0 || work.uploads.length > 0}
+        // Handed in with no files (Mark as submitted): the button stays focusable, as "nothing to update", not disabled.
+        disabled={(work.files.length === 0 && !canMark && !nothingToUpdate) || work.uploads.length > 0}
         aria-disabled={work.submitting || nothingToUpdate || undefined}
         aria-describedby={nothingToUpdate && !work.submitting ? hintId : undefined}
         onClick={() => {
@@ -265,7 +268,7 @@ export default function YourWork({ onWrite, focusOnMount = null }: YourWorkProps
             }),
         })}
       >
-        {work.submitting ? (submitted ? 'Updating…' : 'Submitting…') : submitted ? 'Update' : 'Submit'}
+        {work.submitting ? (submitted ? 'Updating…' : 'Submitting…') : submitted ? 'Update' : canMark ? 'Mark as submitted' : 'Submit'}
       </Button>
       {nothingToUpdate && !work.submitting && (
         <Typography id={hintId} variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75, textAlign: 'center' }}>

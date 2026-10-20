@@ -28,11 +28,14 @@ interface PriorityBoardProps {
 /**
  * To-do work in three columns by urgency when the content area is at least 760px wide (from a 900px
  * window, or a wider one while the Today's classes panel is docked); one column, at most 720 wide,
- * below that. Measured on the nearest size container (the tab panel), falling back to one column.
+ * below that. Columns with work come first, the empty ones after, each group in urgency order. Measured on the nearest size container (the tab panel), falling back to one column.
  */
 export default function PriorityBoard({ items, now }: PriorityBoardProps) {
   const groups = groupTodo(items, now);
   if (COLUMNS.every(({ priority }) => groups[priority].length === 0)) return <AllClear />;
+  // Columns with work first, then the empty ones, each group in the fixed urgency order. The DOM order is
+  // the visual order in the three-column grid and the stacked one alike.
+  const columns = [...COLUMNS.filter((c) => groups[c.priority].length > 0), ...COLUMNS.filter((c) => groups[c.priority].length === 0)];
 
   return (
     <Box
@@ -46,7 +49,7 @@ export default function PriorityBoard({ items, now }: PriorityBoardProps) {
         alignItems: 'start',
       }}
     >
-      {COLUMNS.map(({ priority, title, empty, Icon }) => {
+      {columns.map(({ priority, title, empty, Icon }) => {
         const list = groups[priority];
         const tone = PRIORITY_TONE[priority];
         const headingId = `priority-${priority}`;

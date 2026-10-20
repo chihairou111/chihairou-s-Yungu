@@ -346,6 +346,99 @@ describe('YourWork', () => {
     expect(screen.getByRole('button', { name: 'Update' })).not.toHaveAttribute('aria-disabled');
   });
 
+  describe('Mark as submitted', () => {
+    const free = (extra: Partial<AssignmentDetail> = {}) => detail({ needsFiles: false, ...extra });
+
+    it('reads "Mark as submitted" and is enabled only when files are optional, nothing is handed in and Your work is empty', () => {
+      setup(free());
+      const button = screen.getByRole('button', { name: 'Mark as submitted' });
+      expect(button).toBeEnabled();
+      expect(button).not.toHaveAttribute('aria-disabled');
+      expect(screen.queryByRole('button', { name: 'Submit' })).not.toBeInTheDocument();
+    });
+
+    it('stays "Submit", disabled, when files are required', () => {
+      setup(detail());
+      expect(screen.queryByRole('button', { name: 'Mark as submitted' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled();
+    });
+
+    it('stays "Submit" (enabled) once Your work has a file, even when files are optional', () => {
+      setup(free({ myFiles: [ref('a', 'one.txt')] }));
+      expect(screen.queryByRole('button', { name: 'Mark as submitted' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled();
+    });
+
+    it('turns into "Submit" while a file is uploading, and back to "Mark as submitted" when it fails', async () => {
+      let land!: (f: FileRef) => void;
+      api.uploadFile.mockReturnValueOnce(new Promise((r) => (land = r)));
+      const user = userEvent.setup();
+      setup(free());
+      await user.upload(uploadInput(), new File(['a'], 'slow.txt'));
+      expect(screen.queryByRole('button', { name: 'Mark as submitted' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled();
+      await act(async () => land(ref('id-slow.txt', 'slow.txt')));
+      expect(await screen.findByRole('button', { name: 'Submit' })).toBeEnabled();
+    });
+
+    it('already submitted work never offers it, even with no files', () => {
+      setup(free({ submitted: true, submittedAt: NOW }));
+      expect(screen.queryByRole('button', { name: 'Mark as submitted' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Update' })).toBeInTheDocument();
+    });
+
+    it('one click hands in with no files; a double click sends one request', async () => {
+      let finish!: (v: { submittedAt: number }) => void;
+      api.submit.mockReturnValue(new Promise((r) => (finish = r)));
+      const user = userEvent.setup();
+      setup(free());
+      const button = screen.getByRole('button', { name: 'Mark as submitted' });
+      await user.dblClick(button);
+      expect(api.submit).toHaveBeenCalledOnce();
+      expect(api.submit).toHaveBeenCalledWith(94616, []);
+      expect(screen.getByRole('button', { name: 'Submitting…' })).toHaveFocus();
+      await act(async () => finish({ submittedAt: NOW }));
+      expect(api.submit).toHaveBeenCalledOnce();
+    });
+
+    it('afterwards the assignment reads Submitted, with nothing to update, and focus stays on the button', async () => {
+      api.submit.mockResolvedValue({ submittedAt: NOW });
+      const user = userEvent.setup();
+      setup(free());
+      await user.click(screen.getByRole('button', { name: 'Mark as submitted' }));
+      const update = await screen.findByRole('button', { name: 'Update' });
+      expect(screen.getByText('Submitted')).toBeInTheDocument();
+      expect(screen.queryByText('Not submitted')).not.toBeInTheDocument();
+      expect(update).toHaveAttribute('aria-disabled', 'true');
+      expect(update).toHaveFocus();
+      expect(screen.getByText('No changes to hand in')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Mark as submitted' })).not.toBeInTheDocument();
+      expect(nav.refresh).toHaveBeenCalled();
+      expect(refresh).toHaveBeenCalled();
+    });
+
+    it('a failure shows the inline error and the assignment is not submitted; it can be tried again', async () => {
+      api.submit.mockRejectedValueOnce(new ApiError(502, "Yungu didn't confirm the hand-in. Check on Yungu."));
+      api.submit.mockResolvedValueOnce({ submittedAt: NOW });
+      const user = userEvent.setup();
+      setup(free());
+      await user.click(screen.getByRole('button', { name: 'Mark as submitted' }));
+      expect(await screen.findByRole('alert')).toHaveTextContent("Yungu didn't confirm the hand-in. Check on Yungu.");
+      expect(screen.getByText('Not submitted')).toBeInTheDocument();
+      expect(screen.queryByText('Submitted')).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Mark as submitted' }));
+      expect(await screen.findByText('Submitted')).toBeInTheDocument();
+      expect(api.submit).toHaveBeenCalledTimes(2);
+    });
+
+    it('removing the last file while files are optional offers it again', async () => {
+      const user = userEvent.setup();
+      setup(free({ myFiles: [ref('a', 'one.txt')] }));
+      await user.click(screen.getByRole('button', { name: 'Remove one.txt' }));
+      expect(await screen.findByRole('button', { name: 'Mark as submitted' })).toBeEnabled();
+    });
+  });
+
   it('a 401 says the session ended, with a way to sign in', async () => {
     api.submit.mockRejectedValue(new ApiError(401, 'Sign in again.'));
     const user = userEvent.setup();

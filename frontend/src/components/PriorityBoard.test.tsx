@@ -64,3 +64,36 @@ describe('PriorityBoard upcoming date groups', () => {
     expect(within(upcoming).getAllByRole('heading', { level: 3 })).toHaveLength(3);
   });
 });
+
+describe('PriorityBoard column order', () => {
+  const titles = () => screen.queryAllByRole('region').filter((r) => r.hasAttribute('aria-labelledby') && /^priority-/.test(r.getAttribute('aria-labelledby')!));
+  const order = () => titles().map((r) => within(r).getAllByRole('heading', { level: 2 })[0].textContent);
+
+  it('no overdue work: Nearly overdue, Upcoming, then the empty Overdue', () => {
+    render(<PriorityBoard items={[todo('Tonight', 5 * HOUR), todo('Later', 3 * DAY)]} now={NOW} />);
+    expect(order()).toEqual(['Nearly overdue', 'Upcoming', 'Overdue']);
+    expect(within(screen.getByRole('region', { name: 'Overdue' })).getByText('Nothing overdue')).toBeInTheDocument();
+  });
+
+  it('overdue and upcoming: Overdue, Upcoming, then the empty Nearly overdue', () => {
+    render(<PriorityBoard items={[todo('Late', -2 * DAY), todo('Later', 3 * DAY)]} now={NOW} />);
+    expect(order()).toEqual(['Overdue', 'Upcoming', 'Nearly overdue']);
+    expect(within(screen.getByRole('region', { name: 'Nearly overdue' })).getByText('Nothing due soon')).toBeInTheDocument();
+  });
+
+  it('only upcoming: Upcoming first, then Overdue and Nearly overdue in order', () => {
+    render(<PriorityBoard items={[todo('Later', 3 * DAY)]} now={NOW} />);
+    expect(order()).toEqual(['Upcoming', 'Overdue', 'Nearly overdue']);
+  });
+
+  it('all three have work: the original order', () => {
+    render(<PriorityBoard items={[todo('Later', 3 * DAY), todo('Tonight', 5 * HOUR), todo('Late', -2 * DAY)]} now={NOW} />);
+    expect(order()).toEqual(['Overdue', 'Nearly overdue', 'Upcoming']);
+  });
+
+  it('nothing at all: the single message, no columns', () => {
+    render(<PriorityBoard items={[]} now={NOW} />);
+    expect(order()).toEqual([]);
+    expect(screen.getByRole('heading', { name: 'Nothing to do' })).toBeInTheDocument();
+  });
+});

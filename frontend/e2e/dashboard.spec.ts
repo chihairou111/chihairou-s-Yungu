@@ -600,6 +600,37 @@ test('your work: upload files, submit, and the task moves to Submitted', async (
   await expect(page.getByText('Unit 4 Problem Set')).toBeVisible();
 });
 
+test('mark as submitted: an assignment that takes no files is handed in with one click', async ({ page }) => {
+  await signIn(page);
+  // Needs files: no Mark as submitted, Submit stays disabled.
+  await page.goto('/assignments?task=101');
+  const required = page.getByRole('dialog').getByRole('region', { name: 'Your work' });
+  await expect(required.getByRole('button', { name: 'Submit' })).toBeDisabled();
+  await expect(required.getByRole('button', { name: 'Mark as submitted' })).toHaveCount(0);
+
+  // "Reading check-in": no files needed, none added.
+  await page.goto('/assignments?task=105');
+  const dialog = page.getByRole('dialog', { name: 'Reading check-in: Chapter 3' });
+  const work = dialog.getByRole('region', { name: 'Your work' });
+  await expect(work.getByText('Not submitted')).toBeVisible();
+  const mark = work.getByRole('button', { name: 'Mark as submitted' });
+  await expect(mark).toBeEnabled();
+  await mark.dblclick();
+  await expect(work.getByText('Submitted', { exact: true })).toBeVisible();
+  const update = work.getByRole('button', { name: 'Update' });
+  await expect(update).toHaveAttribute('aria-disabled', 'true');
+  await expect(update).toBeFocused();
+  await expect(work.getByText('No changes to hand in')).toBeVisible();
+
+  // It lives on the server: a reload shows it handed in, and it moved to the Submitted tab.
+  await page.reload();
+  await expect(work.getByText('Submitted', { exact: true })).toBeVisible();
+  await expect(work.getByRole('button', { name: 'Mark as submitted' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await page.getByRole('tab', { name: 'Submitted' }).click();
+  await expect(page.getByText('Reading check-in: Chapter 3')).toBeVisible();
+});
+
 test('write: format text, keep the draft across a reload, Done adds a PDF to Your work', async ({ page }) => {
   await signIn(page);
   await page.goto('/assignments?task=104');
