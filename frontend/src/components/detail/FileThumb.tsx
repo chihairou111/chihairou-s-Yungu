@@ -7,6 +7,7 @@ import Typography from '@mui/material/Typography';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { alpha, type Theme } from '@mui/material/styles';
 import type { SvgIconProps } from '@mui/material/SvgIcon';
+import ArticleOutlined from '@mui/icons-material/ArticleOutlined';
 import AudioFileOutlined from '@mui/icons-material/AudioFileOutlined';
 import DescriptionOutlined from '@mui/icons-material/DescriptionOutlined';
 import ImageOutlined from '@mui/icons-material/ImageOutlined';
@@ -77,11 +78,12 @@ export function fileCaption(file: FileRef, pages?: number): string {
   return `${fileTypeLabel(file)}${count} · ${formatBytes(file.size)}`;
 }
 
-/** The icon for a file's type; spreadsheets and slides get their own among Office files. */
+/** The icon for a file's type; spreadsheets and slides get their own among Office files, online documents a page of text. */
 export function FileKindIcon({ file, ...props }: { file: FileRef } & SvgIconProps) {
   const ext = extension(file.name);
-  const Icon =
-    file.kind === 'pdf'
+  const Icon = file.online
+    ? ArticleOutlined
+    : file.kind === 'pdf'
       ? PictureAsPdfOutlined
       : file.kind === 'image'
         ? ImageOutlined

@@ -51,6 +51,15 @@ describe('FileThumb', () => {
     expect(screen.getByRole('button')).toHaveAccessibleName('Clip.mp4, Video · 2 KB');
   });
 
+  it('shows an online document as a document, captioned "Online document", without fetching anything', () => {
+    const doc: FileRef = { ...file('other', '课堂反思'), size: 0, online: true, content: '{"ops":[{"insert":"x\\n"}]}' };
+    const { container } = render(<FileThumb file={doc} onOpen={() => {}} />);
+    expect(screen.getByRole('button')).toHaveAccessibleName('课堂反思, Online document');
+    expect(container.querySelector('[data-testid="ArticleOutlinedIcon"]')).not.toBeNull();
+    expect(container.querySelector('img, video, audio, iframe')).toBeNull();
+    expect(loadPreview).not.toHaveBeenCalled();
+  });
+
   it('shows a skeleton while the first page renders, then the page as an image', async () => {
     const page = deferred();
     vi.mocked(loadPreview).mockReturnValue(page.promise);

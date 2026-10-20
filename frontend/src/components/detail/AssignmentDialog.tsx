@@ -49,18 +49,18 @@ function fromError(error: unknown): Loaded {
 }
 
 /**
- * The assignment pop-up, driven by `?task=ID` (writer `&write=1`). About 90% of the window, up to
+ * The assignment pop-up, driven by `?task=ID` (writer `&write=1`, for an online document `&doc=FILEID`). About 90% of the window, up to
  * 1200px wide; full-screen on phones. A fixed header (course · teacher, title, due facts, ✕) over one
  * scrolling body: content on the left (Instructions, Attachments, Comments) and Your work in a 320px
  * column that stays in view, stacked below 900px (Your work after the attachments, comments last).
  */
 export default function AssignmentDialog({ now }: { now: number }) {
-  const { taskId, isOpen, writing, close, openWriter, closeWriter } = useTaskParam();
+  const { taskId, isOpen, writing, docId, close, openWriter, closeWriter } = useTaskParam();
   const titleId = useId();
   const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
-  // A short confirmation after the writer's PDF lands in Your work.
+  // A short confirmation after the writer's document lands in Your work.
   const [notice, setNotice] = useState<string | null>(null);
-  // Where focus returns when the writer closes: the new PDF's row after Done, else the Write button.
+  // Where focus returns when the writer closes: the saved document's row, the edited one's, else Write.
   const [workFocus, setWorkFocus] = useState<WorkFocus | null>(null);
   if (!isOpen && (notice !== null || workFocus !== null)) {
     setNotice(null);
@@ -69,13 +69,15 @@ export default function AssignmentDialog({ now }: { now: number }) {
   const [result, setResult] = useState<{ key: string; loaded: Loaded } | null>(null);
 
   // While the dialog fades out the URL no longer names the task; keep showing what was open.
-  const [shown, setShown] = useState({ taskId, writing });
-  if (isOpen && (shown.taskId !== taskId || shown.writing !== writing)) {
+  const [shown, setShown] = useState({ taskId, writing, docId });
+  if (isOpen && (shown.taskId !== taskId || shown.writing !== writing || shown.docId !== docId)) {
     // Leaving the writer by any route (←, Esc, browser Back) returns focus to Your work.
-    if (shown.writing && !writing && shown.taskId === taskId && workFocus === null) setWorkFocus({ kind: 'write' });
-    setShown({ taskId, writing });
+    if (shown.writing && !writing && shown.taskId === taskId && workFocus === null) {
+      setWorkFocus(shown.docId ? { kind: 'file', id: shown.docId } : { kind: 'write' });
+    }
+    setShown({ taskId, writing, docId });
   }
-  const view = isOpen ? { taskId, writing } : shown;
+  const view = isOpen ? { taskId, writing, docId } : shown;
 
   // Each opening (and each retry) is a new generation, so a result cached from an earlier opening is
   // never shown again: reopening loads afresh behind the skeleton instead of flashing old state.
@@ -172,14 +174,15 @@ export default function AssignmentDialog({ now }: { now: number }) {
             {/* Above the view switch, so the work (and anything still uploading) outlives a trip to the writer. */}
             <WorkProvider key={loaded.detail.id} detail={loaded.detail}>
               {/* The writer and the assignment fade into each other, the work staying put above them. */}
-              <ViewSwitchFade view={view.writing ? 'write' : 'detail'}>
+              <ViewSwitchFade view={view.writing ? `write:${view.docId ?? ''}` : 'detail'}>
                 {view.writing ? (
                   <WriteView
                     detail={loaded.detail}
                     titleId={titleId}
+                    docId={view.docId}
                     onBack={closeWriter}
                     onDone={(file) => {
-                      setNotice(`Added ${file.name} to Your work`);
+                      setNotice(`Saved ${file.name} to Your work`);
                       setWorkFocus({ kind: 'file', id: file.id });
                       closeWriter();
                     }}
@@ -190,9 +193,9 @@ export default function AssignmentDialog({ now }: { now: number }) {
                     now={now}
                     titleId={titleId}
                     onClose={close}
-                    onWrite={() => {
+                    onWrite={(doc) => {
                       setWorkFocus(null);
-                      openWriter();
+                      openWriter(doc);
                     }}
                     workFocus={workFocus}
                   />
@@ -357,7 +360,7 @@ interface DetailViewProps {
   now: number;
   titleId: string;
   onClose: () => void;
-  onWrite: () => void;
+  onWrite: (docId?: string) => void;
   workFocus: WorkFocus | null;
 }
 

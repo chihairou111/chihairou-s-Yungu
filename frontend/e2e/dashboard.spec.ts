@@ -631,11 +631,12 @@ test('mark as submitted: an assignment that takes no files is handed in with one
   await expect(page.getByText('Reading check-in: Chapter 3')).toBeVisible();
 });
 
-test('write: format text, keep the draft across a reload, Done adds a PDF to Your work', async ({ page }) => {
+test('write: format text, keep the draft across a reload, save it to Your work as an online document', async ({ page }) => {
   await signIn(page);
   await page.goto('/assignments?task=104');
   const dialog = page.getByRole('dialog');
-  await dialog.getByRole('region', { name: 'Your work' }).getByRole('button', { name: 'Write' }).click();
+  const work = dialog.getByRole('region', { name: 'Your work' });
+  await work.getByRole('button', { name: 'Write' }).click();
   await expect(page).toHaveURL(/write=1/);
 
   const doc = dialog.getByRole('textbox', { name: 'Your writing' });
@@ -666,22 +667,91 @@ test('write: format text, keep the draft across a reload, Done adds a PDF to You
 
   const title = dialog.getByRole('textbox', { name: 'Title' });
   await title.fill('Field notes');
-  await dialog.getByRole('button', { name: 'Done' }).click();
-  await expect(page.getByText('Added Field notes.pdf to Your work')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Save to Your work' }).click();
+  await expect(page.getByText('Saved Field notes to Your work')).toBeVisible();
   await expect(page).not.toHaveURL(/write=1/);
-  const pdfRow = dialog.getByRole('region', { name: 'Your work' }).getByRole('button', { name: /^Field notes\.pdf/ });
-  await expect(pdfRow).toBeVisible();
+  const row = work.getByRole('button', { name: 'Field notes, Online document' });
+  await expect(row).toBeFocused();
 
-  // The new PDF opens in the viewer like any file.
-  await pdfRow.click();
-  const viewer = page.getByRole('dialog', { name: 'Field notes.pdf' });
-  await expect(viewer.locator('iframe')).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(viewer).toBeHidden();
+  // Not handed in yet: the row opens it again in the writer, and saving updates the same document.
+  await row.click();
+  await expect(page).toHaveURL(/write=1&doc=/);
+  await expect(doc.locator('strong')).toHaveText('观察记录');
+  await expect(doc.locator('a')).toHaveAttribute('href', 'https://example.com');
+  await doc.click();
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.type(' Second visit.');
+  await dialog.getByRole('button', { name: 'Save to Your work' }).click();
+  await expect(page.getByText('Saved Field notes to Your work')).toBeVisible();
+  await expect(work.getByRole('button', { name: /^Field notes, Online document/ })).toHaveCount(1);
 
-  // The draft was used up: the writer opens empty again.
-  await dialog.getByRole('region', { name: 'Your work' }).getByRole('button', { name: 'Write' }).click();
+  // It lives on the server: after a reload the row opens with the saved text, and the drafts are used up.
+  await page.reload();
+  await work.getByRole('button', { name: 'Field notes, Online document' }).click();
+  await expect(doc).toContainText('Second visit.');
+  await expect(dialog.getByText('Draft saved')).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Back to assignment' }).click();
+  await work.getByRole('button', { name: 'Write' }).click();
   await expect(doc).toHaveText('');
+});
+
+test('write: an online document past Yungu\'s limit is refused before sending, and the text stays', async ({ page }) => {
+  await signIn(page);
+  await page.goto('/assignments?task=104&write=1');
+  const dialog = page.getByRole('dialog');
+  const doc = dialog.getByRole('textbox', { name: 'Your writing' });
+  await doc.click();
+  let sent = 0;
+  page.on('request', (r) => {
+    if (r.url().includes('/online-docs')) sent += 1;
+  });
+  await page.keyboard.insertText('观'.repeat(21_840));
+  await dialog.getByRole('button', { name: 'Save to Your work' }).click();
+  await expect(dialog.getByText('Too long for Yungu — cut about 4 characters.')).toBeVisible();
+  expect(sent).toBe(0);
+  await expect(page).toHaveURL(/write=1/);
+  await expect(dialog.getByText('Draft saved')).toBeVisible();
+});
+
+test('a handed-in online document opens as a preview; Edit saves a new one in its place, for Update', async ({ page }) => {
+  await signIn(page);
+  await page.goto('/assignments?task=208');
+  const dialog = page.getByRole('dialog', { name: '课堂反思：第一次用户访谈' });
+  const work = dialog.getByRole('region', { name: 'Your work' });
+  await expect(work.getByText('Submitted', { exact: true })).toBeVisible();
+  let fetchedDoc = false;
+  page.on('request', (r) => {
+    if (r.url().includes('/api/files/fx-doc-208')) fetchedDoc = true;
+  });
+
+  await work.getByRole('button', { name: '课堂反思, Online document' }).click();
+  const viewer = page.getByRole('dialog', { name: '课堂反思', exact: true });
+  const page_ = viewer.getByRole('article', { name: '课堂反思' });
+  await expect(page_.getByRole('heading', { level: 3 })).toBeVisible();
+  await expect(page_.locator('blockquote')).not.toHaveCount(0);
+  await expect(page).not.toHaveURL(/write=1/);
+
+  await viewer.getByRole('button', { name: 'Edit' }).click();
+  await expect(viewer).toBeHidden();
+  await expect(page).toHaveURL(/write=1&doc=fx-doc-208/);
+  const doc = dialog.getByRole('textbox', { name: 'Your writing' });
+  await expect(doc.locator('h1')).toBeVisible();
+  await doc.click();
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.type('补充一句。');
+  await dialog.getByRole('button', { name: 'Save to Your work' }).click();
+  await expect(page.getByText('Saved 课堂反思 to Your work')).toBeVisible();
+
+  // The handed-in version is untouched: a new document took its place, waiting for Update.
+  const rows = work.getByRole('button', { name: '课堂反思, Online document' });
+  await expect(rows).toHaveCount(1);
+  await expect(work.getByText('Changes not handed in — press Update to hand them in.')).toBeVisible();
+  await expect(work.getByRole('button', { name: 'Update' })).toBeEnabled();
+  // The new one is not handed in, so it opens straight in the writer.
+  await rows.click();
+  await expect(page).toHaveURL(/write=1&doc=(?!fx-doc-208)/);
+  await expect(doc).toContainText('补充一句。');
+  expect(fetchedDoc).toBe(false);
 });
 
 // Chromium's fake camera and microphone (flags in playwright.config.ts); 127.0.0.1 is a secure context.

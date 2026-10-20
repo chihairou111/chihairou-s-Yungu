@@ -12,6 +12,7 @@ const param = vi.hoisted(() => ({
   taskId: null as number | null,
   isOpen: false,
   writing: false,
+  docId: null as string | null,
   open: vi.fn(),
   close: vi.fn(),
   openWriter: vi.fn(),
@@ -22,11 +23,12 @@ vi.mock('./useTaskParam', async (importOriginal) => ({
   useTaskParam: () => param,
 }));
 
-const api = vi.hoisted(() => ({ fetchDetail: vi.fn(), saveDraft: vi.fn() }));
+const api = vi.hoisted(() => ({ fetchDetail: vi.fn(), saveDraft: vi.fn(), updateOnlineDoc: vi.fn() }));
 vi.mock('./api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./api')>()),
   fetchDetail: api.fetchDetail,
   saveDraft: api.saveDraft,
+  updateOnlineDoc: api.updateOnlineDoc,
 }));
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn(), replace: vi.fn() }) }));
@@ -76,6 +78,7 @@ beforeEach(() => {
   param.taskId = null;
   param.isOpen = false;
   param.writing = false;
+  param.docId = null;
 });
 
 afterEach(() => vi.resetAllMocks());
@@ -168,6 +171,23 @@ describe('AssignmentDialog', () => {
     param.writing = true;
     render(<AssignmentDialog now={NOW} />);
     await userEvent.click(await screen.findByRole('button', { name: 'Back to assignment' }));
+    expect(param.closeWriter).toHaveBeenCalled();
+  });
+
+  it('opens the writer for an online document named by doc=, and confirms its save', async () => {
+    const content = JSON.stringify({ ops: [{ insert: '第一段\n' }] });
+    const doc: FileRef = { id: 'd1', name: '课堂反思', kind: 'other', mime: 'application/octet-stream', size: 0, url: '/api/files/d1', online: true, content, createdAt: NOW };
+    api.fetchDetail.mockResolvedValue(detail({ myFiles: [doc] }));
+    api.updateOnlineDoc.mockResolvedValue(doc);
+    openTask(94616);
+    param.writing = true;
+    param.docId = 'd1';
+    render(<AssignmentDialog now={NOW} />);
+    expect(await screen.findByRole('textbox', { name: 'Title' })).toHaveValue('课堂反思');
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Your writing' })).toHaveTextContent('第一段'));
+    await userEvent.click(screen.getByRole('button', { name: 'Save to Your work' }));
+    expect(await screen.findByText('Saved 课堂反思 to Your work')).toBeInTheDocument();
+    expect(api.updateOnlineDoc).toHaveBeenCalledWith(94616, 'd1', '课堂反思', content);
     expect(param.closeWriter).toHaveBeenCalled();
   });
 

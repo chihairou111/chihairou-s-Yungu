@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DRAFT_DELAY_MS, draftKey, draftTitleKey, useDraft } from './useDraft';
+import { DRAFT_DELAY_MS, docBase, draftBaseKey, draftKey, draftTitleKey, useDraft } from './useDraft';
 
 describe('useDraft', () => {
   beforeEach(() => {
@@ -91,5 +91,36 @@ describe('useDraft', () => {
     expect(result.current.status).toBe('unavailable');
     expect(() => act(() => result.current.setTitle('t'))).not.toThrow();
     expect(() => unmount()).not.toThrow();
+  });
+
+  it('keeps an existing document under its own keys, beside the base it was written from', () => {
+    expect(draftKey(7, 'd1')).toBe('yl_write_draft_7_doc_d1');
+    expect(draftTitleKey(7, 'd1')).toBe('yl_write_draft_7_doc_d1_title');
+    expect(draftBaseKey(7, 'd1')).toBe('yl_write_draft_7_doc_d1_base');
+    const first = renderHook(() => useDraft(7, { id: 'd1', base: 'b-1' }));
+    expect(first.result.current.base).toBeNull();
+    act(() => first.result.current.setHtml('<p>doc</p>'));
+    act(() => vi.advanceTimersByTime(DRAFT_DELAY_MS));
+    act(() => first.result.current.setTitle('Renamed'));
+    expect(localStorage.getItem('yl_write_draft_7_doc_d1')).toBe('<p>doc</p>');
+    expect(localStorage.getItem('yl_write_draft_7_doc_d1_title')).toBe('Renamed');
+    expect(localStorage.getItem('yl_write_draft_7_doc_d1_base')).toBe('b-1');
+    // The new document's draft is a different one.
+    expect(localStorage.getItem('yl_write_draft_7')).toBeNull();
+    first.unmount();
+
+    const { result } = renderHook(() => useDraft(7, { id: 'd1', base: 'b-2' }));
+    expect(result.current).toMatchObject({ html: '<p>doc</p>', title: 'Renamed', base: 'b-1' });
+    act(() => result.current.clear());
+    expect(localStorage.getItem('yl_write_draft_7_doc_d1')).toBeNull();
+    expect(localStorage.getItem('yl_write_draft_7_doc_d1_title')).toBeNull();
+    expect(localStorage.getItem('yl_write_draft_7_doc_d1_base')).toBeNull();
+  });
+
+  it('names a document version by its title and content', () => {
+    const doc = { id: 'd1', name: '课堂反思', content: '{"ops":[{"insert":"a\\n"}]}' };
+    expect(docBase(doc)).toBe(docBase({ ...doc }));
+    expect(docBase(doc)).not.toBe(docBase({ ...doc, name: '课堂反思 2' }));
+    expect(docBase(doc)).not.toBe(docBase({ ...doc, content: '{"ops":[{"insert":"b\\n"}]}' }));
   });
 });

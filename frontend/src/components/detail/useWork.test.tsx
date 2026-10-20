@@ -135,6 +135,52 @@ describe('useWork', () => {
     expect(result.current.files.map((f) => f.id)).toEqual(['a']);
   });
 
+  describe('replace (an online document saved again)', () => {
+    const doc = (id: string, name = '课堂反思'): FileRef => ({ ...ref(id, name), kind: 'other', online: true, size: 0, content: '{"ops":[{"insert":"x\\n"}]}' });
+
+    it('swaps a handed-in document for its new version at the same place; the hand-in list is untouched', async () => {
+      const d = detail({ submitted: true, submittedAt: NOW, myFiles: [ref('a'), doc('old'), ref('c')], submittedFileIds: ['a', 'old', 'c'] });
+      const { result } = setup(d);
+      expect(result.current.submittedFileIds).toEqual(['a', 'old', 'c']);
+      let ok!: boolean;
+      await act(async () => {
+        ok = await result.current.replace('old', doc('new'));
+      });
+      expect(ok).toBe(true);
+      expect(result.current.files.map((f) => f.id)).toEqual(['a', 'new', 'c']);
+      expect(api.saveDraft).toHaveBeenLastCalledWith(94616, ['a', 'new', 'c']);
+      expect(result.current.submittedFileIds).toEqual(['a', 'old', 'c']);
+      expect(result.current.changed).toBe(true);
+      expect(api.submit).not.toHaveBeenCalled();
+    });
+
+    it('an update in place takes the new title and text without a draft save', async () => {
+      const { result } = setup(detail({ myFiles: [ref('a'), doc('d1')] }));
+      const updated = { ...doc('d1', '新的标题'), content: '{"ops":[{"insert":"y\\n"}]}' };
+      await act(async () => {
+        expect(await result.current.replace('d1', updated)).toBe(true);
+      });
+      expect(result.current.files[1]).toEqual(updated);
+      expect(api.saveDraft).not.toHaveBeenCalled();
+    });
+
+    it('puts the old version back when the draft save fails', async () => {
+      api.saveDraft.mockRejectedValueOnce(new ApiError(502, "Can't reach Yungu. Try again."));
+      const { result } = setup(detail({ myFiles: [doc('old'), ref('b')] }));
+      await act(async () => {
+        expect(await result.current.replace('old', doc('new'))).toBe(false);
+      });
+      expect(result.current.files.map((f) => f.id)).toEqual(['old', 'b']);
+      expect(result.current.error).toBe("Can't reach Yungu. Try again.");
+    });
+
+    it('adds the new version at the end when the old one is gone', async () => {
+      const { result } = setup(detail({ myFiles: [ref('a')] }));
+      await act(() => result.current.replace('gone', doc('new')));
+      expect(result.current.files.map((f) => f.id)).toEqual(['a', 'new']);
+    });
+  });
+
   describe('submit with no files (Mark as submitted)', () => {
     it('canMarkSubmitted needs optional files, not submitted, and nothing in Your work', () => {
       expect(setup(detail({ needsFiles: false })).result.current.canMarkSubmitted).toBe(true);

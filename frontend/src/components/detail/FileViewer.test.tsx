@@ -82,15 +82,60 @@ describe('FileViewer', () => {
     expect(within(viewer()).getByText('No preview for this file type.')).toBeInTheDocument();
   });
 
-  it('sends a Yungu online document to Yungu: it has no file to download or open', () => {
-    const doc = file('g', 'my favorite department', 'other', { online: true, size: 0 });
-    render(<FileViewer files={[doc]} index={0} onIndexChange={() => {}} onClose={() => {}} />);
-    expect(title()).toHaveTextContent('my favorite department');
-    expect(within(viewer()).getByText('Open this online document on Yungu.')).toBeInTheDocument();
-    expect(within(viewer()).queryByText('No preview for this file type.')).toBeNull();
-    expect(within(viewer()).queryByRole('link', { name: 'Download' })).toBeNull();
-    expect(within(viewer()).queryByRole('link', { name: 'Open in new tab' })).toBeNull();
-    expect(within(viewer()).getByText('Online document')).toBeInTheDocument();
+  describe('a Yungu online document', () => {
+    const DOC = JSON.stringify({
+      ops: [
+        { insert: '课堂反思' },
+        { insert: '\n', attributes: { header: 1 } },
+        { insert: 'gone', attributes: { strike: true } },
+        { insert: '\n', attributes: { align: 'center' } },
+        { insert: '引用' },
+        { insert: '\n', attributes: { blockquote: true } },
+        { insert: { video: { url: 'https://evil.example/v.mp4' } } },
+        { insert: 'click', attributes: { link: 'javascript:alert(1)' } },
+        { insert: '\n' },
+      ],
+    });
+    const doc = (extra: Partial<FileRef> = {}) => file('g', 'my favorite department', 'other', { online: true, size: 0, content: DOC, ...extra });
+
+    it('previews its text from the document itself, never fetching a file', () => {
+      render(<FileViewer files={[doc()]} index={0} onIndexChange={() => {}} onClose={() => {}} />);
+      expect(title()).toHaveTextContent('my favorite department');
+      const page = within(viewer()).getByRole('article', { name: 'my favorite department' });
+      // Its headings nest under the viewer's own (h2).
+      expect(within(page).getByRole('heading', { level: 3, name: '课堂反思' })).toBeInTheDocument();
+      expect(page.querySelector('s')).toHaveTextContent('gone');
+      expect(page.querySelector('p[style*="text-align: center"]')).not.toBeNull();
+      expect(page.querySelector('blockquote')).toHaveTextContent('引用');
+      expect(within(page).getByText('[Video]')).toBeInTheDocument();
+      expect(within(page).queryByRole('link')).toBeNull();
+      expect(viewer().querySelector('iframe, img, video, audio')).toBeNull();
+      expect(viewer().innerHTML).not.toContain('/api/files/g');
+      expect(within(viewer()).queryByText('Open this online document on Yungu.')).toBeNull();
+      expect(within(viewer()).queryByRole('link', { name: 'Download' })).toBeNull();
+      expect(within(viewer()).getByText('Online document')).toBeInTheDocument();
+    });
+
+    it('offers Edit when the viewer allows it', async () => {
+      const onEdit = vi.fn();
+      const { rerender } = render(<FileViewer files={[doc()]} index={0} onIndexChange={() => {}} onClose={() => {}} />);
+      expect(within(viewer()).queryByRole('button', { name: 'Edit' })).toBeNull();
+      rerender(<FileViewer files={[doc()]} index={0} onIndexChange={() => {}} onClose={() => {}} onEdit={onEdit} />);
+      await userEvent.click(within(viewer()).getByRole('button', { name: 'Edit' }));
+      expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 'g' }));
+    });
+
+    it('falls back to Yungu when its content is missing or unreadable, with nothing to edit', () => {
+      for (const content of [undefined, 'not json']) {
+        const { unmount } = render(
+          <FileViewer files={[doc({ content })]} index={0} onIndexChange={() => {}} onClose={() => {}} onEdit={() => {}} />,
+        );
+        expect(within(viewer()).getByText('Open this online document on Yungu.')).toBeInTheDocument();
+        expect(within(viewer()).queryByRole('button', { name: 'Edit' })).toBeNull();
+        expect(within(viewer()).queryByRole('link', { name: 'Open in new tab' })).toBeNull();
+        unmount();
+      }
+    });
   });
 
   it('closes with Escape and the close button', async () => {

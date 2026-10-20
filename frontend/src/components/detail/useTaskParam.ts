@@ -9,9 +9,12 @@ export interface TaskParam {
   isOpen: boolean;
   /** `&write=1`: the pop-up shows the writing view. */
   writing: boolean;
+  /** `&doc=FILEID` beside `&write=1`: the writer edits that online document (null: a new one). */
+  docId: string | null;
   open(id: number): void;
   close(): void;
-  openWriter(): void;
+  /** Opens the writer, for the online document `docId` or (without one) for a new document. */
+  openWriter(docId?: string): void;
   closeWriter(): void;
 }
 
@@ -34,7 +37,8 @@ function currentMarks(): EntryMarks {
 export const OpenTaskContext = createContext<(id: number) => void>(() => {});
 
 /**
- * The open assignment lives in the URL (`?task=ID`, writer `&write=1`) so refresh, Back and links work.
+ * The open assignment lives in the URL (`?task=ID`, writer `&write=1`, an online document in it
+ * `&doc=FILEID`) so refresh, Back and links work.
  * Opening pushes a history entry; closing goes back over the entries we pushed, or, for a direct link,
  * replaces the URL without the params. Other params (`?tab=`) are kept. Like the tab switch, this uses
  * the native History API, which Next syncs with `useSearchParams` without a server round trip.
@@ -47,6 +51,8 @@ export function useTaskParam(): TaskParam {
   const raw = params.get('task');
   const taskId = raw !== null && /^\d{1,15}$/.test(raw) ? Number(raw) : null;
   const query = params.toString();
+  const writing = raw !== null && params.get('write') === '1';
+  const doc = params.get('doc');
   // Set while a close is navigating; cleared once the URL has changed.
   const closing = useRef(false);
   useEffect(() => {
@@ -70,11 +76,13 @@ export function useTaskParam(): TaskParam {
   return {
     taskId,
     isOpen: raw !== null,
-    writing: raw !== null && params.get('write') === '1',
+    writing,
+    docId: writing && doc ? doc : null,
     open(id) {
       const marks: EntryMarks = { ylTask: true };
       window.history.pushState(marks, '', url((next) => {
         next.delete('write');
+        next.delete('doc');
         next.set('task', String(id));
       }));
     },
@@ -84,6 +92,7 @@ export function useTaskParam(): TaskParam {
         const list = url((next) => {
           next.delete('task');
           next.delete('write');
+          next.delete('doc');
         });
         if (ylTask) {
           window.history.go(ylWrite ? -2 : -1);
@@ -97,14 +106,22 @@ export function useTaskParam(): TaskParam {
         }
       });
     },
-    openWriter() {
+    openWriter(docId) {
       const marks: EntryMarks = { ...(currentMarks().ylTask ? { ylTask: true } : {}), ylWrite: true };
-      window.history.pushState(marks, '', url((next) => next.set('write', '1')));
+      window.history.pushState(marks, '', url((next) => {
+        next.set('write', '1');
+        if (docId) next.set('doc', docId);
+        else next.delete('doc');
+      }));
     },
     closeWriter() {
       once(() => {
         if (currentMarks().ylWrite) window.history.go(-1);
-        else window.history.replaceState(null, '', url((next) => next.delete('write')));
+        else
+          window.history.replaceState(null, '', url((next) => {
+            next.delete('write');
+            next.delete('doc');
+          }));
       });
     },
   };

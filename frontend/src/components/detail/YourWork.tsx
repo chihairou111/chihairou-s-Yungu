@@ -22,14 +22,14 @@ import { chinaDueLabel } from '@/lib/time';
 import type { FileRef } from '@/lib/types';
 import CameraDialog from './CameraDialog';
 import { FileKindIcon, fileCaption, formatBytes } from './FileThumb';
-import FileViewer from './FileViewer';
+import FileViewer, { docDelta } from './FileViewer';
 import RecorderDialog from './RecorderDialog';
 import type { PendingUpload, WorkStatus } from './useWork';
 import { useWorkContext } from './WorkContext';
 
 interface YourWorkProps {
-  /** Switches the pop-up to the writing view. */
-  onWrite: () => void;
+  /** Switches the pop-up to the writing view: for the online document `docId`, or a new document. */
+  onWrite: (docId?: string) => void;
   /** Where focus lands when the panel mounts (back from the writer): its Write button, or a new file's row. */
   focusOnMount?: WorkFocus | null;
 }
@@ -38,7 +38,8 @@ export type WorkFocus = { kind: 'write' } | { kind: 'file'; id: string };
 
 /**
  * The student's side of the assignment: status, the files added so far (each opens in the viewer and
- * can be removed), the four ways to add work (Record, Camera, Write, Upload) and Submit, which reads
+ * can be removed; an online document not yet handed in opens straight in the writer, a handed-in one in
+ * the viewer's preview with Edit), the four ways to add work (Record, Camera, Write, Upload) and Submit, which reads
  * Update once the work has been handed in, and "Mark as submitted" where the assignment takes no files and
  * none are added. Record and Camera open their own small dialogs on top of the
  * pop-up, which add what they made like an upload. After a submit, edits only change the draft: a notice says
@@ -79,6 +80,13 @@ export default function YourWork({ onWrite, focusOnMount = null }: YourWorkProps
   const open = (index: number) => {
     setViewing(index);
     setLastViewed(index);
+  };
+  // Edit in the viewer: the writer opens once the viewer has faded out, so the two never cut into each other.
+  const editAfterViewer = useRef<string | null>(null);
+  const openRow = (index: number) => {
+    const file = work.files[index];
+    if (docDelta(file) && !work.submittedFileIds.includes(file.id)) onWrite(file.id);
+    else open(index);
   };
 
   const addAll = (picked: FileList | null) => {
@@ -168,7 +176,7 @@ export default function YourWork({ onWrite, focusOnMount = null }: YourWorkProps
       ) : (
         <Stack component="ul" ref={list} aria-label="Your files" sx={{ listStyle: 'none', m: 0, p: 0, mt: 2, gap: 0.5 }}>
           {work.files.map((file, i) => (
-            <FileRow key={file.id} file={file} onOpen={() => open(i)} onRemove={() => removeAt(i)} disabled={work.submitting} />
+            <FileRow key={file.id} file={file} onOpen={() => openRow(i)} onRemove={() => removeAt(i)} disabled={work.submitting} />
           ))}
           {work.uploads.map((upload) => (
             <UploadRow key={upload.key} upload={upload} />
@@ -208,7 +216,7 @@ export default function YourWork({ onWrite, focusOnMount = null }: YourWorkProps
         <AddButton icon={<PhotoCameraOutlined />} onClick={() => setCapture('camera')} disabled={work.submitting}>
           Camera
         </AddButton>
-        <AddButton icon={<EditNoteOutlined />} onClick={onWrite} disabled={work.submitting} buttonRef={writeButton}>
+        <AddButton icon={<EditNoteOutlined />} onClick={() => onWrite()} disabled={work.submitting} buttonRef={writeButton}>
           Write
         </AddButton>
         <AddButton
@@ -285,6 +293,15 @@ export default function YourWork({ onWrite, focusOnMount = null }: YourWorkProps
         index={Math.min(viewing ?? lastViewed, Math.max(0, work.files.length - 1))}
         onIndexChange={open}
         onClose={() => setViewing(null)}
+        onEdit={(file) => {
+          editAfterViewer.current = file.id;
+          setViewing(null);
+        }}
+        onExited={() => {
+          const docId = editAfterViewer.current;
+          editAfterViewer.current = null;
+          if (docId) onWrite(docId);
+        }}
       />
     </Box>
   );

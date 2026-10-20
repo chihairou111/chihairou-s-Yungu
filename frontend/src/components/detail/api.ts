@@ -76,7 +76,3 @@ export async function deleteComment(id: number, commentId: string): Promise<void
   await request(`/api/assignments/${id}/comments/${encodeURIComponent(commentId)}`, { method: 'DELETE' });
 }
 
-/** Renders written work (editor HTML) to a PDF on the server and stores it like an upload. */
-export function renderPdf(title: string, html: string, signal?: AbortSignal): Promise<FileRef> {
-  return request('/api/render-pdf', json('POST', { title, html }, signal));
-}

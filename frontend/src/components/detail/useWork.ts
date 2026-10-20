@@ -28,6 +28,8 @@ export interface Work {
   submittedAt: number | undefined;
   /** After a submit: the draft differs from what was handed in, so Update has something to hand in. */
   changed: boolean;
+  /** The files as last handed in: an online document among them is never saved over, only replaced. */
+  submittedFileIds: string[];
   /**
    * "Mark as submitted": the assignment takes no files, is not handed in, and Your work is empty — so
    * `submit()` hands in an empty list (the server decides again and answers 400/502 when it disagrees).
@@ -42,8 +44,14 @@ export interface Work {
   error: string | null;
   /** The last failure was a 401: the error says so and the panel offers a way to sign in. */
   sessionEnded: boolean;
-  /** Adds a file made elsewhere (the writer's PDF); resolves false when the draft save failed and it was taken back out. */
+  /** Adds a file made elsewhere (the writer's document); resolves false when the draft save failed and it was taken back out. */
   add(file: FileRef): Promise<boolean>;
+  /**
+   * Puts `file` where `oldId` is (at the end when it has gone): a handed-in online document's new version.
+   * The same id (a document saved in place) only takes its new title and text, with no draft save.
+   * Resolves false when the draft save failed and the old file was put back.
+   */
+  replace(oldId: string, file: FileRef): Promise<boolean>;
   addLocal(file: File): Promise<void>;
   /** Uploads several local files at once; failures are collected, each naming its file. */
   addFiles(files: File[]): Promise<void>;
@@ -154,6 +162,24 @@ export function useWork(detail: AssignmentDetail): Work {
     [change],
   );
 
+  const replace = useCallback(
+    async (oldId: string, file: FileRef) => {
+      setFailure(null);
+      const before = filesRef.current;
+      const index = before.findIndex((f) => f.id === oldId);
+      if (index < 0) return change([...before, file], (current) => current.filter((f) => f.id !== file.id));
+      const old = before[index];
+      const next = before.map((f, i) => (i === index ? file : f));
+      if (oldId === file.id) {
+        filesRef.current = next;
+        setFiles(next);
+        return true;
+      }
+      return change(next, (current) => current.map((f) => (f.id === file.id ? old : f)));
+    },
+    [change],
+  );
+
   const uploadOne = useCallback(
     async (file: File) => {
       const refuse = (error: ApiError) => fail(error, uploadMessage(file.name, error));
@@ -248,6 +274,7 @@ export function useWork(detail: AssignmentDetail): Work {
     status,
     submittedAt: submittedAt || undefined,
     changed,
+    submittedFileIds: handedInIds,
     canMarkSubmitted,
     busy: submitting || saving > 0 || uploads.length > 0,
     submitting,
@@ -255,6 +282,7 @@ export function useWork(detail: AssignmentDetail): Work {
     error: failure?.messages[0] ?? null,
     sessionEnded: failure?.session ?? false,
     add,
+    replace,
     addLocal,
     addFiles,
     remove,

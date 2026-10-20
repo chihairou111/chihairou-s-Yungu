@@ -106,6 +106,8 @@ describe('YourWork', () => {
     setup(detail());
     await user.click(screen.getByRole('button', { name: 'Write' }));
     expect(handlers.onWrite).toHaveBeenCalledOnce();
+    // A new document: no document id (not the click event either).
+    expect(handlers.onWrite).toHaveBeenCalledWith();
   });
 
   it('Record and Camera open their dialogs, which say so on plain HTTP and hand focus back on close', async () => {
@@ -344,6 +346,43 @@ describe('YourWork', () => {
     expect(screen.getByRole('status')).toHaveTextContent(NOT_HANDED_IN);
     expect(screen.getByRole('button', { name: 'Update' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Update' })).not.toHaveAttribute('aria-disabled');
+  });
+
+  describe('online documents', () => {
+    const content = JSON.stringify({ ops: [{ insert: '反思' }, { insert: '\n', attributes: { header: 1 } }, { insert: '正文\n' }] });
+    const doc = (id: string, extra: Partial<FileRef> = {}): FileRef => ({ ...ref(id, '课堂反思'), size: 0, online: true, content, ...extra });
+
+    it('a document not handed in opens straight in the writer', async () => {
+      const user = userEvent.setup();
+      setup(detail({ myFiles: [doc('d1')] }));
+      const row = screen.getByRole('button', { name: '课堂反思, Online document' });
+      await user.click(row);
+      expect(handlers.onWrite).toHaveBeenCalledWith('d1');
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
+    it('a handed-in document opens in the preview, whose Edit opens the writer for it', async () => {
+      const user = userEvent.setup();
+      setup(detail({ submitted: true, submittedAt: NOW, myFiles: [doc('d1')], submittedFileIds: ['d1'] }));
+      await user.click(screen.getByRole('button', { name: '课堂反思, Online document' }));
+      const viewer = await screen.findByRole('dialog', { name: '课堂反思' });
+      expect(within(viewer).getByRole('heading', { level: 3, name: '反思' })).toBeInTheDocument();
+      expect(handlers.onWrite).not.toHaveBeenCalled();
+      await user.click(within(viewer).getByRole('button', { name: 'Edit' }));
+      // The writer opens once the viewer has faded out.
+      await waitFor(() => expect(handlers.onWrite).toHaveBeenCalledWith('d1'));
+      expect(screen.queryByRole('dialog', { name: '课堂反思' })).toBeNull();
+    });
+
+    it('a document whose text cannot be read opens in the viewer, with nothing to edit', async () => {
+      const user = userEvent.setup();
+      setup(detail({ myFiles: [doc('d1', { content: undefined })] }));
+      await user.click(screen.getByRole('button', { name: '课堂反思, Online document' }));
+      const viewer = await screen.findByRole('dialog', { name: '课堂反思' });
+      expect(within(viewer).getByText('Open this online document on Yungu.')).toBeInTheDocument();
+      expect(within(viewer).queryByRole('button', { name: 'Edit' })).toBeNull();
+      expect(handlers.onWrite).not.toHaveBeenCalled();
+    });
   });
 
   describe('Mark as submitted', () => {

@@ -89,6 +89,39 @@ describe('useTaskParam', () => {
     expect(go).toHaveBeenCalledWith(-1);
   });
 
+  it('reads the document being written from &doc=, only with the writer open', () => {
+    nav.search = 'task=101&write=1&doc=fx-doc-208';
+    expect(renderHook(() => useTaskParam()).result.current).toMatchObject({ writing: true, docId: 'fx-doc-208' });
+    nav.search = 'task=101&doc=fx-doc-208';
+    expect(renderHook(() => useTaskParam()).result.current).toMatchObject({ writing: false, docId: null });
+    nav.search = 'task=101&write=1';
+    expect(renderHook(() => useTaskParam()).result.current.docId).toBeNull();
+  });
+
+  it('opens the writer for an online document with &doc=FILEID', () => {
+    nav.search = 'task=101';
+    setHistoryState({ ylTask: true });
+    const push = vi.spyOn(window.history, 'pushState').mockImplementation(() => {});
+    const { result } = renderHook(() => useTaskParam());
+    result.current.openWriter('a b/1');
+    expect(push).toHaveBeenCalledWith({ ylTask: true, ylWrite: true }, '', '/assignments?task=101&write=1&doc=a+b%2F1');
+    result.current.openWriter();
+    expect(push).toHaveBeenLastCalledWith({ ylTask: true, ylWrite: true }, '', '/assignments?task=101&write=1');
+  });
+
+  it('drops doc= with write=1 when the writer or the task closes', () => {
+    nav.search = 'task=101&write=1&doc=d1';
+    setHistoryState(null);
+    const replace = vi.spyOn(window.history, 'replaceState').mockImplementation(() => {});
+    const { result, rerender } = renderHook(() => useTaskParam());
+    result.current.closeWriter();
+    expect(replace).toHaveBeenLastCalledWith(null, '', '/assignments?task=101');
+    nav.search = 'tab=submitted&task=101&write=1&doc=d1';
+    rerender();
+    result.current.close();
+    expect(replace).toHaveBeenLastCalledWith(null, '', '/assignments?tab=submitted');
+  });
+
   it('closes a directly linked writer by dropping only write=1', () => {
     nav.search = 'task=101&write=1';
     setHistoryState(null);

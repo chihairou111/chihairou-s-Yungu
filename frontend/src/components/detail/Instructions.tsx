@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
+import type { Theme } from '@mui/material/styles';
 import ExpandLess from '@mui/icons-material/ExpandLess';
 import ExpandMore from '@mui/icons-material/ExpandMore';
 
@@ -51,6 +52,35 @@ export function stripTitle(html: string, title: string): string {
   const text = comparable(inner);
   return text !== '' && text === comparable(title) ? html.slice(first[0].length).replace(/^\s+/, '') : html;
 }
+
+/** Rich text set for reading: the teacher's instructions, and an online document's preview. */
+export const proseSx = (theme: Theme) =>
+  ({
+    maxWidth: '72ch',
+    overflowWrap: 'anywhere',
+    ...theme.typography.body1,
+    lineHeight: 1.7,
+    color: 'text.primary',
+    '& > :first-child': { mt: 0 },
+    '& > :last-child': { mb: 0 },
+    '& p, & ul, & ol, & blockquote': { my: 1.25 },
+    '& ul, & ol': { pl: 3 },
+    '& li + li': { mt: 0.5 },
+    // The teacher's own headings sit under the section label ("Instructions"), never above it:
+    // a touch smaller than it, medium weight (the label is 500–600), lower levels in the muted colour.
+    '& h4, & h5, & h6': { fontSize: '0.9375rem', fontWeight: 600, lineHeight: 1.5, letterSpacing: '0.01em', mt: 2.5, mb: 0.5 },
+    '& h5, & h6': { color: 'text.secondary' },
+    '& a': {
+      color: 'primary.main',
+      textDecorationThickness: '1px',
+      textUnderlineOffset: '0.2em',
+      '&:hover': { textDecorationThickness: '2px' },
+      '&:focus-visible': { outline: `2px solid ${theme.palette.primary.main}`, outlineOffset: 2, borderRadius: '2px' },
+    },
+    '& img': { display: 'block', maxWidth: '100%', height: 'auto', my: 1.5, borderRadius: `${theme.yungu.shape.small}px` },
+    '& blockquote': { mx: 0, pl: 2, color: 'text.secondary', fontStyle: 'normal' },
+    '& table': { display: 'block', maxWidth: '100%', overflowX: 'auto', borderCollapse: 'collapse' },
+  }) as const;
 
 /**
  * The teacher's instructions (HTML, sanitised on the server) set for reading: a comfortable measure,
@@ -101,32 +131,7 @@ export default function Instructions({ html: rawHtml, title }: { html: string; /
             // Already sanitised on the server with an allowlist (`sanitizeInstructions`).
             dangerouslySetInnerHTML={{ __html: nestHeadings(html) }}
             sx={[
-              (theme) => ({
-                maxWidth: '72ch',
-                overflowWrap: 'anywhere',
-                ...theme.typography.body1,
-                lineHeight: 1.7,
-                color: 'text.primary',
-                '& > :first-child': { mt: 0 },
-                '& > :last-child': { mb: 0 },
-                '& p, & ul, & ol, & blockquote': { my: 1.25 },
-                '& ul, & ol': { pl: 3 },
-                '& li + li': { mt: 0.5 },
-                // The teacher's own headings sit under the section label ("Instructions"), never above it:
-                // a touch smaller than it, medium weight (the label is 500–600), lower levels in the muted colour.
-                '& h4, & h5, & h6': { fontSize: '0.9375rem', fontWeight: 600, lineHeight: 1.5, letterSpacing: '0.01em', mt: 2.5, mb: 0.5 },
-                '& h5, & h6': { color: 'text.secondary' },
-                '& a': {
-                  color: 'primary.main',
-                  textDecorationThickness: '1px',
-                  textUnderlineOffset: '0.2em',
-                  '&:hover': { textDecorationThickness: '2px' },
-                  '&:focus-visible': { outline: `2px solid ${theme.palette.primary.main}`, outlineOffset: 2, borderRadius: '2px' },
-                },
-                '& img': { display: 'block', maxWidth: '100%', height: 'auto', my: 1.5, borderRadius: `${theme.yungu.shape.small}px` },
-                '& blockquote': { mx: 0, pl: 2, color: 'text.secondary', fontStyle: 'normal' },
-                '& table': { display: 'block', maxWidth: '100%', overflowX: 'auto', borderCollapse: 'collapse' },
-              }),
+              proseSx,
               collapsed && {
                 maxHeight: COLLAPSED_PX,
                 overflow: 'hidden',

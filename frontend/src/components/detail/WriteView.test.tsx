@@ -4,29 +4,37 @@ import { Editor } from '@tiptap/react';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AssignmentDetail, FileRef } from '@/lib/types';
 import { HOUR, NOW, todo } from '../test-fixtures';
+import { docTooLongMessage, ONLINE_DOC_MAX_BYTES } from '@/lib/limits';
 import { ApiError } from './api';
 import { shortcutLabel } from './EditorToolbar';
 import WriteView from './WriteView';
 import { WRITER_EXTENSIONS } from './writerExtensions';
 
-const api = vi.hoisted(() => ({ renderPdf: vi.fn() }));
+const api = vi.hoisted(() => ({ createOnlineDoc: vi.fn(), updateOnlineDoc: vi.fn() }));
 vi.mock('./api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./api')>()),
-  renderPdf: api.renderPdf,
+  createOnlineDoc: api.createOnlineDoc,
+  updateOnlineDoc: api.updateOnlineDoc,
 }));
 
-const work = vi.hoisted(() => ({ add: vi.fn() }));
+const work = vi.hoisted(() => ({
+  add: vi.fn(),
+  replace: vi.fn(),
+  files: [] as FileRef[],
+  submittedFileIds: [] as string[],
+  submitting: false,
+}));
 vi.mock('./WorkContext', () => ({ useWorkContext: () => work }));
 
-const PDF: FileRef = {
-  id: 'f1',
-  name: '观察记录.pdf',
-  kind: 'pdf',
-  mime: 'application/pdf',
-  size: 30_000,
-  url: '/api/files/f1',
-  createdAt: NOW,
-};
+const delta = (...lines: string[]) => JSON.stringify({ ops: [{ insert: `${lines.join('\n')}\n` }] });
+
+/** An online document as Yungu hands it back. */
+function onlineDoc(id: string, name: string, content: string): FileRef {
+  return { id, name, kind: 'other', mime: 'application/octet-stream', size: 0, url: `/api/files/${id}`, online: true, content, createdAt: NOW };
+}
+
+const SAVED = onlineDoc('doc-new', '观察记录', delta('Hello'));
+const EXISTING = onlineDoc('doc-1', '课堂反思', delta('第一段'));
 
 function detail(): AssignmentDetail {
   return {
@@ -45,9 +53,11 @@ function detail(): AssignmentDetail {
 const onBack = vi.fn();
 const onDone = vi.fn();
 
-function open() {
-  return render(<WriteView detail={detail()} titleId="t" onBack={onBack} onDone={onDone} />);
+function open(docId: string | null = null) {
+  return render(<WriteView detail={detail()} titleId="t" docId={docId} onBack={onBack} onDone={onDone} />);
 }
+
+const saveButton = () => screen.getByRole('button', { name: 'Save to Your work' });
 
 /** The Tiptap document, once the client-only editor has mounted. */
 async function editor(): Promise<HTMLElement> {
@@ -70,6 +80,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   work.add.mockResolvedValue(true);
+  work.replace.mockResolvedValue(true);
+  work.files = [];
+  work.submittedFileIds = [];
+  work.submitting = false;
 });
 
 describe('WriteView', () => {
@@ -156,16 +170,24 @@ describe('WriteView', () => {
     expect(shortcutLabel({ key: 'Z', shift: true }, false)).toBe('Ctrl+Shift+Z');
   });
 
-  it('refuses to export an empty document without calling the server', async () => {
+  it('has no PDF export left: the final action saves to Your work', async () => {
     open();
     await editor();
-    await userEvent.click(screen.getByRole('button', { name: 'Done' }));
-    expect(await screen.findByText('Nothing to export yet.')).toBeInTheDocument();
-    expect(api.renderPdf).not.toHaveBeenCalled();
+    expect(saveButton()).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
+    expect('renderPdf' in (await vi.importActual<typeof import('./api')>('./api'))).toBe(false);
   });
 
-  it('exports to PDF, adds it to Your work, clears the draft and reports back', async () => {
-    api.renderPdf.mockResolvedValue(PDF);
+  it('refuses to save an empty document without calling the server', async () => {
+    open();
+    await editor();
+    await userEvent.click(saveButton());
+    expect(await screen.findByText('Nothing to save yet.')).toBeInTheDocument();
+    expect(api.createOnlineDoc).not.toHaveBeenCalled();
+  });
+
+  it('saves a new document on Yungu, adds it to Your work, clears the draft and reports back', async () => {
+    api.createOnlineDoc.mockResolvedValue(SAVED);
     // The dialog swaps the writer out a moment later (a history step); nothing may write the draft back meanwhile.
     const view = open();
     let left = false;
@@ -180,24 +202,194 @@ describe('WriteView', () => {
     await userEvent.clear(title);
     await userEvent.type(title, '观察记录');
     await userEvent.type(await editor(), 'Hello');
-    await userEvent.click(screen.getByRole('button', { name: 'Done' }));
-    await waitFor(() => expect(onDone).toHaveBeenCalledWith(PDF));
-    expect(api.renderPdf).toHaveBeenCalledWith('观察记录', '<p>Hello</p>', expect.any(AbortSignal));
-    expect(work.add).toHaveBeenCalledWith(PDF);
+    await userEvent.click(saveButton());
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith(SAVED));
+    expect(api.createOnlineDoc).toHaveBeenCalledWith(94616, '观察记录', delta('Hello'));
+    expect(api.updateOnlineDoc).not.toHaveBeenCalled();
+    expect(work.add).toHaveBeenCalledWith(SAVED);
+    expect(work.replace).not.toHaveBeenCalled();
     await waitFor(() => expect(left).toBe(true));
     expect(localStorage.getItem(DRAFT)).toBeNull();
     expect(localStorage.getItem(`${DRAFT}_title`)).toBeNull();
   });
 
-  it('keeps the draft and says why when the PDF fails', async () => {
-    api.renderPdf.mockRejectedValue(new ApiError(500, 'Could not create the PDF. Try again.'));
+  it('falls back to the assignment title when the title is cleared', async () => {
+    api.createOnlineDoc.mockResolvedValue(SAVED);
+    open();
+    await userEvent.clear(screen.getByRole('textbox', { name: 'Title' }));
+    await userEvent.type(await editor(), 'Hello');
+    await userEvent.click(saveButton());
+    await waitFor(() => expect(api.createOnlineDoc).toHaveBeenCalledWith(94616, 'Task 3：开始第一次观察', delta('Hello')));
+  });
+
+  it('keeps the draft and says why when Yungu does not save it', async () => {
+    api.createOnlineDoc.mockRejectedValue(new ApiError(502, "Yungu couldn't save the document. Try again."));
     open();
     await userEvent.type(await editor(), 'Hello');
-    await userEvent.click(screen.getByRole('button', { name: 'Done' }));
-    expect(await screen.findByText('Could not create the PDF. Try again.')).toBeInTheDocument();
+    await userEvent.click(saveButton());
+    expect(await screen.findByText("Yungu couldn't save the document. Try again.")).toBeInTheDocument();
     expect(onDone).not.toHaveBeenCalled();
     expect((await editor()).textContent).toBe('Hello');
     await waitFor(() => expect(localStorage.getItem(DRAFT)).toBe('<p>Hello</p>'));
+  });
+
+  it('keeps the draft when the document is saved but Your work is not, and retrying saves that same document', async () => {
+    api.createOnlineDoc.mockResolvedValue(SAVED);
+    api.updateOnlineDoc.mockResolvedValue(SAVED);
+    work.add.mockResolvedValueOnce(false);
+    open();
+    await userEvent.type(await editor(), 'Hello');
+    await userEvent.click(saveButton());
+    expect(await screen.findByText('Saved on Yungu, but not added to Your work. Try again.')).toBeInTheDocument();
+    expect(onDone).not.toHaveBeenCalled();
+    await waitFor(() => expect(localStorage.getItem(DRAFT)).toBe('<p>Hello</p>'));
+    // No second document on Yungu: the one just made is saved again and added.
+    await userEvent.click(saveButton());
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith(SAVED));
+    expect(api.createOnlineDoc).toHaveBeenCalledTimes(1);
+    expect(api.updateOnlineDoc).toHaveBeenCalledWith(94616, 'doc-new', 'Task 3：开始第一次观察', delta('Hello'));
+    expect(work.add).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses a document over Yungu\'s limit before sending anything, and keeps the text', async () => {
+    // The local draft is written as typed; seed it so the editor opens with a long text.
+    const long = '观'.repeat(21_840);
+    localStorage.setItem(DRAFT, `<p>${long}</p>`);
+    open();
+    expect((await editor()).textContent).toBe(long);
+    await userEvent.click(saveButton());
+    const content = JSON.stringify({ ops: [{ insert: `${long}\n` }] });
+    expect(new TextEncoder().encode(content).length).toBeGreaterThan(ONLINE_DOC_MAX_BYTES);
+    expect(await screen.findByText(docTooLongMessage(content)!)).toBeInTheDocument();
+    expect(screen.getByText('Too long for Yungu — cut about 4 characters.')).toBeInTheDocument();
+    expect(api.createOnlineDoc).not.toHaveBeenCalled();
+    expect(localStorage.getItem(DRAFT)).toBe(`<p>${long}</p>`);
+  });
+
+  it('saves a document of exactly 65 535 bytes', async () => {
+    api.createOnlineDoc.mockResolvedValue(SAVED);
+    // {"ops":[{"insert":"…\n"}]} is 25 bytes around the text; 21 836 CJK characters + 2 ASCII = 65 535.
+    const text = `${'观'.repeat(21_836)}ab`;
+    localStorage.setItem(DRAFT, `<p>${text}</p>`);
+    open();
+    await editor();
+    await userEvent.click(saveButton());
+    await waitFor(() => expect(api.createOnlineDoc).toHaveBeenCalled());
+    expect(new TextEncoder().encode(api.createOnlineDoc.mock.calls[0][2]).length).toBe(ONLINE_DOC_MAX_BYTES);
+  });
+
+  it('warns before saving what Yungu cannot keep, and saves only on "Save anyway"', async () => {
+    api.createOnlineDoc.mockResolvedValue(SAVED);
+    localStorage.setItem(DRAFT, '<p>one<br>two</p>');
+    open();
+    await editor();
+    await userEvent.click(saveButton());
+    expect(
+      await screen.findByText("Yungu can't keep nested lists or line breaks inside a paragraph — they'll be saved as separate lines."),
+    ).toBeInTheDocument();
+    expect(api.createOnlineDoc).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Save anyway' }));
+    await waitFor(() => expect(api.createOnlineDoc).toHaveBeenCalledWith(94616, 'Task 3：开始第一次观察', delta('one', 'two')));
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith(SAVED));
+  });
+
+  describe('an existing online document', () => {
+    it('opens with its Yungu text and title, and saves it in place when it is not handed in', async () => {
+      const updated = onlineDoc('doc-1', '课堂反思', delta('更多第一段'));
+      api.updateOnlineDoc.mockResolvedValue(updated);
+      work.files = [EXISTING];
+      open('doc-1');
+      const doc = await editor();
+      expect(doc.textContent).toBe('第一段');
+      expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('课堂反思');
+      // jsdom puts the caret at the start of the existing text.
+      await userEvent.type(doc, '更多');
+      await userEvent.click(saveButton());
+      await waitFor(() => expect(onDone).toHaveBeenCalledWith(updated));
+      expect(api.updateOnlineDoc).toHaveBeenCalledWith(94616, 'doc-1', '课堂反思', delta('更多第一段'));
+      expect(api.createOnlineDoc).not.toHaveBeenCalled();
+      expect(work.replace).toHaveBeenCalledWith('doc-1', updated);
+      expect(work.add).not.toHaveBeenCalled();
+      expect(localStorage.getItem(`${DRAFT}_doc_doc-1`)).toBeNull();
+    });
+
+    it('saves a handed-in document as a new one that takes its place (Review Focus 2)', async () => {
+      const fresh = onlineDoc('doc-2', '课堂反思', delta('更多第一段'));
+      api.createOnlineDoc.mockResolvedValue(fresh);
+      work.files = [EXISTING];
+      work.submittedFileIds = ['doc-1'];
+      open('doc-1');
+      const doc = await editor();
+      // jsdom puts the caret at the start of the existing text.
+      await userEvent.type(doc, '更多');
+      await userEvent.click(saveButton());
+      await waitFor(() => expect(onDone).toHaveBeenCalledWith(fresh));
+      expect(api.createOnlineDoc).toHaveBeenCalledWith(94616, '课堂反思', delta('更多第一段'));
+      expect(api.updateOnlineDoc).not.toHaveBeenCalled();
+      expect(work.replace).toHaveBeenCalledWith('doc-1', fresh);
+      expect(work.submittedFileIds).toEqual(['doc-1']);
+    });
+
+    it('saves as a new one when Yungu says the document was handed in after all', async () => {
+      const fresh = onlineDoc('doc-2', '课堂反思', delta('第一段'));
+      api.updateOnlineDoc.mockRejectedValue(new ApiError(409, 'This document was handed in — save it as a new one.'));
+      api.createOnlineDoc.mockResolvedValue(fresh);
+      work.files = [EXISTING];
+      open('doc-1');
+      await editor();
+      await userEvent.click(saveButton());
+      await waitFor(() => expect(onDone).toHaveBeenCalledWith(fresh));
+      expect(work.replace).toHaveBeenCalledWith('doc-1', fresh);
+    });
+
+    it('keeps its own local draft and reopens it while the Yungu version is unchanged', async () => {
+      work.files = [EXISTING];
+      const view = open('doc-1');
+      const doc = await editor();
+      await userEvent.type(doc, '，继续');
+      await waitFor(() => expect(localStorage.getItem(`${DRAFT}_doc_doc-1`)).toBe('<p>，继续第一段</p>'));
+      expect(localStorage.getItem(DRAFT)).toBeNull();
+      view.unmount();
+      open('doc-1');
+      expect((await editor()).textContent).toBe('，继续第一段');
+      expect(screen.queryByRole('button', { name: 'Use my unsaved draft' })).toBeNull();
+    });
+
+    it('opens the Yungu version when it changed since the local draft, and offers the draft', async () => {
+      work.files = [EXISTING];
+      localStorage.setItem(`${DRAFT}_doc_doc-1`, '<p>本地草稿</p>');
+      localStorage.setItem(`${DRAFT}_doc_doc-1_base`, 'an-older-version');
+      open('doc-1');
+      const doc = await editor();
+      expect(doc.textContent).toBe('第一段');
+      expect(await screen.findByText(/unsaved draft of this document/)).toBeInTheDocument();
+      // Neither is overwritten while the choice is open.
+      expect(doc).toHaveAttribute('contenteditable', 'false');
+      expect(localStorage.getItem(`${DRAFT}_doc_doc-1`)).toBe('<p>本地草稿</p>');
+      await userEvent.click(screen.getByRole('button', { name: 'Use my unsaved draft' }));
+      await waitFor(() => expect(doc.textContent).toBe('本地草稿'));
+      expect(doc).toHaveAttribute('contenteditable', 'true');
+      expect(screen.queryByRole('button', { name: 'Use my unsaved draft' })).toBeNull();
+    });
+
+    it('can keep the Yungu version instead, which forgets the local draft', async () => {
+      work.files = [EXISTING];
+      localStorage.setItem(`${DRAFT}_doc_doc-1`, '<p>本地草稿</p>');
+      localStorage.setItem(`${DRAFT}_doc_doc-1_base`, 'an-older-version');
+      open('doc-1');
+      const doc = await editor();
+      await userEvent.click(await screen.findByRole('button', { name: 'Keep the Yungu version' }));
+      expect(doc.textContent).toBe('第一段');
+      expect(doc).toHaveAttribute('contenteditable', 'true');
+      expect(localStorage.getItem(`${DRAFT}_doc_doc-1`)).toBeNull();
+    });
+
+    it('says so when the document is no longer in Your work', async () => {
+      open('doc-gone');
+      expect(await screen.findByText('This document is no longer in Your work.')).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: 'Back to assignment' }));
+      expect(onBack).toHaveBeenCalled();
+    });
   });
 
   it('keeps the draft when going back, even right after typing', async () => {

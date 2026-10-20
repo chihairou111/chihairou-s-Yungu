@@ -12,9 +12,14 @@ import ChevronLeft from '@mui/icons-material/ChevronLeft';
 import ChevronRight from '@mui/icons-material/ChevronRight';
 import Close from '@mui/icons-material/Close';
 import DownloadOutlined from '@mui/icons-material/DownloadOutlined';
+import EditOutlined from '@mui/icons-material/EditOutlined';
 import OpenInNew from '@mui/icons-material/OpenInNew';
+import type { Theme } from '@mui/material/styles';
+import { deltaToHtml, parseDelta, type Delta } from '@/lib/quill-delta';
 import type { FileRef } from '@/lib/types';
+import { embedSx, quoteSx, strikeSx } from './docStyles';
 import { FileKindIcon, fileCaption, previewPdf } from './FileThumb';
+import { proseSx } from './Instructions';
 import { pdfViewUrl } from './pdfThumb';
 
 /**
@@ -43,6 +48,11 @@ function viewPdf(file: FileRef): string | null {
   return pdf === null ? null : pdfViewUrl(pdf);
 }
 
+/** An online document's text, when it came with the document and reads as a Quill delta; else null. */
+export function docDelta(file: FileRef): Delta | null {
+  return file.online && file.content ? parseDelta(file.content) : null;
+}
+
 /** What "Open in new tab" opens: the browser can show a PDF rendition of an Office file, not the file. */
 function viewUrl(file: FileRef): string {
   return viewPdf(file) ?? file.url;
@@ -55,6 +65,10 @@ interface FileViewerProps {
   onIndexChange: (index: number) => void;
   /** Lets the parent keep the viewer mounted while it fades out; open by default. */
   open?: boolean;
+  /** Offers Edit on an online document whose text came with it (the student's own work). */
+  onEdit?: (file: FileRef) => void;
+  /** The viewer has finished fading out. */
+  onExited?: () => void;
 }
 
 /**
@@ -63,7 +77,7 @@ interface FileViewerProps {
  * of files beside it from 900px and as a strip underneath below that. ←/→ step through the files, Esc
  * closes, and focus goes back to whatever opened it.
  */
-export default function FileViewer({ files, index, onClose, onIndexChange, open = true }: FileViewerProps) {
+export default function FileViewer({ files, index, onClose, onIndexChange, open = true, onEdit, onExited }: FileViewerProps) {
   const titleId = useId();
   const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   const at = Math.min(Math.max(index, 0), files.length - 1);
@@ -95,6 +109,7 @@ export default function FileViewer({ files, index, onClose, onIndexChange, open 
       onKeyDown={onKeyDown}
       transitionDuration={reduceMotion ? 0 : undefined}
       slotProps={{
+        transition: { onExited },
         paper: {
           sx: {
             bgcolor: V.bg,
@@ -106,7 +121,15 @@ export default function FileViewer({ files, index, onClose, onIndexChange, open 
         },
       }}
     >
-      <TopBar file={file} titleId={titleId} at={at} count={files.length} onClose={onClose} onStep={(d) => go(at + d)} />
+      <TopBar
+        file={file}
+        titleId={titleId}
+        at={at}
+        count={files.length}
+        onClose={onClose}
+        onStep={(d) => go(at + d)}
+        onEdit={onEdit && docDelta(file) ? () => onEdit(file) : undefined}
+      />
       <Box
         sx={{
           flex: 1,
@@ -133,6 +156,7 @@ interface TopBarProps {
   count: number;
   onClose: () => void;
   onStep: (delta: number) => void;
+  onEdit?: () => void;
 }
 
 const darkOutlined = {
@@ -147,7 +171,7 @@ const darkOutlined = {
   '& .MuiButton-startIcon': { m: { xs: 0, sm: '0 8px 0 -4px' } },
 } as const;
 
-function TopBar({ file, titleId, at, count, onClose, onStep }: TopBarProps) {
+function TopBar({ file, titleId, at, count, onClose, onStep, onEdit }: TopBarProps) {
   return (
     <Stack
       direction="row"
@@ -206,6 +230,24 @@ function TopBar({ file, titleId, at, count, onClose, onStep }: TopBarProps) {
             <ChevronRight />
           </IconButton>
         </Stack>
+      )}
+      {onEdit && (
+        <Button
+          variant="contained"
+          onClick={onEdit}
+          startIcon={<EditOutlined />}
+          sx={{
+            flexShrink: 0,
+            whiteSpace: 'nowrap',
+            minHeight: { xs: 48, sm: 0 },
+            color: V.bg,
+            bgcolor: V.focus,
+            boxShadow: 'none',
+            '&:hover': { bgcolor: '#c2d7fb', boxShadow: 'none' },
+          }}
+        >
+          Edit
+        </Button>
       )}
       {/* An online document has no file behind it: both links would only meet an error. */}
       {!file.online && (
@@ -374,6 +416,8 @@ function Stage({ file }: { file: FileRef }) {
       </Stack>
     );
   }
+  const delta = docDelta(file);
+  if (delta) return <DocPage file={file} delta={delta} />;
   if (file.online) {
     return (
       <Stack sx={{ ...fill, flexDirection: 'column', gap: 1.5, px: 3, textAlign: 'center' }}>
@@ -398,3 +442,58 @@ function Stage({ file }: { file: FileRef }) {
     </Stack>
   );
 }
+
+/** An online document's headings nest under the viewer's title (h2): h1 → h3, h2 → h4. */
+function nestDocHeadings(html: string): string {
+  return html.replace(/<(\/?)h([12])\b/g, (_, slash: string, level: string) => `<${slash}h${Number(level) + 2}`);
+}
+
+/**
+ * An online document, read: its text as a page lit in the dark room, set like the assignment's
+ * instructions. The page scrolls on its own; nothing is fetched (the text came with the document, and
+ * only Yungu's storage serves its images — anything else is a labelled placeholder).
+ */
+function DocPage({ file, delta }: { file: FileRef; delta: Delta }) {
+  const html = nestDocHeadings(deltaToHtml(delta));
+  return (
+    <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', scrollbarColor: `${V.line} transparent` }}>
+      <Box
+        component="article"
+        aria-label={file.name}
+        sx={(theme) => ({
+          boxSizing: 'border-box',
+          maxWidth: 820,
+          minHeight: { xs: '100%', sm: 'auto' },
+          mx: 'auto',
+          px: { xs: 2.5, sm: 6 },
+          py: { xs: 3, sm: 5 },
+          bgcolor: theme.yungu.color.surfaceContainerLowest,
+          color: theme.palette.text.primary,
+          borderRadius: { xs: 0, sm: `${theme.yungu.shape.medium}px` },
+          boxShadow: { sm: '0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.32)' },
+          '& ::selection': { bgcolor: theme.yungu.color.primaryContainer, color: theme.yungu.color.onPrimaryContainer },
+          '& :focus-visible': { outlineColor: `${theme.palette.primary.main} !important` },
+        })}
+      >
+        <Box
+          // Built by deltaToHtml from escaped parts only: http(s) links, Yungu-hosted images, placeholders.
+          dangerouslySetInnerHTML={{ __html: html }}
+          sx={[proseSx, docExtrasSx]}
+        />
+      </Box>
+    </Box>
+  );
+}
+
+/** What a Yungu document has beyond the instructions: two heading steps, strike, quotes, media chips. */
+const docExtrasSx = (theme: Theme) => ({
+  maxWidth: '72ch',
+  mx: 'auto',
+  '& h3': { fontSize: '1.5rem', fontWeight: 700, lineHeight: 1.3, letterSpacing: '-0.01em', mt: 3.5, mb: 1 },
+  '& h4': { fontSize: '1.1875rem', fontWeight: 650, lineHeight: 1.4, letterSpacing: 0, color: 'text.primary', mt: 3, mb: 0.75 },
+  '& s': strikeSx,
+  '& blockquote': { ...quoteSx(theme), my: 1.25, mx: 0 },
+  // Yungu writes a quote one line at a time; consecutive lines read as one quote.
+  '& blockquote + blockquote': { mt: -1.25 },
+  '& .yungu-embed': { ...embedSx(theme), my: 1.25 },
+});

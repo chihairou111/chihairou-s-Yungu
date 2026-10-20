@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sanitizeEditorHtml, sanitizeInstructions } from './sanitize';
+import { sanitizeInstructions } from './sanitize';
 
 describe('sanitizeInstructions', () => {
   it('strips scripts, event handlers and javascript: links but keeps safe markup', () => {
@@ -37,15 +37,3 @@ describe('sanitizeInstructions', () => {
   });
 });
 
-describe('sanitizeEditorHtml', () => {
-  it('keeps the toolbar output and strips style, script and img', () => {
-    const out = sanitizeEditorHtml(
-      '<h1 style="color:red">T</h1><p><strong>b</strong><em>i</em><u>u</u><br></p><ul><li>x</li></ul><ol><li>y</li></ol><h2>h</h2><a href="https://a.b" onclick="x">l</a><script>bad()</script><img src="x.png"><style>p{}</style>',
-    );
-    expect(out).toContain('<h1>T</h1>');
-    expect(out).toContain('<strong>b</strong>');
-    expect(out).toContain('<ul><li>x</li></ul>');
-    expect(out).toContain('<a href="https://a.b">l</a>');
-    for (const bad of ['style', 'script', 'img', 'onclick', 'bad()']) expect(out).not.toContain(bad);
-  });
-});
