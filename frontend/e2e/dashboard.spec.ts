@@ -191,66 +191,44 @@ test.describe('half-width window', () => {
   });
 });
 
-test.describe('style switcher', () => {
+test.describe('one style', () => {
   const card = (page: Page) => page.getByRole('article').first();
   const radius = (page: Page) => card(page).evaluate((el) => getComputedStyle(el).borderTopLeftRadius);
 
-  async function chooseStyle(page: Page, label: string) {
-    await page.getByRole('button', { name: 'Settings' }).click();
-    await page.getByRole('menuitemradio', { name: label }).click();
-  }
-
-  test('the gear switches between rounded and classic at once, and the choice survives a reload', async ({ page }) => {
+  test('the app bar has no Settings gear; the dashboard is Rounded even with an old Classic cookie', async ({ page, context, baseURL }) => {
+    await context.addCookies([{ name: 'yl_style', value: 'classic', url: baseURL! }]);
     await signIn(page);
-    // A new visitor gets the rounded Material 3 style: 12px cards.
-    await expect.poll(() => radius(page)).toBe('12px');
-
-    await chooseStyle(page, 'Classic (Material 2)');
-    await expect.poll(() => radius(page)).toBe('4px');
-    await page.getByRole('button', { name: 'Settings' }).click();
-    await expect(page.getByRole('menuitemradio', { name: 'Classic (Material 2)' })).toHaveAttribute('aria-checked', 'true');
-    await page.keyboard.press('Escape');
-
-    await page.reload();
-    await expect(card(page)).toBeVisible();
-    expect(await radius(page)).toBe('4px');
-    const cookie = (await page.context().cookies()).find((c) => c.name === 'yl_style');
-    expect(cookie?.value).toBe('classic');
-
-    await chooseStyle(page, 'Rounded (Material 3)');
-    await expect.poll(() => radius(page)).toBe('12px');
-    await page.reload();
     await expect(card(page)).toBeVisible();
     expect(await radius(page)).toBe('12px');
+    const bar = page.getByRole('banner');
+    await expect(bar.getByRole('button', { name: 'Settings' })).toHaveCount(0);
+    const labels = await bar.getByRole('button').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')));
+    expect(labels).toEqual([expect.stringMatching(/^Notifications/), 'Refresh', expect.stringMatching(/^Account: /)]);
   });
 
-  test('the sign-in page renders in the stored style on first paint', async ({ page, context, baseURL }) => {
+  test('the sign-in page is Rounded on first paint, whatever an old style cookie says', async ({ page, context, baseURL }) => {
     const card = () => page.locator('main .MuiPaper-root').first();
-    // JavaScript off: what the server rendered is what shows, so the style cannot come from a client-side switch.
+    // JavaScript off: what the server rendered is what shows.
     await page.route('**/*.js', (route) => route.abort());
     await page.goto('/login');
     expect(await card().evaluate((el) => getComputedStyle(el).borderTopLeftRadius)).toBe('28px');
     await context.addCookies([{ name: 'yl_style', value: 'classic', url: baseURL! }]);
     await page.goto('/login');
-    expect(await card().evaluate((el) => getComputedStyle(el).borderTopLeftRadius)).toBe('4px');
+    expect(await card().evaluate((el) => getComputedStyle(el).borderTopLeftRadius)).toBe('28px');
   });
 });
 
-test('refresh: reloads each page from the service past its cache, in either style', async ({ page }) => {
+test('refresh: reloads each page from the service past its cache', async ({ page }) => {
   await signIn(page);
-  for (const [path, style] of [
-    ['/assignments', 'Rounded (Material 3)'],
-    ['/calendar', 'Classic (Material 2)'],
-  ] as const) {
+  for (const path of ['/assignments', '/calendar']) {
     await page.goto(path);
-    await page.getByRole('button', { name: 'Settings' }).click();
-    await page.getByRole('menuitemradio', { name: style }).click();
-    const refresh = page.getByRole('banner').getByRole('button', { name: 'Refresh' });
+    const bar = page.getByRole('banner');
+    const refresh = bar.getByRole('button', { name: 'Refresh' });
     await expect(refresh).toBeVisible();
-    // Left of the gear, the same size.
-    const [r, g] = [await refresh.boundingBox(), await page.getByRole('button', { name: 'Settings' }).boundingBox()];
-    expect(r!.x + r!.width).toBeLessThanOrEqual(g!.x);
-    expect(r!.height).toBe(g!.height);
+    // Right of Notifications, the same size.
+    const [r, n] = [await refresh.boundingBox(), await bar.getByRole('button', { name: 'Notifications' }).boundingBox()];
+    expect(n!.x + n!.width).toBeLessThanOrEqual(r!.x);
+    expect(r!.height).toBe(n!.height);
 
     const dropped = page.waitForResponse((res) => res.url().endsWith('/api/refresh') && res.request().method() === 'POST');
     // The re-render that follows asks for the page again, with the no-cache flag set.

@@ -3,11 +3,10 @@ import Alert from '@mui/material/Alert';
 import { ThemeProvider } from '@mui/material/styles';
 import { describe, expect, it } from 'vitest';
 import { contrastRatio } from '@/lib/colors';
-import { getTheme } from './index';
+import theme from './index';
 
-describe.each(['classic', 'expressive'] as const)('%s error alert', (style) => {
+describe('error alert', () => {
   it('is dark red on the light red tint (the palette error.light, not a lightened copy of it)', () => {
-    const theme = getTheme(style);
     render(
       <ThemeProvider theme={theme}>
         <Alert severity="error">Could not upload.</Alert>
@@ -21,9 +20,8 @@ describe.each(['classic', 'expressive'] as const)('%s error alert', (style) => {
   });
 });
 
-describe.each(['classic', 'expressive'] as const)('%s warning alert', (style) => {
+describe('warning alert', () => {
   it('is dark amber on the light amber tint, so it reads as a notice and not as grey text', () => {
-    const theme = getTheme(style);
     render(
       <ThemeProvider theme={theme}>
         <Alert severity="warning">Sign in again.</Alert>

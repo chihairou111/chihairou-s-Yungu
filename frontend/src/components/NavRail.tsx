@@ -19,8 +19,7 @@ const ICON_PX = 24;
  * Floating vertical rail on the left edge from 600px. Shows icons only; widens to the right on hover
  * or keyboard focus to reveal labels, overlaying the page. Labels stay in the DOM (clipped, not
  * hidden) so links keep their names. Size, shape and colours come from `theme.yungu.rail`:
- * classic is an elevated MD2 rail with a filled active item; expressive is an M3 rail with a pill
- * active indicator. On phones the same pill turns horizontal and docks at the bottom left
+ * an M3 rail with a pill active indicator. On phones the same pill turns horizontal and docks at the bottom left
  * (Material's compact layout puts navigation at the bottom), icons only, labels visually hidden.
  */
 export default function NavRail() {

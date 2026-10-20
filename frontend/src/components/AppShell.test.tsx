@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useTheme } from '@mui/material/styles';
 import AppShell, { initials } from './AppShell';
 import PageHeader from './PageHeader';
-import StyleProvider from './StyleProvider';
 
 const nav = vi.hoisted(() => ({ pathname: '/assignments', replace: vi.fn() }));
 vi.mock('next/navigation', () => ({
@@ -120,58 +119,26 @@ describe('AppShell', () => {
   });
 });
 
-/** Shows which theme is in effect. */
+/** Shows the corner radius of the theme in effect. */
 function ThemeProbe() {
-  return <span data-testid="theme-style">{useTheme().yungu.style}</span>;
+  return <span data-testid="theme-radius">{useTheme().shape.borderRadius}</span>;
 }
 
-describe('Settings menu', () => {
-  function renderStyled(initialStyle: 'classic' | 'expressive') {
-    return render(
-      <StyleProvider initialStyle={initialStyle}>
-        <AppShell userName="Bruce Zheng">
-          <ThemeProbe />
-        </AppShell>
-      </StyleProvider>,
-    );
-  }
-
-  it('sits left of the avatar as a labelled menu button', () => {
-    renderStyled('expressive');
+describe('app bar', () => {
+  it('holds, on the right, Notifications, Refresh and the account avatar, and no Settings gear', () => {
+    render(<AppShell userName="Bruce Zheng">content</AppShell>);
     const buttons = within(screen.getByRole('banner')).getAllByRole('button');
-    expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(['Notifications', 'Refresh', 'Settings', 'Account: Bruce Zheng']);
-    expect(buttons[2]).toHaveAttribute('aria-haspopup', 'menu');
+    expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(['Notifications', 'Refresh', 'Account: Bruce Zheng']);
+    expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument();
   });
 
-  it('lists both styles under "Style" with the current one checked', async () => {
-    renderStyled('classic');
-    const button = screen.getByRole('button', { name: 'Settings' });
-    await userEvent.click(button);
-
-    const menu = screen.getByRole('menu', { name: 'Style' });
-    expect(button).toHaveAttribute('aria-expanded', 'true');
-    expect(button).toHaveAttribute('aria-controls', menu.id);
-    const items = within(menu).getAllByRole('menuitemradio');
-    expect(items.map((i) => i.textContent)).toEqual(['Classic (Material 2)', 'Rounded (Material 3)']);
-    expect(items[0]).toHaveAttribute('aria-checked', 'true');
-    expect(items[1]).toHaveAttribute('aria-checked', 'false');
-  });
-
-  it('switches the whole app to the chosen style at once and remembers it in a cookie', async () => {
-    renderStyled('classic');
-    expect(screen.getByTestId('theme-style')).toHaveTextContent('classic');
-
-    await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    await userEvent.click(screen.getByRole('menuitemradio', { name: 'Rounded (Material 3)' }));
-
-    expect(screen.getByTestId('theme-style')).toHaveTextContent('expressive');
-    expect(document.cookie).toContain('yl_style=expressive');
-    await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    expect(screen.getByRole('menuitemradio', { name: 'Rounded (Material 3)' })).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByRole('menuitemradio', { name: 'Classic (Material 2)' })).toHaveAttribute('aria-checked', 'false');
-
-    await userEvent.click(screen.getByRole('menuitemradio', { name: 'Classic (Material 2)' }));
-    expect(screen.getByTestId('theme-style')).toHaveTextContent('classic');
-    expect(document.cookie).toContain('yl_style=classic');
+  it('is always in the one Rounded (Material 3) style, whatever an old style cookie says', () => {
+    document.cookie = 'yl_style=classic; Path=/';
+    render(
+      <AppShell userName="Bruce Zheng">
+        <ThemeProbe />
+      </AppShell>,
+    );
+    expect(screen.getByTestId('theme-radius')).toHaveTextContent('12');
   });
 });

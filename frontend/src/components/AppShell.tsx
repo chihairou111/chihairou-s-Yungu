@@ -29,7 +29,6 @@ import { BOTTOM_FAB_MEDIA, showsTodayPanel } from './TodayDrawer';
 import NotificationsMenu from './NotificationsMenu';
 import RefreshButton from './RefreshButton';
 import { RefreshProvider } from './RefreshContext';
-import SettingsMenu from './SettingsMenu';
 
 /** "Bruce Zheng" -> "BZ"; "郑博" -> "郑"; blank -> "?". */
 export function initials(name: string): string {
@@ -51,7 +50,7 @@ interface AppShellProps {
 }
 
 /**
- * Material app bar (section title, notifications, Refresh, settings and account menus) over the page content. A page
+ * Material app bar (section title, notifications, Refresh and the account menu) over the page content. A page
  * may extend the bar with a `PageHeader` (tabs, page controls); the bar then gives up its bottom edge
  * so the two read as one header. The Today's classes panel sits beside the content on every page.
  */
@@ -97,7 +96,6 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
           </Typography>
           <NotificationsMenu />
           <RefreshButton />
-          <SettingsMenu />
           <IconButton
             id="account-button"
             aria-label={`Account: ${userName}`}
@@ -105,7 +103,7 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
             aria-controls={menuAnchor ? 'account-menu' : undefined}
             aria-expanded={menuAnchor ? 'true' : undefined}
             onClick={(e) => setMenuAnchor(e.currentTarget)}
-            sx={{ p: 0.5, borderRadius: '50%' }}
+            sx={{ ml: 1, p: 0.5, borderRadius: '50%' }}
           >
             <Avatar sx={{ width: 36, height: 36, fontSize: '0.875rem', fontWeight: 600, bgcolor: 'primary.main' }}>
               {initials(userName)}

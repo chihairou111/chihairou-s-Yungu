@@ -23,7 +23,7 @@ import { proseSx } from './Instructions';
 import { pdfViewUrl } from './pdfThumb';
 
 /**
- * The viewer is a dark room in both styles, so the file is the brightest thing on screen. Text and
+ * The viewer is a dark room, so the file is the brightest thing on screen. Text and
  * icons on `BG` stay above 7:1 (`TEXT`) and 4.5:1 (`MUTED`); the focus ring is the M3 dark primary.
  */
 const V = {

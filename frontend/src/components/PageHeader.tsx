@@ -97,7 +97,7 @@ interface PageHeaderProps {
  * docked Today's classes panel too, which starts below it), sticks
  * with it, and starts at the title's left edge (both line up with the capped content column). The app shell drops the app bar's bottom edge while
  * a page header is present, so the header draws the one edge between the bar and the content
- * (a hairline in classic, a tonal change in expressive; see `theme.yungu.header`).
+ * (a tonal change; see `theme.yungu.header`).
  */
 export default function PageHeader({ children }: PageHeaderProps) {
   return (

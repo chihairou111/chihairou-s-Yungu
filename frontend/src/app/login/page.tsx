@@ -9,6 +9,9 @@ import { SIGN_IN_NOTICE_COOKIE, signInNotice } from '@/lib/session-cookie';
 
 export const metadata: Metadata = { title: 'Sign in' };
 
+// The sign-in notice comes from a request cookie, so the page renders per request (reading a cookie is instant).
+export const instant = false;
+
 export default async function LoginPage() {
   // Set when the service ended the last session: why, e.g. the saved Yungu password stopped working.
   const notice = signInNotice((await cookies()).get(SIGN_IN_NOTICE_COOKIE)?.value);

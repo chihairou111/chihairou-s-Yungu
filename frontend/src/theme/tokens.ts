@@ -1,5 +1,3 @@
-import type { UiStyle } from '@/lib/style';
-
 /** Corner radii in px, named after the Material 3 shape scale. */
 export interface ShapeScale {
   extraSmall: number;
@@ -51,9 +49,8 @@ export interface RailTokens {
   activeFocus: { outlineColor?: string; outlineOffset: number };
 }
 
-/** Everything a component needs to render the current style, so components never branch on its name. */
+/** Theme values outside MUI's own (M3 roles, rail, header), read by components through `theme.yungu`. */
 export interface YunguTokens {
-  style: UiStyle;
   shape: ShapeScale;
   color: ColorRoles;
   rail: RailTokens;

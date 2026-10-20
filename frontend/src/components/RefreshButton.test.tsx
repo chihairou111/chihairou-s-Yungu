@@ -2,11 +2,10 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { UiStyle } from '@/lib/style';
 import AppShell from './AppShell';
 import RefreshButton from './RefreshButton';
 import { RefreshProvider, useOnRefresh, useRegisterDetailRefresh } from './RefreshContext';
-import StyleProvider from './StyleProvider';
+import ThemeRegistry from './ThemeRegistry';
 
 const nav = vi.hoisted(() => ({ pathname: '/assignments', refresh: vi.fn(), replace: vi.fn() }));
 vi.mock('next/navigation', () => ({
@@ -43,37 +42,37 @@ afterEach(() => {
   document.cookie = 'yl_refresh=; Max-Age=0; Path=/';
 });
 
-function renderButton(extra?: React.ReactNode, style: UiStyle = 'expressive') {
+function renderButton(extra?: React.ReactNode) {
   return render(
-    <StyleProvider initialStyle={style}>
+    <ThemeRegistry>
       <RefreshProvider>
         <RefreshButton />
         {extra}
       </RefreshProvider>
-    </StyleProvider>,
+    </ThemeRegistry>,
   );
 }
 
 const button = () => screen.getByRole('button', { name: 'Refresh' });
 
 describe('RefreshButton in the app bar', () => {
-  for (const style of ['classic', 'expressive'] as const) {
-    it(`sits left of the gear on both pages (${style})`, async () => {
-      for (const pathname of ['/assignments', '/calendar']) {
-        nav.pathname = pathname;
-        const { unmount } = render(
-          <StyleProvider initialStyle={style}>
-            <AppShell userName="Bruce Zheng">content</AppShell>
-          </StyleProvider>,
-        );
-        const bar = screen.getByRole('banner');
-        const refresh = within(bar).getByRole('button', { name: 'Refresh' });
-        const gear = within(bar).getByRole('button', { name: 'Settings' });
-        expect(refresh.compareDocumentPosition(gear) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-        unmount();
-      }
-    });
-  }
+  it('sits between Notifications and the avatar on both pages', async () => {
+    for (const pathname of ['/assignments', '/calendar']) {
+      nav.pathname = pathname;
+      const { unmount } = render(
+        <ThemeRegistry>
+          <AppShell userName="Bruce Zheng">content</AppShell>
+        </ThemeRegistry>,
+      );
+      const bar = screen.getByRole('banner');
+      const refresh = within(bar).getByRole('button', { name: 'Refresh' });
+      const bell = within(bar).getByRole('button', { name: 'Notifications' });
+      const avatar = within(bar).getByRole('button', { name: 'Account: Bruce Zheng' });
+      expect(bell.compareDocumentPosition(refresh) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(refresh.compareDocumentPosition(avatar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      unmount();
+    }
+  });
 
   it('explains itself in a tooltip', async () => {
     renderButton();
@@ -104,12 +103,12 @@ describe('refreshing', () => {
       return null;
     }
     render(
-      <StyleProvider initialStyle="expressive">
+      <ThemeRegistry>
         <RefreshProvider>
           <RefreshButton />
           <Listener />
         </RefreshProvider>
-      </StyleProvider>,
+      </ThemeRegistry>,
     );
     await userEvent.click(button());
     expect(heard).not.toHaveBeenCalled();

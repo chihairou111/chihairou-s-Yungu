@@ -3,9 +3,9 @@ import { createTheme } from '@mui/material/styles';
 import type { ColorRoles, ShapeScale, YunguTokens } from './tokens';
 import { MuiAlert } from './alert';
 
-// Expressive style: Material 3 (Material You), rounded. Tonal roles are the M3 light scheme for the
+// The app's one style, Rounded: Material 3 (Material You). Tonal roles are the M3 light scheme for the
 // existing blue primary (#1565c0): a faintly blue-tinted surface, cards and containers separated by
-// tone rather than shadow, secondary-container for selection. Priorities keep the classic
+// tone rather than shadow, secondary-container for selection. Priorities keep the original
 // error / warning / primary colours, which pass WCAG AA on every surface below.
 
 /** M3 shape scale (dp = px). */
@@ -39,7 +39,6 @@ const hoverOnSecondaryContainer = '#cbd3ea';
 const hoverOnPrimaryContainer = '#c6d4f0';
 
 const tokens: YunguTokens = {
-  style: 'expressive',
   shape,
   color,
   // M3 navigation rail: an active indicator pill (secondary container) behind the icon, 56px wide;

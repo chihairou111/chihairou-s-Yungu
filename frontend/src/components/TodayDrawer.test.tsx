@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClassEvent, Course } from '@/lib/types';
-import StyleProvider from './StyleProvider';
+import ThemeRegistry from './ThemeRegistry';
 import { DOCK_MIN_PX } from './PageHeader';
 import TodayDrawer, { DOCK_QUERY, shouldRevealEdgeButton } from './TodayDrawer';
 
@@ -249,9 +249,9 @@ describe('TodayDrawer docked panel (1200px and up)', () => {
   it('server-renders the stored state, so a reload shows the panel without a flash', () => {
     const html = (open: boolean) =>
       renderToString(
-        <StyleProvider initialStyle="expressive">
+        <ThemeRegistry>
           <TodayDrawer events={classes} now={NOW} courses={COURSES} initialPanelOpen={open} />
-        </StyleProvider>,
+        </ThemeRegistry>,
       );
     const open = html(true);
     expect(open).toMatch(/<aside[^>]*data-open="true"/);
