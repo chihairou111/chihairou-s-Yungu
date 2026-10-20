@@ -2,12 +2,13 @@
 
 JSON everywhere; `Authorization: Bearer <token>` on everything except POST /session; errors are
 `{"error": str}`. Reads are cached 60 s per endpoint + params (`X-Refresh: 1` bypasses); any write
-(draft, submit, comment) or POST /refresh clears the cache; an upload changes no read and leaves it. Run: `uvicorn service.app:app --host 127.0.0.1 --port 8100`
+(draft, submit, comment, online document) or POST /refresh clears the cache; an upload changes no read and leaves it. Run: `uvicorn service.app:app --host 127.0.0.1 --port 8100`
 from api/, with YUNGU_STATE_DIR (default /var/lib/yungu-lms).
 """
 import logging
 import mimetypes
 import os
+import threading
 import time
 from datetime import datetime
 from typing import Callable, List, Optional, TypeVar
@@ -22,7 +23,7 @@ from starlette.exceptions import HTTPException
 from starlette.requests import ClientDisconnect
 
 import mapping
-from yungu_task import CST, SUBMITTED, TODO, YunguError, YunguTask
+from yungu_task import CST, ONLINE_DOC_MAX_BYTES, SUBMITTED, TODO, YunguError, YunguTask
 
 from .auth import Auth
 from .cache import ReadCache
@@ -37,6 +38,7 @@ log = logging.getLogger("yungu_lms.app")
 T = TypeVar("T")
 BLANK_CREDENTIALS = "Enter your student ID and password."
 UNKNOWN_TASK = 1035          # Yungu's answer (HTTP 200, JSON code 1035) for a taskPublishId that does not exist
+DOC_TOO_LONG = 1008          # Yungu's answer (HTTP 200, JSON code 1008) for an online document over the limit
 # Per socket operation (connect, each read) of every Yungu call. The client's own default (60 s) let a
 # stalled Yungu hold a page for minutes: a cold Submitted list is several sequential page calls and a
 # login is five calls under the login lock other requests wait on. The OSS upload keeps its own
@@ -47,6 +49,10 @@ YUNGU_TIMEOUT_SECONDS = 15
 LIST_PAGE_SIZE = 50
 ONLINE_DOCUMENT = "Open this online document on Yungu."
 COMMENT_NOT_FOUND = "Comment not found."
+NO_TITLE = "Give the document a title."
+HANDED_IN_DOC = "This document was handed in — save it as a new one."
+ADD_A_FILE = "Add at least one file."
+NOT_CONFIRMED = "Yungu didn't confirm the hand-in. Check on Yungu."
 
 
 class NotFound(ServiceError):
@@ -77,6 +83,35 @@ class TooLarge(ServiceError):
 
     def __init__(self):
         super().__init__(TOO_LARGE)
+
+
+class DocTooLong(ServiceError):
+    """An online document over Yungu's limit, with roughly how many characters must go.
+
+    Counted over the delta JSON string as stored: excess = bytes - limit, scaled to characters by the
+    string's own bytes per character, at least 1 (the dashboard computes the same number)."""
+    status = 413
+
+    def __init__(self, content: str):
+        size, chars = len(content.encode("utf-8")), len(content)
+        excess = size - ONLINE_DOC_MAX_BYTES
+        n = max(1, -(-excess * chars // size)) if size else 1          # ceil, without floats
+        super().__init__(f"Too long for Yungu — cut about {n} characters.")
+
+
+class Conflict(ServiceError):
+    status = 409
+
+    def __init__(self, message: str):
+        super().__init__(message)
+
+
+class NotConfirmed(ServiceError):
+    """Mark as submitted was sent, but reading the assignment again did not show it handed in."""
+    status = 502
+
+    def __init__(self):
+        super().__init__(NOT_CONFIRMED)
 
 
 class _BodyTooLarge(Exception):
@@ -122,6 +157,11 @@ class TextBody(BaseModel):
     text: str
 
 
+class OnlineDocBody(BaseModel):
+    title: str
+    content: str          # the Quill delta JSON string, stored by Yungu as is
+
+
 def _known(lookup: Callable[[], T]) -> T:
     """Run a Yungu call keyed by an assignment id; Yungu's "no such task" answer becomes a 404.
     Only for those lookups: elsewhere code 1035 stays an ordinary failure (502)."""
@@ -131,6 +171,25 @@ def _known(lookup: Callable[[], T]) -> T:
         if error_code(e) == UNKNOWN_TASK:
             raise NotFound() from None
         raise
+
+
+def _doc_write(write: Callable[[], T], content: str) -> T:
+    """Run an online-document create/update; Yungu's "too long" answer (code 1008) becomes the 413."""
+    try:
+        return write()
+    except YunguError as e:
+        if error_code(e) == DOC_TOO_LONG:
+            raise DocTooLong(content) from None
+        raise
+
+
+def _checked_doc(title: str, content: str) -> str:
+    """The title to send; refuses a blank title or an over-long delta before any Yungu call."""
+    if not title.strip():
+        raise BadRequest(NO_TITLE)
+    if len(content.encode("utf-8")) > ONLINE_DOC_MAX_BYTES:
+        raise DocTooLong(content)
+    return title.strip()
 
 
 def yungu_client(login_id: str, password: str) -> YunguTask:
@@ -196,6 +255,7 @@ class Service:
         self.cache = ReadCache(clock=monotonic)
         self.submitted = SubmittedFiles(state)
         self._now = now
+        self._marking = threading.Lock()       # one Mark as submitted at a time (see mark_submitted)
 
     def now_ms(self) -> int:
         return int(self._now() * 1000)
@@ -290,6 +350,9 @@ class Service:
             self.cache.clear()
 
     def submit(self, aid: int, ids: List[int]) -> dict:
+        if not ids:
+            return self.mark_submitted(aid)
+
         def go(c):
             c.save_draft(self._relation(c, aid), ids)        # the web UI saves the list, then submits it
             c.submit(aid, ids)                               # first submit vs update, by achievementId
@@ -299,6 +362,77 @@ class Service:
             self.cache.clear()
         self.submitted.put(aid, [str(i) for i in ids])
         return {"submittedAt": self.now_ms()}
+
+    def _fresh(self, aid: int):
+        """(mixed, achievement) straight from Yungu, never the cache: they decide a write."""
+        achievement = self.yungu.call(lambda c: _known(lambda: c.achievement(aid)))
+        if not isinstance(achievement, dict):
+            raise NotFound()
+        mixed = self.yungu.call(lambda c: _known(lambda: c.task_detail(aid)))
+        if not isinstance(mixed, dict) or not mixed.get("taskPublishId"):
+            raise NotFound()
+        return mixed, achievement
+
+    def mark_submitted(self, aid: int) -> dict:
+        """An empty submit. Only when no file is required, nothing is handed in yet and the draft holds
+        no files is it Yungu's "Mark as submitted" (a real hand-in: the teacher is told); anything else
+        is refused with no Yungu write. The call goes through Yungu.call on its own, so the only resend
+        is the one after a re-login, when Yungu turned the request away; the lock makes a concurrent
+        second request wait and then find the assignment submitted."""
+        with self._marking:
+            try:
+                mixed, achievement = self._fresh(aid)
+                if (mapping.needs_files(mixed, achievement) or mapping.is_submitted(mixed, achievement)
+                        or achievement.get("fileModelList")):
+                    raise BadRequest(ADD_A_FILE)
+                task_id = achievement.get("taskId") or mixed.get("taskId")
+                if not task_id:
+                    raise Unavailable()
+                self.yungu.call(lambda c: c.mark_submitted(task_id))
+                try:
+                    after = self.yungu.call(lambda c: c.achievement(aid))
+                except ServiceError:
+                    raise NotConfirmed() from None
+                if not isinstance(after, dict) or not mapping.is_submitted(mixed, after):
+                    raise NotConfirmed()
+            finally:
+                self.cache.clear()
+            self.submitted.put(aid, [])
+        return {"submittedAt": self.now_ms()}
+
+    def _doc_ref(self, content: Optional[dict], title: str, delta: str, file_id: Optional[int] = None) -> dict:
+        raw = {**(content or {}), "type": mapping.ONLINE_DOCUMENT_TYPE}
+        raw.setdefault("fileName", title)
+        if file_id is not None and not raw.get("fileId"):
+            raw["fileId"] = file_id
+        ref = mapping.file_ref(raw)
+        ref["content"] = delta                   # what we sent is what Yungu stores (storeMeta echoes it)
+        if not ref["createdAt"]:
+            ref["createdAt"] = self.now_ms()
+        return ref
+
+    def create_doc(self, title: str, content: str) -> dict:
+        """A new online document (new fileId), attached to nothing until a draft save or submit."""
+        title = _checked_doc(title, content)
+        try:
+            made = self.yungu.call(lambda c: _doc_write(lambda: c.create_online_doc(title, content), content))
+        finally:
+            self.cache.clear()
+        return self._doc_ref(made, title, content)
+
+    def update_doc(self, aid: int, file_id: int, title: str, content: str) -> dict:
+        """Rewrite a document in place, unless it is with the teacher (then the dashboard saves a new one)."""
+        title = _checked_doc(title, content)
+        try:
+            mixed, achievement = self._fresh(aid)
+            if str(file_id) in mapping.handed_in_ids(mixed, achievement, self.submitted.get(aid)):
+                raise Conflict(HANDED_IN_DOC)
+            achievement_id = achievement.get("achievementId")
+            made = self.yungu.call(lambda c: _doc_write(
+                lambda: c.update_online_doc(file_id, title, content, achievement_id), content))
+        finally:
+            self.cache.clear()
+        return self._doc_ref(made, title, content, file_id)
 
     def add_comment(self, aid: int, text: str) -> dict:
         try:
@@ -444,6 +578,16 @@ def create_app(state_dir: Optional[str] = None, client_factory=yungu_client,
     @app.post("/assignments/{assignment_id}/submit", dependencies=authed)
     def submit(assignment_id: int, body: FileIdsBody):
         return service.submit(assignment_id, _file_ids(body.fileIds))
+
+    @app.post("/assignments/{assignment_id}/online-docs", dependencies=authed)
+    def create_doc(assignment_id: int, body: OnlineDocBody):
+        return service.create_doc(body.title, body.content)
+
+    @app.put("/assignments/{assignment_id}/online-docs/{file_id}", dependencies=authed)
+    def update_doc(assignment_id: int, file_id: str, body: OnlineDocBody):
+        if not file_id.isdigit():
+            raise NotFound()
+        return service.update_doc(assignment_id, int(file_id), body.title, body.content)
 
     @app.post("/assignments/{assignment_id}/comments", dependencies=authed)
     def add_comment(assignment_id: int, body: TextBody):

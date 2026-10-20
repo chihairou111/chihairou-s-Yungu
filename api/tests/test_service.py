@@ -3,6 +3,7 @@ import asyncio
 import base64
 import functools
 import json
+import math
 import os
 import re
 import socket
@@ -87,6 +88,10 @@ class World:
         self.comments = {93251: load("comments_sample.json"), 94929: []}
         self.next_feedback = 400000
         self.page_sizes = []            # page_size of every iter_tasks call
+        self.next_doc = 11130500        # fileId of the next online document created
+        self.doc_error = None           # exception create/update_online_doc raise
+        self.mark_confirms = True       # mark_submitted moves the achievement to status 4
+        self.after_mark = None          # callable run right after mark_submitted (expiry, blocking)
 
     def expire_all(self):
         self.valid_from = self.sessions + 1
@@ -176,6 +181,31 @@ class FakeClient:
 
     def delete_comment(self, feedback_id):
         self._hit("delete_comment", feedback_id)
+
+    def _doc(self, file_id, title, delta):
+        if self.w.doc_error is not None:
+            raise self.w.doc_error
+        return {"fileId": file_id, "fileName": title, "type": "onlineDocument", "storeMeta": delta,
+                "previewImage": "/api/file/preview?previewId=9", "url": None}
+
+    def create_online_doc(self, title, delta_json):
+        self._hit("create_online_doc", title, delta_json)
+        self.w.next_doc += 1
+        return self._doc(self.w.next_doc, title, delta_json)
+
+    def update_online_doc(self, file_id, title, delta_json, achievement_id):
+        self._hit("update_online_doc", file_id, title, delta_json, achievement_id)
+        return self._doc(file_id, title, delta_json)
+
+    def mark_submitted(self, task_id):
+        self._hit("mark_submitted", task_id)
+        if self.w.after_mark is not None:          # before the status changes: a racing read sees status 1
+            self.w.after_mark()
+        if self.w.mark_confirms:
+            for ach in self.w.ach.values():
+                if ach.get("taskId") == task_id:
+                    ach["achievementStatus"] = 4
+        return None
 
 
 @pytest.fixture
@@ -284,6 +314,8 @@ ENDPOINTS = [
     ("POST", "/files", None), ("PUT", "/assignments/93251/draft", {"fileIds": []}),
     ("POST", "/assignments/93251/submit", {"fileIds": []}), ("POST", "/assignments/93251/comments", {"text": "x"}),
     ("DELETE", "/assignments/93251/comments/327994", None), ("POST", "/refresh", None), ("DELETE", "/session", None),
+    ("POST", "/assignments/94929/online-docs", {"title": "t", "content": "{}"}),
+    ("PUT", "/assignments/94929/online-docs/11130500", {"title": "t", "content": "{}"}),
 ]
 
 
@@ -429,6 +461,9 @@ def test_refresh_clears_the_cache(api, world, auth):
     ("POST", "/assignments/94929/submit", {"fileIds": ["11128687"]}),
     ("POST", "/assignments/93251/comments", {"text": "好的"}),
     ("DELETE", "/assignments/93251/comments/327994", None),
+    ("POST", "/assignments/94929/online-docs", {"title": "研究", "content": '{"ops":[{"insert":"x\\n"}]}'}),
+    ("PUT", "/assignments/94929/online-docs/11130500", {"title": "研究", "content": '{"ops":[{"insert":"x\\n"}]}'}),
+    ("POST", "/assignments/94929/submit", {"fileIds": []}),                 # mark as submitted
 ])
 def test_writes_clear_the_cache(api, world, auth, method, path, body):
     api.get("/courses", headers=auth)
@@ -748,6 +783,8 @@ def test_unknown_assignment_id_from_the_real_client_is_a_404(real, caplog):
     ("POST", "/assignments/999999999/submit", {"fileIds": ["1"]}),
     ("POST", "/assignments/999999999/comments", {"text": "hi"}),
     ("DELETE", "/assignments/999999999/comments/1", None),
+    ("PUT", "/assignments/999999999/online-docs/1", {"title": "t", "content": "{}"}),
+    ("POST", "/assignments/999999999/submit", {"fileIds": []}),
 ])
 def test_writes_on_an_unknown_assignment_id_are_a_404(real, method, path, body):
     api, auth = real
@@ -756,7 +793,8 @@ def test_writes_on_an_unknown_assignment_id_are_a_404(real, method, path, body):
     r = api.request(method, path, json=body, headers=auth)
     assert r.status_code == 404 and r.json() == {"error": "Not found."}
     assert not any(c.request.url.split("?")[0].endswith(("/submitAchievementForDrafts", "/saveCommentary",
-                   "/submitAchievementSendMessage", "/deletedCommentary")) for c in responses.calls)
+                   "/submitAchievementSendMessage", "/deletedCommentary", "/update_onlineDocument",
+                   "/users/taskPublish/status")) for c in responses.calls)
 
 
 @responses.activate
@@ -1123,6 +1161,287 @@ def test_someone_elses_comment_is_left_alone_and_is_a_404(api, world, auth):
         r = api.delete(f"/assignments/93251/comments/{comment_id}", headers=auth)
         assert r.status_code == 404 and r.json() == {"error": "Comment not found."}, comment_id
     assert world.count("delete_comment") == 0
+
+
+# ------------------------------------------------------- online documents
+DELTA = '{"ops":[{"insert":"研究计划\\n"},{"insert":"第一步","attributes":{"bold":true}},{"insert":"\\n"}]}'
+WRITES = ("create_online_doc", "update_online_doc", "save_draft", "submit", "mark_submitted")
+
+
+def writes(world):
+    return [c for c in world.calls if c[0] in WRITES]
+
+
+def delta_of_bytes(n):
+    """A Quill delta JSON string of exactly `n` UTF-8 bytes, mostly CJK (3 bytes a character)."""
+    head, tail = '{"ops":[{"insert":"', '\\n"}]}'
+    room = n - len(head) - len(tail)
+    text = "研" * (room // 3) + "a" * (room % 3)
+    out = head + text + tail
+    assert len(out.encode("utf-8")) == n
+    return out
+
+
+def cut_message(content):
+    size, chars = len(content.encode("utf-8")), len(content)
+    n = max(1, math.ceil((size - 65535) * chars / size))
+    return f"Too long for Yungu — cut about {n} characters."
+
+
+def code_1008():
+    return YunguError("POST /api/upload_onlineDocument -> code=1008 message=system error",
+                      json_response({"code": 1008, "message": "system error", "content": None}))
+
+
+def test_create_online_doc_returns_its_file_ref(api, world, auth):
+    r = api.post("/assignments/94929/online-docs", json={"title": "研究计划", "content": DELTA}, headers=auth)
+    assert r.status_code == 200, r.text
+    ref = r.json()
+    assert ref["id"] == str(world.next_doc) and ref["name"] == "研究计划"
+    assert ref["online"] is True and ref["content"] == DELTA
+    assert ref["url"] == f"/api/files/{world.next_doc}" and ref["createdAt"] == int(NOW * 1000)
+    assert writes(world) == [("create_online_doc", ("研究计划", DELTA))]
+
+
+def test_created_doc_content_is_the_delta_sent_even_if_yungu_echoes_otherwise(api, world, auth):
+    orig = FakeClient._doc
+    FakeClient._doc = lambda self, fid, title, delta: {**orig(self, fid, title, delta), "storeMeta": None, "url": None}
+    try:
+        r = api.post("/assignments/94929/online-docs", json={"title": "t", "content": DELTA}, headers=auth)
+    finally:
+        FakeClient._doc = orig
+    assert r.status_code == 200 and r.json()["content"] == DELTA and r.json()["online"] is True
+
+
+def test_update_online_doc_keeps_its_id(api, world, auth):
+    r = api.put("/assignments/94929/online-docs/11130500", json={"title": "改过的", "content": DELTA}, headers=auth)
+    assert r.status_code == 200, r.text
+    ref = r.json()
+    assert ref["id"] == "11130500" and ref["name"] == "改过的" and ref["content"] == DELTA and ref["online"] is True
+    achievement_id = world.ach[94929]["achievementId"]
+    assert writes(world) == [("update_online_doc", (11130500, "改过的", DELTA, achievement_id))]
+
+
+def test_update_online_doc_sends_the_achievement_id(api, world, auth):
+    world.ach[94929]["achievementId"] = 870001
+    api.put("/assignments/94929/online-docs/11130500", json={"title": "t", "content": DELTA}, headers=auth)
+    assert writes(world) == [("update_online_doc", (11130500, "t", DELTA, 870001))]
+
+
+@pytest.mark.parametrize("method,path", [
+    ("POST", "/assignments/94929/online-docs"), ("PUT", "/assignments/94929/online-docs/11130500")])
+@pytest.mark.parametrize("title", ["", "   ", "\n\t"])
+def test_a_document_needs_a_title(api, world, auth, method, path, title):
+    r = api.request(method, path, json={"title": title, "content": DELTA}, headers=auth)
+    assert r.status_code == 400 and r.json() == {"error": "Give the document a title."}
+    assert world.calls == []
+
+
+@pytest.mark.parametrize("method,path", [
+    ("POST", "/assignments/94929/online-docs"), ("PUT", "/assignments/94929/online-docs/11130500")])
+def test_a_delta_of_65535_bytes_is_sent(api, world, auth, method, path):
+    content = delta_of_bytes(65535)
+    r = api.request(method, path, json={"title": "长文", "content": content}, headers=auth)
+    assert r.status_code == 200, r.text
+    assert r.json()["content"] == content and len(writes(world)) == 1
+
+
+@pytest.mark.parametrize("method,path", [
+    ("POST", "/assignments/94929/online-docs"), ("PUT", "/assignments/94929/online-docs/11130500")])
+def test_a_delta_of_65536_bytes_is_refused_before_any_yungu_call(api, world, auth, method, path):
+    content = delta_of_bytes(65536)
+    r = api.request(method, path, json={"title": "长文", "content": content}, headers=auth)
+    assert r.status_code == 413 and r.json() == {"error": cut_message(content)}
+    assert world.calls == []
+
+
+def test_the_cut_count_for_an_all_cjk_text_is_the_excess_in_characters(api, world, auth):
+    # 22 000 CJK characters = 66 000 bytes, 465 over: 155 characters (3 bytes each) must go.
+    r = api.post("/assignments/94929/online-docs", json={"title": "长文", "content": "研" * 22000}, headers=auth)
+    assert r.status_code == 413
+    assert r.json() == {"error": "Too long for Yungu — cut about 155 characters."}
+    # Just over the limit: at least one character, never zero.
+    r = api.post("/assignments/94929/online-docs", json={"title": "长文", "content": "研" * 21846}, headers=auth)
+    assert r.json() == {"error": "Too long for Yungu — cut about 1 characters."}
+    assert world.calls == []
+
+
+@pytest.mark.parametrize("method,path", [
+    ("POST", "/assignments/94929/online-docs"), ("PUT", "/assignments/94929/online-docs/11130500")])
+def test_yungus_code_1008_is_the_same_413(api, world, auth, method, path):
+    world.doc_error = code_1008()
+    content = delta_of_bytes(60000)
+    r = api.request(method, path, json={"title": "长文", "content": content}, headers=auth)
+    assert r.status_code == 413 and r.json() == {"error": "Too long for Yungu — cut about 1 characters."}
+    assert len(writes(world)) == 1                                   # not retried
+
+
+def test_other_yungu_failures_on_a_document_are_a_502(api, world, auth):
+    world.doc_error = YunguError("POST /api/upload_onlineDocument -> code=500 message=x",
+                                 json_response({"code": 500, "message": "x"}))
+    r = api.post("/assignments/94929/online-docs", json={"title": "t", "content": DELTA}, headers=auth)
+    assert r.status_code == 502 and r.json() == {"error": UNREACHABLE}
+
+
+def test_a_handed_in_document_is_never_updated_in_place(api, world, auth):
+    handed_in = world.ach[93251]["fileModelList"][0]["fileId"]
+    r = api.put(f"/assignments/93251/online-docs/{handed_in}", json={"title": "t", "content": DELTA}, headers=auth)
+    assert r.status_code == 409 and r.json() == {"error": "This document was handed in — save it as a new one."}
+    assert writes(world) == []
+
+
+def test_the_kept_hand_in_list_decides_what_was_handed_in(api, world, auth):
+    api.post("/assignments/93251/submit", json={"fileIds": ["11128687"]}, headers=auth)
+    world.calls.clear()
+    r = api.put("/assignments/93251/online-docs/11128687", json={"title": "t", "content": DELTA}, headers=auth)
+    assert r.status_code == 409 and writes(world) == []
+    # A document added to the draft after the hand-in is not with the teacher: it is updated in place.
+    r = api.put("/assignments/93251/online-docs/11130777", json={"title": "t", "content": DELTA}, headers=auth)
+    assert r.status_code == 200 and r.json()["id"] == "11130777"
+    assert writes(world) == [("update_online_doc", (11130777, "t", DELTA, world.ach[93251]["achievementId"]))]
+
+
+def test_the_hand_in_check_reads_yungu_not_the_cache(api, world, auth):
+    api.get("/assignments/94929", headers=auth)                     # cached as not submitted
+    world.ach[94929].update(achievementStatus=4, fileModelList=[{**world.ach[93251]["fileModelList"][0]}])
+    fid = world.ach[94929]["fileModelList"][0]["fileId"]
+    r = api.put(f"/assignments/94929/online-docs/{fid}", json={"title": "t", "content": DELTA}, headers=auth)
+    assert r.status_code == 409 and writes(world) == []
+
+
+def test_updating_a_document_of_an_unknown_assignment_is_a_404(api, world, auth):
+    r = api.put("/assignments/1/online-docs/11130500", json={"title": "t", "content": DELTA}, headers=auth)
+    assert r.status_code == 404 and writes(world) == []
+
+
+def test_a_bad_document_id_is_a_404(api, world, auth):
+    r = api.put("/assignments/94929/online-docs/abc", json={"title": "t", "content": DELTA}, headers=auth)
+    assert r.status_code == 404 and world.calls == []
+
+
+@pytest.mark.parametrize("body", [{"title": "t"}, {"content": DELTA}, {"title": 1, "content": DELTA},
+                                  {"title": "t", "content": None}])
+def test_a_malformed_document_body_is_a_400(api, world, auth, body):
+    r = api.post("/assignments/94929/online-docs", json=body, headers=auth)
+    assert r.status_code == 400 and world.calls == []
+
+
+# ------------------------------------------------------ mark as submitted
+ADD_A_FILE = "Add at least one file."
+NOT_CONFIRMED = "Yungu didn't confirm the hand-in. Check on Yungu."
+
+
+def test_mark_as_submitted_hands_in_with_no_files(api, world, auth):
+    ach = world.ach[94929]
+    assert ach["needEnclosure"] is False and ach["achievementStatus"] == 1 and not ach.get("fileModelList")
+    r = api.post("/assignments/94929/submit", json={"fileIds": []}, headers=auth)
+    assert r.status_code == 200 and r.json() == {"submittedAt": int(NOW * 1000)}
+    assert writes(world) == [("mark_submitted", (ach["taskId"],))]
+    d = api.get("/assignments/94929", headers=auth).json()
+    assert d["submitted"] is True and d["submittedFileIds"] == [] and d["myFiles"] == []
+
+
+def test_mark_as_submitted_reads_the_status_again_after_the_call(api, world, auth):
+    r = api.post("/assignments/94929/submit", json={"fileIds": []}, headers=auth)
+    assert r.status_code == 200
+    i = world.calls.index(("mark_submitted", (world.ach[94929]["taskId"],)))
+    assert ("achievement", (94929,)) in world.calls[i + 1:]
+
+
+def test_mark_as_submitted_that_yungu_does_not_confirm_is_a_502(api, world, auth):
+    world.mark_confirms = False                                        # status stays 1
+    r = api.post("/assignments/94929/submit", json={"fileIds": []}, headers=auth)
+    assert r.status_code == 502 and r.json() == {"error": NOT_CONFIRMED}
+    assert world.count("mark_submitted") == 1
+
+
+def test_mark_as_submitted_is_sent_once_even_when_the_session_expires_after_it(api, world, auth):
+    world.after_mark = world.expire_all                                 # the re-read meets an expired session
+    r = api.post("/assignments/94929/submit", json={"fileIds": []}, headers=auth)
+    assert r.status_code == 200 and r.json() == {"submittedAt": int(NOW * 1000)}
+    assert world.count("mark_submitted") == 1 and world.logins == ["S106", "S106"]
+
+
+def test_mark_as_submitted_whose_status_cannot_be_read_again_is_unconfirmed(api, world, auth):
+    def down():
+        world.fail = requests.ConnectionError("down")
+    world.after_mark = down
+    r = api.post("/assignments/94929/submit", json={"fileIds": []}, headers=auth)
+    assert r.status_code == 502 and r.json() == {"error": NOT_CONFIRMED}
+    assert world.count("mark_submitted") == 1
+
+
+def test_a_failed_mark_as_submitted_is_not_retried(api, world, auth):
+    orig = FakeClient.mark_submitted
+
+    def failing(self, task_id):
+        orig(self, task_id)
+        raise YunguError("POST /api/users/taskPublish/status -> code=500 message=x",
+                         json_response({"code": 500, "message": "x"}))
+    FakeClient.mark_submitted = failing
+    try:
+        r = api.post("/assignments/94929/submit", json={"fileIds": []}, headers=auth)
+    finally:
+        FakeClient.mark_submitted = orig
+    assert r.status_code == 502 and world.count("mark_submitted") == 1
+
+
+def test_two_concurrent_mark_as_submitted_requests_send_one(api, world, auth):
+    entered, release = threading.Event(), threading.Event()
+
+    def hold():
+        entered.set()
+        release.wait(10)
+    world.after_mark = hold
+    results = []
+
+    def press():
+        results.append(api.post("/assignments/94929/submit", json={"fileIds": []}, headers=auth))
+    first = threading.Thread(target=press)
+    first.start()
+    assert entered.wait(10)
+    world.after_mark = None
+    second = threading.Thread(target=press)
+    second.start()
+    second.join(0.3)                                                     # waits behind the first
+    release.set()
+    first.join(10)
+    second.join(10)
+    assert world.count("mark_submitted") == 1
+    assert sorted(r.status_code for r in results) == [200, 400]
+
+
+@pytest.mark.parametrize("change", [
+    {"needEnclosure": True},                                             # a file is required
+    {"needEnclosure": None},                                             # unknown: treated as required
+    {"achievementStatus": 4},                                            # already submitted
+    {"fileModelList": [{"fileId": 11128687, "fileName": "draft.txt", "type": "file"}]},   # draft has files
+])
+def test_any_other_empty_submit_is_a_400_without_a_yungu_write(api, world, auth, change):
+    world.ach[94929].update(change)
+    if "needEnclosure" in change:
+        world.mixed[94929].pop("needEnclosure")
+    r = api.post("/assignments/94929/submit", json={"fileIds": []}, headers=auth)
+    assert r.status_code == 400 and r.json() == {"error": ADD_A_FILE}
+    assert writes(world) == []
+
+
+def test_an_empty_submit_on_a_submitted_assignment_with_no_files_is_a_400(api, world, auth):
+    world.ach[93251]["fileModelList"] = []
+    r = api.post("/assignments/93251/submit", json={"fileIds": []}, headers=auth)
+    assert r.status_code == 400 and r.json() == {"error": ADD_A_FILE} and writes(world) == []
+
+
+def test_the_mark_as_submitted_check_reads_yungu_not_the_cache(api, world, auth):
+    api.get("/assignments/94929", headers=auth)                     # cached as not submitted, no files
+    world.ach[94929]["achievementStatus"] = 4
+    r = api.post("/assignments/94929/submit", json={"fileIds": []}, headers=auth)
+    assert r.status_code == 400 and writes(world) == []
+
+
+def test_mark_as_submitted_on_an_unknown_assignment_is_a_404(api, world, auth):
+    r = api.post("/assignments/1/submit", json={"fileIds": []}, headers=auth)
+    assert r.status_code == 404 and writes(world) == []
 
 
 # ------------------------------------------------------------------ secrets

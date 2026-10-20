@@ -375,3 +375,12 @@ def test_detail_needs_files(load):
     mixed2 = {k: v for k, v in mixed.items() if k != "needEnclosure"}
     assert mapping.detail(mixed2, ach2, [], ME, None)["needsFiles"] is True
     assert mapping.detail({**mixed2, "needEnclosure": False}, ach2, [], ME, None)["needsFiles"] is False
+
+
+def test_detail_null_need_enclosure_means_files_required(load):
+    # Yungu sending needEnclosure: null is "unknown", like a missing key: never offer a no-file hand-in.
+    mixed, ach = load("mixed_93251.json"), load("achievement_93251.json")
+    mixed_missing = {k: v for k, v in mixed.items() if k != "needEnclosure"}
+    assert mapping.detail(mixed_missing, {**ach, "needEnclosure": None}, [], ME, None)["needsFiles"] is True
+    assert mapping.detail({**mixed, "needEnclosure": None}, {**ach, "needEnclosure": None}, [], ME, None)["needsFiles"] is True
+    assert mapping.detail({**mixed, "needEnclosure": None}, {**ach, "needEnclosure": False}, [], ME, None)["needsFiles"] is False

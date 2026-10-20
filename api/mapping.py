@@ -173,6 +173,33 @@ def comment(raw: dict, me: int) -> dict:
 
 
 # --------------------------------------------------------------------- detail
+def is_submitted(mixed: dict, achievement: dict) -> bool:
+    status_id = achievement.get("achievementStatus")
+    if status_id is None:
+        status_id = mixed.get("doTaskStatusId")
+    return status_id == ACHIEVEMENT_SUBMITTED
+
+
+def handed_in_ids(mixed: dict, achievement: dict, submitted_ids: Optional[List[str]]) -> List[str]:
+    """File ids with the teacher: none before a hand-in; the kept list of the last dashboard submit,
+    or (unknown) the current files."""
+    if not is_submitted(mixed, achievement):
+        return []
+    if submitted_ids is None:
+        return [str(f["fileId"]) for f in achievement.get("fileModelList") or []]
+    return list(submitted_ids)
+
+
+def needs_files(mixed: dict, achievement: dict) -> bool:
+    """'Attachment required' (needEnclosure): the achievement's flag, else the task's. Missing or null
+    = True, so we never offer a hand-in Yungu might refuse."""
+    for source in (achievement, mixed):
+        value = source.get("needEnclosure")
+        if value is not None:
+            return bool(value)
+    return True
+
+
 def detail(mixed: dict, achievement: dict, comments: List[dict], me: int,
            submitted_ids: Optional[List[str]], listed: Optional[dict] = None) -> dict:
     """getMixedPublishDetail + getAchievementDetail + comments -> AssignmentDetail.
@@ -181,17 +208,9 @@ def detail(mixed: dict, achievement: dict, comments: List[dict], me: int,
     unknown (then the current files stand in for it once submitted). `listed`: the mapped list
     Assignment for the same task, if the caller has it, which supplies schoolGroup and submittedAt
     (the detail endpoints carry neither). `instructionsHtml` is raw; Next sanitises it."""
-    status_id = achievement.get("achievementStatus")
-    if status_id is None:
-        status_id = mixed.get("doTaskStatusId")
-    submitted = status_id == ACHIEVEMENT_SUBMITTED
+    submitted = is_submitted(mixed, achievement)
     my_files = [file_ref(f) for f in achievement.get("fileModelList") or []]
-    if not submitted:
-        handed_in = []
-    elif submitted_ids is None:
-        handed_in = [f["id"] for f in my_files]
-    else:
-        handed_in = list(submitted_ids)
+    handed_in = handed_in_ids(mixed, achievement, submitted_ids)
     minutes = mixed.get("useTime")
     due = china_ms(mixed.get("endTime")) or (listed or {}).get("dueAt") or NO_DEADLINE_MS
     out = {
@@ -211,8 +230,7 @@ def detail(mixed: dict, achievement: dict, comments: List[dict], me: int,
         "myFiles": my_files,
         "submittedFileIds": handed_in,
         "submitted": submitted,
-        # 'Attachment required'. Missing = True, so we never offer a hand-in Yungu might refuse.
-        "needsFiles": bool(achievement.get("needEnclosure", mixed.get("needEnclosure", True))),
+        "needsFiles": needs_files(mixed, achievement),
         "comments": sorted((comment(c, me) for c in comments or []), key=lambda c: (c["createdAt"], c["id"])),
     }
     if listed and listed.get("submittedAt") is not None and submitted:
