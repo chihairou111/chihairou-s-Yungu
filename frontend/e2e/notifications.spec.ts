@@ -18,7 +18,7 @@ test('the bell lists unread then read, marks one read, and opens an assignment w
   await bell.click();
   const menu = page.getByRole('dialog', { name: 'Notifications' });
   await expect(menu.getByRole('heading', { name: 'Unread (3)' })).toBeVisible();
-  const read = menu.getByRole('list', { name: 'Read' });
+  const read = menu.getByRole('list', { name: 'Read', exact: true });
   await expect(read.getByRole('listitem')).toHaveCount(20);
   await menu.getByRole('button', { name: 'Load more' }).click();
   await expect(read.getByRole('listitem')).toHaveCount(26);
@@ -27,7 +27,7 @@ test('the bell lists unread then read, marks one read, and opens an assignment w
   const unread = menu.getByRole('list', { name: 'Unread' });
   await unread.getByRole('listitem').filter({ hasText: 'Behaviour record' }).getByRole('button', { name: 'Mark as read' }).click();
   await expect(menu.getByRole('heading', { name: 'Unread (2)' })).toBeVisible();
-  await expect(unread.getByText('Behaviour record')).toBeHidden();
+  await expect(unread.getByText('Behaviour record', { exact: true })).toBeHidden();
   await expect(read.getByRole('listitem').first()).toContainText('Behaviour record');
   await expect(page.getByRole('button', { name: 'Notifications, 2 unread', includeHidden: true })).toBeAttached();
 
@@ -48,7 +48,7 @@ test('from the calendar, a notification about an assignment goes to Assignments 
   await page.goto('/calendar');
   await page.getByRole('banner').getByRole('button', { name: /^Notifications/ }).click();
   const menu = page.getByRole('dialog', { name: 'Notifications' });
-  await menu.getByRole('list', { name: 'Read' }).getByRole('button', { name: 'New comment on homework' }).first().click();
+  await menu.getByRole('list', { name: 'Read', exact: true }).getByRole('button', { name: 'New comment on homework' }).first().click();
   await expect(page).toHaveURL(/\/assignments\?task=207\b/);
   await expect(page.getByRole('dialog', { name: 'Task 2：用户访谈提纲' })).toBeVisible();
 });
