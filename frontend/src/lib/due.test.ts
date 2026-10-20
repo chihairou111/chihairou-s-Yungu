@@ -71,13 +71,16 @@ describe('upcomingGroups', () => {
 });
 
 describe('submittedGroups', () => {
-  it('groups by This week, Last week and Earlier, newest first', () => {
+  const handedIn = (title: string, submittedAt: number, dueAt = submittedAt + DAY) =>
+    item(title, dueAt, { status: 'Submitted', submittedAt });
+
+  it('groups by the week it was handed in, This week / Last week / Earlier, newest hand-in first', () => {
     const items = [
-      item('Oct 4', oct22h(4)),
-      item('Oct 12', oct22h(12)),
-      item('Oct 16', oct22h(16)),
-      item('Oct 11', oct22h(11)),
-      item('Oct 5', oct22h(5)),
+      handedIn('Oct 4', oct22h(4)),
+      handedIn('Oct 12', oct22h(12)),
+      handedIn('Oct 16', oct22h(16)),
+      handedIn('Oct 11', oct22h(11)),
+      handedIn('Oct 5', oct22h(5)),
     ];
     const groups = submittedGroups(items, SUN);
     expect(groups.map((g) => [g.label, g.items.map((a) => a.title)])).toEqual([
@@ -87,9 +90,22 @@ describe('submittedGroups', () => {
     ]);
   });
 
-  it('puts work handed in before a due date after this week first, under "Due later"', () => {
-    const groups = submittedGroups([item('Oct 16', oct22h(16)), item('Oct 20', oct22h(20))], SUN);
-    expect(groups.map((g) => g.label)).toEqual(['Due later', 'This week']);
+  it('orders by hand-in time, not due date: work handed in early for a later deadline is in the week it was handed in', () => {
+    const items = [
+      handedIn('Due Oct 30, handed in Oct 13', oct22h(13), oct22h(30)),
+      handedIn('Due Oct 10, handed in late Oct 15', oct22h(15), oct22h(10)),
+      handedIn('Due Oct 9, handed in Oct 8', oct22h(8), oct22h(9)),
+    ];
+    const groups = submittedGroups(items, SUN);
+    expect(groups.map((g) => [g.label, g.items.map((a) => a.title)])).toEqual([
+      ['This week', ['Due Oct 10, handed in late Oct 15', 'Due Oct 30, handed in Oct 13']],
+      ['Last week', ['Due Oct 9, handed in Oct 8']],
+    ]);
+  });
+
+  it('falls back to the due date when the hand-in time is missing', () => {
+    const groups = submittedGroups([handedIn('Oct 14', oct22h(14)), item('No time, due Oct 16', oct22h(16), { status: 'Submitted' })], SUN);
+    expect(groups.map((g) => [g.label, g.items.map((a) => a.title)])).toEqual([['This week', ['No time, due Oct 16', 'Oct 14']]]);
   });
 
   it('returns no groups for no work', () => {

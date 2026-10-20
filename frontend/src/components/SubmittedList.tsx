@@ -30,7 +30,8 @@ function coursesIn(items: Assignment[]): { id: number; name: string; count: numb
 }
 
 /**
- * Submitted work as small cards in one column, grouped by due date (This week / Last week / Earlier), newest first.
+ * Submitted work as small cards in one column, grouped by when it was handed in (This week / Last week / Earlier),
+ * newest hand-in first.
  * When the work spans more than one course, a Course menu narrows the list to one of them.
  */
 export default function SubmittedList({ items, now, courseId, onCourseChange }: SubmittedListProps) {

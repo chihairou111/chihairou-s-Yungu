@@ -46,16 +46,22 @@ export function upcomingGroups(items: Assignment[], now: number): DateGroup[] {
   });
 }
 
-const SUBMITTED = ['Due later', 'This week', 'Last week', 'Earlier'] as const;
+const SUBMITTED = ['This week', 'Last week', 'Earlier'] as const;
 
-/** Submitted work by due date, newest first: This week · Last week · Earlier (work due after this week first). */
+/** When the work was handed in; the due date only for a row that does not say (never from the service). */
+const handedInAt = (a: Assignment) => a.submittedAt ?? a.dueAt;
+
+/**
+ * Submitted work by when it was handed in (China weeks), newest first: This week · Last week · Earlier.
+ * Ties keep the list's order.
+ */
 export function submittedGroups(items: Assignment[], now: number): DateGroup[] {
   const thisWeek = weekStartOf(now);
-  const sorted = [...items].sort((a, b) => b.dueAt - a.dueAt);
+  const sorted = [...items].sort((a, b) => handedInAt(b) - handedInAt(a));
   return bucket(sorted, SUBMITTED, (a) => {
-    const week = weekStartOf(a.dueAt);
-    if (week > thisWeek) return 'Due later';
-    if (week === thisWeek) return 'This week';
+    const week = weekStartOf(handedInAt(a));
+    // A hand-in stamped after this week (a clock ahead of China time) still reads as this week's.
+    if (week >= thisWeek) return 'This week';
     if (week === thisWeek - WEEK) return 'Last week';
     return 'Earlier';
   });
