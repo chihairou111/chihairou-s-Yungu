@@ -47,3 +47,19 @@ export class AssignmentNotFound extends ServiceError {
     this.name = 'AssignmentNotFound';
   }
 }
+
+/** 409 on updating an online document that was handed in: the teacher's copy is never edited in place. */
+export class DocumentHandedIn extends ServiceError {
+  constructor(message = 'This document was handed in — save it as a new one.') {
+    super(409, message);
+    this.name = 'DocumentHandedIn';
+  }
+}
+
+/** 413 on an online document over Yungu's limit; the message says about how much to cut. */
+export class DocumentTooLong extends ServiceError {
+  constructor(message: string) {
+    super(413, message);
+    this.name = 'DocumentTooLong';
+  }
+}

@@ -3,7 +3,7 @@ import { cookies, headers } from 'next/headers';
 import { sanitizeInstructions } from '../sanitize';
 import { SESSION_COOKIE, decodeSession } from '../session-cookie';
 import type { Assignment, AssignmentDetail, ClassEvent, Comment, Course, FileRef } from '../types';
-import { AssignmentNotFound, CommentNotFound, ServiceError, SessionEnded, YunguUnavailable } from './errors';
+import { AssignmentNotFound, CommentNotFound, DocumentHandedIn, DocumentTooLong, ServiceError, SessionEnded, YunguUnavailable } from './errors';
 import type { SignInResult, StoredFile, YunguData } from './index';
 
 /** Set to `1` on a request (cookie, or the `X-Refresh: 1` header) to have the service skip its read cache. */
@@ -95,6 +95,17 @@ async function write(path: string, init: RequestInit): Promise<Response> {
   }
 }
 
+/** An online-document write: the service's 409 (handed in) and 413 (too long) become their own types, message kept. */
+async function docWrite(path: string, init: RequestInit): Promise<FileRef> {
+  try {
+    return await body<FileRef>(await write(path, init));
+  } catch (error) {
+    if (error instanceof ServiceError && error.status === 409) throw new DocumentHandedIn(error.message);
+    if (error instanceof ServiceError && error.status === 413) throw new DocumentTooLong(error.message);
+    throw error;
+  }
+}
+
 /** Null on a 404; every other failure is thrown. */
 async function orNull<T>(load: () => Promise<T>): Promise<T | null> {
   try {
@@ -130,8 +141,12 @@ export const serviceData: YunguData = {
     await write(`/assignments/${id}/draft`, jsonInit('PUT', { fileIds }));
   },
   async submit(id, fileIds) {
+    // An empty list is Mark as submitted; the service decides whether it is allowed.
     return body<{ submittedAt: number }>(await write(`/assignments/${id}/submit`, jsonInit('POST', { fileIds })));
   },
+  createOnlineDoc: (id, title, content) => docWrite(`/assignments/${id}/online-docs`, jsonInit('POST', { title, content })),
+  updateOnlineDoc: (id, fileId, title, content) =>
+    docWrite(`/assignments/${id}/online-docs/${encodeURIComponent(fileId)}`, jsonInit('PUT', { title, content })),
   async addComment(id, text) {
     return body<Comment>(await write(`/assignments/${id}/comments`, jsonInit('POST', { text })));
   },

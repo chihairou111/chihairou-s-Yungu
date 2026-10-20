@@ -53,8 +53,19 @@ export async function saveDraft(id: number, fileIds: string[]): Promise<void> {
   await request(`/api/assignments/${id}/draft`, json('PUT', { fileIds }));
 }
 
+/** Hands the files in; an empty list is "Mark as submitted" (the server refuses it unless allowed). */
 export function submit(id: number, fileIds: string[]): Promise<{ submittedAt: number }> {
   return request(`/api/assignments/${id}/submit`, json('POST', { fileIds }));
+}
+
+/** Saves a new Yungu online document (`content`: Quill delta JSON) and returns its FileRef; it is not in the draft until saved there. */
+export function createOnlineDoc(id: number, title: string, content: string): Promise<FileRef> {
+  return request(`/api/assignments/${id}/online-docs`, json('POST', { title, content }));
+}
+
+/** Saves an online document in place; a handed-in one fails with a 409 ApiError (save it as a new one instead). */
+export function updateOnlineDoc(id: number, fileId: string, title: string, content: string): Promise<FileRef> {
+  return request(`/api/assignments/${id}/online-docs/${encodeURIComponent(fileId)}`, json('PUT', { title, content }));
 }
 
 export function addComment(id: number, text: string): Promise<Comment> {

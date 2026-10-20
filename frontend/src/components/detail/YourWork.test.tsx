@@ -36,6 +36,7 @@ function detail(extra: Partial<AssignmentDetail> = {}): AssignmentDetail {
     myFiles: [],
     submittedFileIds: [],
     submitted: false,
+    needsFiles: true,
     comments: [],
     ...extra,
   };

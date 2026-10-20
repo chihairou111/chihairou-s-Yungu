@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireSession, withServiceErrors } from '@/lib/api-auth';
+import { readCapped, requireSession, withServiceErrors } from '@/lib/api-auth';
 import { data } from '@/lib/data';
 
 const MAX_BYTES = 50 * 1024 * 1024;
@@ -11,34 +11,6 @@ const TOO_LARGE = 'Files up to 50 MB.';
 function baseMime(type: string): string {
   const base = type.split(';')[0].trim();
   return /^[A-Za-z0-9]+\/[A-Za-z0-9+.-]+$/.test(base) ? base : 'application/octet-stream';
-}
-
-/**
- * The request body, read until it passes `limit` bytes: null then (and the rest is never read). Holds
- * a body without a Content-Length, or with one that understates it, to the same limit as a declared one.
- */
-async function readCapped(request: Request, limit: number): Promise<Uint8Array | null> {
-  const reader = request.body?.getReader();
-  if (!reader) return new Uint8Array(0);
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > limit) {
-      await reader.cancel();
-      return null;
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
 }
 
 export const POST = withServiceErrors(async (request: Request) => {

@@ -4,7 +4,7 @@ import { mockData } from './mock';
 import { serviceData } from './service';
 
 export { BLANK_CREDENTIALS_ERROR } from './messages';
-export { AssignmentNotFound, CommentNotFound, ServiceError, SessionEnded, YunguUnavailable } from './errors';
+export { AssignmentNotFound, CommentNotFound, DocumentHandedIn, DocumentTooLong, ServiceError, SessionEnded, YunguUnavailable } from './errors';
 
 export type SignInResult = { ok: true; displayName: string; token: string } | { ok: false; error: string };
 
@@ -42,8 +42,10 @@ export type StoredFile = { ref: FileRef; bytes: Uint8Array } | { redirect: strin
  *
  * Errors (the service implementation; the mock does not fail): a 401 throws `SessionEnded` carrying the
  * service's message, a 502 or an unreachable service `YunguUnavailable`, other statuses `ServiceError`
- * (e.g. 413 "Files up to 50 MB."), a 404 on a write `AssignmentNotFound`, and `deleteComment` on a comment
- * that is not the student's own `CommentNotFound`. The mock throws the same two 404s, so the write
+ * (e.g. 413 "Files up to 50 MB."), a 404 on a write `AssignmentNotFound`, an online document over Yungu's limit
+ * `DocumentTooLong` (413) and an update of a handed-in one `DocumentHandedIn` (409), and `deleteComment` on a comment
+ * that is not the student's own `CommentNotFound`. Every message is the service's own, passed on unchanged.
+ * The mock throws the same 404s and the online-document and empty-submit refusals, so the write
  * Route Handlers need no existence check of their own. Pages turn `SessionEnded` into
  * the login page and `YunguUnavailable` into a message; Route Handlers answer with the status
  * (`withServiceErrors` in `../api-auth`).
@@ -70,8 +72,19 @@ export interface YunguData {
   getFile(id: string, opts?: { preview?: boolean }): Promise<StoredFile | null>;
   /** Replaces the student's file list on an assignment without submitting it. */
   saveDraft(id: number, fileIds: string[]): Promise<void>;
-  /** Hands the files in (or updates an earlier hand-in); moves the task to Submitted. */
+  /**
+   * Hands the files in (or updates an earlier hand-in); moves the task to Submitted. An empty list is
+   * "Mark as submitted": allowed only when `needsFiles` is false, the task is not submitted and the draft
+   * has no files; otherwise a 400 "Add at least one file.", and a 502 when Yungu does not confirm it.
+   */
   submit(id: number, fileIds: string[]): Promise<{ submittedAt: number }>;
+  /**
+   * Saves a new Yungu online document (`content`: Quill delta JSON) and returns its `FileRef` (online, with
+   * `content`). It is not part of the draft until saved there. 400 for a blank title, 413 over 65 535 bytes.
+   */
+  createOnlineDoc(id: number, title: string, content: string): Promise<FileRef>;
+  /** Saves an online document in place; one that was handed in is refused with a 409 (save it as a new one). */
+  updateOnlineDoc(id: number, fileId: string, title: string, content: string): Promise<FileRef>;
   /** Posts a comment as the student (assumed shape; endpoint not captured yet). */
   addComment(id: number, text: string): Promise<Comment>;
   /** Removes one of the student's own comments; anyone else's is left alone. */

@@ -36,6 +36,7 @@ function detail(): AssignmentDetail {
     myFiles: [],
     submittedFileIds: [],
     submitted: false,
+    needsFiles: true,
     comments: [],
   };
 }

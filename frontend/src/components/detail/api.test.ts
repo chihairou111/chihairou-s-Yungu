@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, addComment, fetchDetail, uploadFile } from './api';
+import { ApiError, addComment, createOnlineDoc, fetchDetail, submit, updateOnlineDoc, uploadFile } from './api';
 
 function respond(status: number, body: unknown) {
   return vi.spyOn(globalThis, 'fetch').mockResolvedValue(
@@ -40,5 +40,37 @@ describe('detail api', () => {
     const init = fetchMock.mock.calls[0][1]!;
     expect(init.method).toBe('POST');
     expect((init.body as FormData).get('file')).toBeInstanceOf(File);
+  });
+
+  it('createOnlineDoc POSTs the title and content as JSON and returns the FileRef', async () => {
+    const delta = '{"ops":[{"insert":"研究\\n"}]}';
+    const fetchMock = respond(200, { id: '11138501', online: true, content: delta });
+    await expect(createOnlineDoc(93251, '研究', delta)).resolves.toMatchObject({ id: '11138501', content: delta });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/assignments/93251/online-docs');
+    expect(init).toMatchObject({ method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' } });
+    expect(JSON.parse(String(init!.body))).toEqual({ title: '研究', content: delta });
+  });
+
+  it('updateOnlineDoc PUTs to the encoded document id', async () => {
+    const fetchMock = respond(200, { id: 'a/b' });
+    await updateOnlineDoc(93251, 'a/b', 'T', '{"ops":[]}');
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/assignments/93251/online-docs/a%2Fb');
+    expect(init!.method).toBe('PUT');
+    expect(JSON.parse(String(init!.body))).toEqual({ title: 'T', content: '{"ops":[]}' });
+  });
+
+  it("surfaces the server's 409 and 413 messages as ApiError", async () => {
+    respond(409, { error: 'This document was handed in — save it as a new one.' });
+    await expect(updateOnlineDoc(1, '2', 'T', '{}')).rejects.toMatchObject({ status: 409, message: 'This document was handed in — save it as a new one.' });
+    respond(413, { error: 'Too long for Yungu — cut about 3 characters.' });
+    await expect(createOnlineDoc(1, 'T', '{}')).rejects.toMatchObject({ status: 413, message: 'Too long for Yungu — cut about 3 characters.' });
+  });
+
+  it('submit sends an empty list for Mark as submitted', async () => {
+    const fetchMock = respond(200, { submittedAt: 1 });
+    await expect(submit(95257, [])).resolves.toEqual({ submittedAt: 1 });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]!.body))).toEqual({ fileIds: [] });
   });
 });

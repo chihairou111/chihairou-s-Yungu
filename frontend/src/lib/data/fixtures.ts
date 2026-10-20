@@ -182,6 +182,17 @@ export function buildTodo(now: number): Assignment[] {
       estimatedMinutes: 30,
       schoolGroup: null,
     },
+    {
+      id: 105,
+      title: 'Reading check-in: Chapter 3',
+      course: 'CL English Language & Composition 1',
+      courseId: COURSES.english.id,
+      dueAt: at22(now, 4),
+      assignedAt: now - 1 * DAY,
+      status: 'To submit',
+      estimatedMinutes: 20,
+      schoolGroup: null,
+    },
   ];
 }
 
@@ -216,6 +227,7 @@ export function buildSubmitted(now: number): Assignment[] {
     done(205, 'Rhetorical Analysis Draft', 'english', 10, -12, 90),
     done(206, '作文：我的校园', 'chinese', 12, -30, null),
     done(207, 'Task 2：用户访谈提纲', 'design', 14, -2, 40),
+    done(208, '课堂反思：第一次用户访谈', 'elai', 4, -5, 25),
   ];
 }
 
@@ -230,6 +242,8 @@ export interface DetailSeed {
   attachments: FileRef[];
   /** Files already handed in (submitted fixtures only). */
   myFiles: FileRef[];
+  /** The teacher requires at least one file; false lets the student mark it as submitted with none. */
+  needsFiles: boolean;
   comments: Comment[];
 }
 
@@ -285,6 +299,7 @@ export function buildDetailSeed(id: number, now: number): DetailSeed | undefined
           '<p>提交方式：上传文档或照片均可。参考资料见 <a href="https://www.ideo.org/tools">IDEO 设计工具</a>。</p>',
         attachments: [],
         myFiles: [],
+        needsFiles: true,
         comments: [
           comment('c-101-1', 'Daniel Moore', false, now - 2 * DAY, '截止日期已过，请尽快提交，晚交会标记为 Late。'),
           comment('c-101-2', MY_NAME, true, now - 2 * DAY + HOUR, '好的，今晚提交。'),
@@ -305,6 +320,7 @@ export function buildDetailSeed(id: number, now: number): DetailSeed | undefined
           sampleFile('fx-102-4', 'Observation template.docx', 'office', assigned),
         ],
         myFiles: [],
+        needsFiles: true,
         comments: [],
       };
     case 103:
@@ -317,6 +333,7 @@ export function buildDetailSeed(id: number, now: number): DetailSeed | undefined
           '<p>提交前请确认文件可以正常打开。</p>',
         attachments: [sampleFile('fx-103-1', 'MVP checklist.pdf', 'pdf', now - DAY)],
         myFiles: [],
+        needsFiles: true,
         comments: [],
       };
     case 104:
@@ -328,6 +345,18 @@ export function buildDetailSeed(id: number, now: number): DetailSeed | undefined
           '<ul><li>Photograph handwritten work clearly, one page per photo.</li><li>Label each problem number.</li></ul>',
         attachments: [sampleFile('fx-104-1', 'Unit 4 problem set.pdf', 'pdf', now - 2 * DAY)],
         myFiles: [],
+        needsFiles: true,
+        comments: [],
+      };
+    case 105:
+      return {
+        teacher: 'Grace Liu',
+        instructionsHtml:
+          '<h2>Reading check-in: Chapter 3</h2>' +
+          '<p>Read chapter 3 of <em>The Elements of Style</em> before Thursday. Nothing to hand in: mark this as submitted once you have read it.</p>',
+        attachments: [],
+        myFiles: [],
+        needsFiles: false,
         comments: [],
       };
     case 201:
@@ -344,9 +373,48 @@ export function buildDetailSeed(id: number, now: number): DetailSeed | undefined
       return submittedSeed('王老师', '作文：我的校园', '以&ldquo;我的校园&rdquo;为题写一篇 600 字左右的作文。', '作文.pdf', now);
     case 207:
       return submittedSeed('Lena Fischer', 'Task 2：用户访谈提纲', '为你的访谈对象写一份提纲，至少包含五个开放式问题。', '访谈提纲.pdf', now);
+    case 208:
+      return {
+        teacher: 'Daniel Moore',
+        instructionsHtml:
+          '<h2>课堂反思：第一次用户访谈</h2><p>在 Yungu 上写一篇在线文档，回顾你的第一次用户访谈：哪里顺利，哪里卡住了？</p>',
+        attachments: [],
+        myFiles: [onlineDoc('fx-doc-208', '课堂反思', REFLECTION_DELTA, now - 5 * DAY)],
+        needsFiles: true,
+        comments: [],
+      };
     default:
       return undefined;
   }
+}
+
+/**
+ * A short Yungu online document, in the delta shape Yungu's editor (Quill 1.3.6) stores: a cut-down
+ * version of the delta captured through Yungu's toolbar (research `online-docs-and-empty-submit.md` §2).
+ */
+const REFLECTION_DELTA = JSON.stringify({
+  ops: [
+    { insert: '课堂反思' },
+    { attributes: { header: 1 }, insert: '\n' },
+    { insert: 'Plain start, ' },
+    { attributes: { bold: true }, insert: 'bold' },
+    { insert: ', ' },
+    { attributes: { italic: true }, insert: 'italic' },
+    { insert: ' end.\nBullet one' },
+    { attributes: { list: 'bullet' }, insert: '\n' },
+    { insert: 'Bullet two 第二项' },
+    { attributes: { list: 'bullet' }, insert: '\n' },
+    { insert: 'A quoted line' },
+    { attributes: { blockquote: true }, insert: '\n' },
+    { insert: '这是第一段中文。\nLink here: ' },
+    { attributes: { link: 'https://example.com/' }, insert: 'Example site' },
+    { insert: '\n' },
+  ],
+});
+
+/** A Yungu online document as the service maps one: no file behind it, its delta in `content`. */
+export function onlineDoc(id: string, title: string, content: string, createdAt: number): FileRef {
+  return { id, name: title, kind: 'other', mime: 'application/octet-stream', size: 0, url: `/api/files/${id}`, online: true, content, createdAt };
 }
 
 /** Submitted fixtures: short instructions plus one handed-in file, all pointing at the sample PDF. */
@@ -356,6 +424,7 @@ function submittedSeed(teacher: string, title: string, task: string, fileName: s
     instructionsHtml: `<h2>${title}</h2><p>${task}</p>`,
     attachments: [],
     myFiles: [sampleFile(`fx-sub-${fileName}`, fileName, 'pdf', now - 4 * DAY)],
+    needsFiles: true,
     comments: [],
   };
 }

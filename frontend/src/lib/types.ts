@@ -59,6 +59,8 @@ export interface FileRef {
   previewPdfUrl?: string;
   /** A Yungu online document: its text lives on Yungu, which keeps no file to download, view or open. */
   online?: boolean;
+  /** An online document's text: Yungu's Quill delta JSON string, exactly as stored (online documents only). */
+  content?: string;
   createdAt: number;
 }
 
@@ -85,5 +87,10 @@ export interface AssignmentDetail extends Assignment {
   /** Ids of the files handed in at the last submit or update; empty before the first. Only a submit changes it. */
   submittedFileIds: string[];
   submitted: boolean;
+  /**
+   * The teacher requires at least one file (Yungu's `needEnclosure`). When false, the assignment is not
+   * submitted and Your work is empty, it can be marked as submitted with no files (`submit(id, [])`).
+   */
+  needsFiles: boolean;
   comments: Comment[];
 }

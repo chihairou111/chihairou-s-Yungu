@@ -3,9 +3,23 @@ import { weekStartOf } from '../time';
 import type { ClassEvent } from '../types';
 import type { YunguData } from './index';
 import { TIMETABLE, buildCourses } from './fixtures';
-import { AssignmentNotFound, CommentNotFound } from './errors';
+import { docTooLongMessage } from '../limits';
+import { AssignmentNotFound, CommentNotFound, DocumentHandedIn, DocumentTooLong, ServiceError } from './errors';
 import { BLANK_CREDENTIALS_ERROR } from './messages';
-import { getDetail, listSubmitted, listTodo, loadFile, markSubmitted, putComment, removeComment, setFiles, storeFile } from './store';
+import {
+  findOnlineDoc,
+  getDetail,
+  listSubmitted,
+  listTodo,
+  loadFile,
+  markSubmitted,
+  putComment,
+  removeComment,
+  replaceOnlineDoc,
+  setFiles,
+  storeFile,
+  storeOnlineDoc,
+} from './store';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -18,6 +32,14 @@ function known(id: number, now: number) {
   const detail = getDetail(id, now);
   if (!detail) throw new AssignmentNotFound();
   return detail;
+}
+
+/** The service's checks on an online document, in its order (title, then size), before anything is written. Returns the trimmed title. */
+function checkDoc(title: string, content: string): string {
+  if (!title.trim()) throw new ServiceError(400, 'Give the document a title.');
+  const tooLong = docTooLongMessage(content);
+  if (tooLong) throw new DocumentTooLong(tooLong);
+  return title.trim();
 }
 
 /** "HH:MM" China wall-clock to ms since midnight. */
@@ -65,10 +87,28 @@ export const mockData: YunguData = {
   },
   async submit(id, fileIds) {
     const now = Date.now();
-    known(id, now);
+    const detail = known(id, now);
+    if (fileIds.length === 0) {
+      // Mark as submitted, as the service allows it: no files needed, not yet submitted, nothing in the draft.
+      if (detail.needsFiles || detail.submitted || detail.myFiles.length > 0) throw new ServiceError(400, 'Add at least one file.');
+      markSubmitted(id, now);
+      return { submittedAt: now };
+    }
     setFiles(id, fileIds, now);
     markSubmitted(id, now);
     return { submittedAt: now };
+  },
+  async createOnlineDoc(_id, title, content) {
+    // Like the service, the assignment is not looked up: an unknown id only leaves an orphan document.
+    return storeOnlineDoc(checkDoc(title, content), content, Date.now());
+  },
+  async updateOnlineDoc(id, fileId, title, content) {
+    const name = checkDoc(title, content);
+    const now = Date.now();
+    const detail = known(id, now);
+    if (!findOnlineDoc(fileId)) throw new AssignmentNotFound();
+    if (detail.submittedFileIds.includes(fileId)) throw new DocumentHandedIn();
+    return replaceOnlineDoc(fileId, name, content, now);
   },
   async addComment(id, text) {
     const now = Date.now();

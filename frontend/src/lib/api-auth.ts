@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSession } from './auth';
 import { AssignmentNotFound, ServiceError, SessionEnded } from './data/errors';
+import { ONLINE_DOC_MAX_BYTES } from './limits';
 import { endSession } from './session-cookie';
 
 /** Route Handlers are not covered by the proxy, so each one calls this first. Returns the 401 response, or null when signed in. */
@@ -58,4 +59,60 @@ export async function readJson(request: Request): Promise<Record<string, unknown
 /** A string[] of file ids from an untrusted body value, or null. */
 export function toFileIds(value: unknown): string[] | null {
   return Array.isArray(value) && value.every((v) => typeof v === 'string') ? (value as string[]) : null;
+}
+
+/**
+ * The request body, read until it passes `limit` bytes: null then (and the rest is never read). Holds
+ * a body without a Content-Length, or with one that understates it, to the same limit as a declared one.
+ */
+export async function readCapped(request: Request, limit: number): Promise<Uint8Array | null> {
+  const reader = request.body?.getReader();
+  if (!reader) return new Uint8Array(0);
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > limit) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+/**
+ * An abuse guard on an online-document request body, not Yungu's limit: JSON escaping at most doubles
+ * real content, so four times Yungu's 65 535 bytes plus 64 KiB of slack is never reached by a document
+ * the editor would send. Yungu's own limit is the service's to enforce, with its "cut about N" message.
+ */
+export const ONLINE_DOC_BODY_LIMIT = 4 * ONLINE_DOC_MAX_BYTES + 64 * 1024;
+export const ONLINE_DOC_BODY_TOO_LARGE = 'Too long for Yungu.';
+const BAD_REQUEST = 'Bad request.';
+
+/** `{ title, content }` (both strings) from an online-document request, or the 400 / 413 answer to send instead. */
+export async function readOnlineDoc(request: Request): Promise<{ title: string; content: string } | Response> {
+  const tooLarge = () => NextResponse.json({ error: ONLINE_DOC_BODY_TOO_LARGE }, { status: 413 });
+  // Refuse a declared oversized body without reading it; any other body is read only up to the limit.
+  if (Number(request.headers.get('content-length') ?? 0) > ONLINE_DOC_BODY_LIMIT) return tooLarge();
+  const raw = await readCapped(request, ONLINE_DOC_BODY_LIMIT);
+  if (!raw) return tooLarge();
+  let body: unknown;
+  try {
+    body = JSON.parse(new TextDecoder().decode(raw));
+  } catch {
+    body = null;
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return NextResponse.json({ error: BAD_REQUEST }, { status: 400 });
+  const { title, content } = body as Record<string, unknown>;
+  if (typeof title !== 'string' || typeof content !== 'string') return NextResponse.json({ error: BAD_REQUEST }, { status: 400 });
+  return { title, content };
 }

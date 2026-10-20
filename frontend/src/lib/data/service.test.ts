@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeSession } from '../session-cookie';
-import { AssignmentNotFound, CommentNotFound, ServiceError, SessionEnded, YunguUnavailable } from './errors';
+import { AssignmentNotFound, CommentNotFound, DocumentHandedIn, DocumentTooLong, ServiceError, SessionEnded, YunguUnavailable } from './errors';
 
 const request = vi.hoisted(() => ({ cookies: new Map<string, string>(), headers: new Headers() }));
 vi.mock('next/headers', () => ({
@@ -168,6 +168,8 @@ describe('serviceData timeouts: a stalled Yungu or a hung service is "Can\'t rea
     ['submit', () => data.submit(93251, ['1'])],
     ['addComment', () => data.addComment(93251, 'x')],
     ['deleteComment', () => data.deleteComment(93251, '2')],
+    ['createOnlineDoc', () => data.createOnlineDoc(93251, 'T', '{"ops":[]}')],
+    ['updateOnlineDoc', () => data.updateOnlineDoc(93251, '11138501', 'T', '{"ops":[]}')],
     ['refresh', () => data.refresh()],
     ['signOut', () => data.signOut('tok')],
   ])('%s gives up after the longer write budget with YunguUnavailable', async (_name, run) => {
@@ -342,6 +344,77 @@ describe('serviceData writes', () => {
     await data.refresh();
     expect(call()).toMatchObject({ url: 'http://127.0.0.1:8100/refresh', method: 'POST' });
     expect(call().headers.get('authorization')).toBe('Bearer tok-123');
+  });
+});
+
+describe('serviceData online documents and Mark as submitted', () => {
+  const DELTA = '{"ops":[{"insert":"研究 \\"quoted\\"\\n"}]}';
+  const doc = { id: '11138501', name: '研究测试', kind: 'other', mime: 'application/octet-stream', size: 0, url: '/api/files/11138501', createdAt: 5, online: true, content: DELTA };
+
+  it('createOnlineDoc POSTs the title and content verbatim and returns the FileRef', async () => {
+    reply(json(200, doc));
+    expect(await data.createOnlineDoc(93251, '研究测试', DELTA)).toEqual(doc);
+    expect(call()).toMatchObject({ url: 'http://127.0.0.1:8100/assignments/93251/online-docs', method: 'POST' });
+    expect(call().headers.get('content-type')).toBe('application/json');
+    expect(call().headers.get('authorization')).toBe('Bearer tok-123');
+    expect(call().headers.get('x-refresh')).toBeNull();
+    expect(bodyOf()).toEqual({ title: '研究测试', content: DELTA });
+  });
+
+  it('updateOnlineDoc PUTs to the encoded document id and returns the FileRef', async () => {
+    reply(json(200, doc));
+    expect(await data.updateOnlineDoc(93251, '11138501', '研究测试', DELTA)).toEqual(doc);
+    expect(call()).toMatchObject({ url: 'http://127.0.0.1:8100/assignments/93251/online-docs/11138501', method: 'PUT' });
+    expect(bodyOf()).toEqual({ title: '研究测试', content: DELTA });
+    reply(json(200, doc));
+    await data.updateOnlineDoc(93251, 'a/b?c', 'x', DELTA);
+    expect(call(1).url).toBe('http://127.0.0.1:8100/assignments/93251/online-docs/a%2Fb%3Fc');
+  });
+
+  it.each([
+    ['createOnlineDoc', () => data.createOnlineDoc(93251, 'T', DELTA)],
+    ['updateOnlineDoc', () => data.updateOnlineDoc(93251, '1', 'T', DELTA)],
+  ])("%s passes the service's 400, 413 and 502 through with their messages", async (_name, run) => {
+    reply(json(400, { error: 'Give the document a title.' }));
+    const blank = await run().catch((e: unknown) => e);
+    expect(blank).toBeInstanceOf(ServiceError);
+    expect(blank).toMatchObject({ status: 400, message: 'Give the document a title.' });
+
+    reply(json(413, { error: 'Too long for Yungu — cut about 155 characters.' }));
+    const long = await run().catch((e: unknown) => e);
+    expect(long).toBeInstanceOf(DocumentTooLong);
+    expect(long).toMatchObject({ status: 413, message: 'Too long for Yungu — cut about 155 characters.' });
+
+    reply(json(502, { error: "Yungu couldn't save the document. Try again." }));
+    const refused = await run().catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(YunguUnavailable);
+    expect(refused).toMatchObject({ status: 502, message: "Yungu couldn't save the document. Try again." });
+
+    reply(json(404, { error: 'Not found.' }));
+    expect(await run().catch((e: unknown) => e)).toBeInstanceOf(AssignmentNotFound);
+  });
+
+  it("updateOnlineDoc turns the service's 409 for a handed-in document into DocumentHandedIn with its message", async () => {
+    reply(json(409, { error: 'This document was handed in — save it as a new one.' }));
+    const error = await data.updateOnlineDoc(93251, '11138501', 'T', DELTA).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(DocumentHandedIn);
+    expect(error).toMatchObject({ status: 409, message: 'This document was handed in — save it as a new one.' });
+  });
+
+  it('submit sends an empty list as is (Mark as submitted) and returns submittedAt', async () => {
+    reply(json(200, { submittedAt: 1760900000000 }));
+    expect(await data.submit(95257, [])).toEqual({ submittedAt: 1760900000000 });
+    expect(call()).toMatchObject({ url: 'http://127.0.0.1:8100/assignments/95257/submit', method: 'POST' });
+    expect(bodyOf()).toEqual({ fileIds: [] });
+  });
+
+  it("submit passes the service's 400 and unconfirmed 502 through with their messages", async () => {
+    reply(json(400, { error: 'Add at least one file.' }));
+    await expect(data.submit(95257, [])).rejects.toMatchObject({ name: 'ServiceError', status: 400, message: 'Add at least one file.' });
+    reply(json(502, { error: "Yungu didn't confirm the hand-in. Check on Yungu." }));
+    const error = await data.submit(95257, []).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(YunguUnavailable);
+    expect(error).toMatchObject({ status: 502, message: "Yungu didn't confirm the hand-in. Check on Yungu." });
   });
 });
 

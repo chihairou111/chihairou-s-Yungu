@@ -1,7 +1,7 @@
 import 'server-only';
 import { sanitizeInstructions } from '../sanitize';
 import type { Assignment, AssignmentDetail, Comment, FileKind, FileRef } from '../types';
-import { buildDetailSeed, buildSubmitted, buildTodo } from './fixtures';
+import { buildDetailSeed, buildSubmitted, buildTodo, onlineDoc } from './fixtures';
 import type { DetailSeed } from './fixtures';
 
 const ME = 'Bruce Zheng';
@@ -112,6 +112,7 @@ export function getDetail(id: number, now: number): AssignmentDetail | null {
     myFiles: state.myFileIds.flatMap((fid) => refs.get(fid) ?? []),
     submittedFileIds: [...state.submittedFileIds],
     submitted: a.status === 'Submitted',
+    needsFiles: state.seed.needsFiles,
     comments: [...state.comments].sort((x, y) => x.createdAt - y.createdAt),
   };
 }
@@ -128,6 +129,26 @@ export function loadFile(id: string): { ref: FileRef; bytes: Uint8Array } | null
   const ref = store().refs.get(id);
   const bytes = store().blobs.get(id);
   return ref && bytes ? { ref, bytes } : null;
+}
+
+/** Stores a new online document (no bytes: its text is the delta in `content`); it joins no draft by itself. */
+export function storeOnlineDoc(title: string, content: string, now: number): FileRef {
+  const ref = onlineDoc(crypto.randomUUID(), title, content, now);
+  store().refs.set(ref.id, ref);
+  return ref;
+}
+
+/** An online document the store holds, by id; undefined for an unknown id or a file that is not one. */
+export function findOnlineDoc(fileId: string): FileRef | undefined {
+  const ref = store().refs.get(fileId);
+  return ref?.online ? ref : undefined;
+}
+
+/** Replaces an online document's title and text, keeping its id, so every draft listing it shows the new version. */
+export function replaceOnlineDoc(fileId: string, title: string, content: string, now: number): FileRef {
+  const ref = onlineDoc(fileId, title, content, now);
+  store().refs.set(fileId, ref);
+  return ref;
 }
 
 /** Replaces the draft file list, keeping only ids the store knows. Returns false for an unknown assignment. */

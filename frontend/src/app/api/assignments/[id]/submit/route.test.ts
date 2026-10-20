@@ -30,6 +30,34 @@ describe('POST submit', () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'Add at least one file.' });
   });
+  it('passes an empty list to the data layer, which marks an allowed assignment as submitted', async () => {
+    const spy = vi.spyOn(data, 'submit');
+    const res = await POST(json({ fileIds: [] }, 'POST'), ctx({ id: '105' }));
+    expect(res.status).toBe(200);
+    expect(typeof (await res.json()).submittedAt).toBe('number');
+    expect(spy).toHaveBeenCalledWith(105, []);
+    expect((await data.getAssignmentDetail(105))?.submitted).toBe(true);
+    spy.mockRestore();
+  });
+  it("passes the data layer's refusal of an empty list through (400) and an unconfirmed hand-in (502)", async () => {
+    const spy = vi.spyOn(data, 'submit');
+    const refused = await POST(json({ fileIds: [] }, 'POST'), ctx({ id: '101' }));
+    expect(spy).toHaveBeenCalledWith(101, []);
+    expect([refused.status, await refused.json()]).toEqual([400, { error: 'Add at least one file.' }]);
+    spy.mockRejectedValueOnce(new YunguUnavailable("Yungu didn't confirm the hand-in. Check on Yungu."));
+    const unconfirmed = await POST(json({ fileIds: [] }, 'POST'), ctx({ id: '105' }));
+    expect([unconfirmed.status, await unconfirmed.json()]).toEqual([502, { error: "Yungu didn't confirm the hand-in. Check on Yungu." }]);
+    spy.mockRestore();
+  });
+  it('400s a body without a list of file ids, without calling the data layer', async () => {
+    const spy = vi.spyOn(data, 'submit');
+    for (const body of [{}, { fileIds: 'a' }, { fileIds: [1] }]) {
+      const res = await POST(json(body, 'POST'), ctx({ id: '105' }));
+      expect([res.status, await res.json()]).toEqual([400, { error: 'Add at least one file.' }]);
+    }
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
   it('404s on an unknown assignment', async () => {
     const res = await POST(json({ fileIds: ['a'] }, 'POST'), ctx({ id: '999999' }));
     expect(res.status).toBe(404);

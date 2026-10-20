@@ -52,10 +52,11 @@ describe('mock fixtures', () => {
       expect(chinaDay(items.get(101)!.dueAt)).toBe(chinaDay(now) - 2);
       expect(chinaDay(items.get(104)!.dueAt)).toBe(chinaDay(now) + 3);
       expect(chinaDay(items.get(103)!.dueAt)).toBe(chinaDay(now) + 5);
+      expect(chinaDay(items.get(105)!.dueAt)).toBe(chinaDay(now) + 4);
       const groups = groupTodo(buildTodo(now), now);
       expect(groups.overdue.map((a) => a.id)).toEqual([101]);
       expect(groups.nearly.map((a) => a.id)).toEqual([102]);
-      expect(groups.upcoming.map((a) => a.id).sort()).toEqual([103, 104]);
+      expect(groups.upcoming.map((a) => a.id).sort()).toEqual([103, 104, 105]);
     }
   });
 
