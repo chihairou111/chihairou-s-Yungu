@@ -92,6 +92,7 @@ class World:
         self.doc_error = None           # exception create/update_online_doc raise
         self.mark_confirms = True       # mark_submitted moves the achievement to status 4
         self.after_mark = None          # callable run right after mark_submitted (expiry, blocking)
+        self.mark_answer = None         # what mark_submitted returns (Yungu's `content`)
 
     def expire_all(self):
         self.valid_from = self.sessions + 1
@@ -205,7 +206,7 @@ class FakeClient:
             for ach in self.w.ach.values():
                 if ach.get("taskId") == task_id:
                     ach["achievementStatus"] = 4
-        return None
+        return self.w.mark_answer
 
 
 @pytest.fixture
@@ -1349,6 +1350,29 @@ def test_mark_as_submitted_hands_in_with_no_files(api, world, auth):
     assert writes(world) == [("mark_submitted", (ach["taskId"],))]
     d = api.get("/assignments/94929", headers=auth).json()
     assert d["submitted"] is True and d["submittedFileIds"] == [] and d["myFiles"] == []
+
+
+def test_the_services_info_lines_reach_the_journal():
+    import logging
+    import service.app  # noqa: F401  (importing the service sets its logging up)
+    own = logging.getLogger("yungu_lms")
+    assert own.isEnabledFor(logging.INFO) and own.handlers and own.propagate
+
+
+@pytest.mark.parametrize("answer, shape", [
+    (None, "null"),
+    (True, "bool"),
+    ({"id": 7, "token": "SECRET-TOKEN", "users": [{"userId": 106, "name": "郑博纬"}], "x": None},
+     '{"id": "int", "token": "str", "users": [{"name": "str", "userId": "int"}], "x": "null"}'),
+])
+def test_mark_as_submitted_logs_the_shape_of_yungus_answer_never_its_values(api, world, auth, caplog,
+                                                                            answer, shape):
+    world.mark_answer = answer
+    caplog.set_level("DEBUG")
+    r = api.post("/assignments/94929/submit", json={"fileIds": []}, headers=auth)
+    assert r.status_code == 200
+    assert f"Mark as submitted: Yungu answered {shape}" in caplog.text
+    assert "SECRET-TOKEN" not in caplog.text and "郑博纬" not in caplog.text and "106" not in caplog.text
 
 
 def test_mark_as_submitted_falls_back_to_the_task_status(api, world, auth):

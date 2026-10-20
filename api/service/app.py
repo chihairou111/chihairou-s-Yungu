@@ -5,6 +5,7 @@ JSON everywhere; `Authorization: Bearer <token>` on everything except POST /sess
 (draft, submit, comment, online document) or POST /refresh clears the cache; an upload changes no read and leaves it. Run: `uvicorn service.app:app --host 127.0.0.1 --port 8100`
 from api/, with YUNGU_STATE_DIR (default /var/lib/yungu-lms).
 """
+import json
 import logging
 import mimetypes
 import os
@@ -198,6 +199,26 @@ def _doc_write(write: Callable[[], T], content: str) -> T:
             log.warning("online document refused by Yungu: code=%d", DOC_TOO_LONG)
             raise DocNotSaved() from None
         raise
+
+
+def _shape(value, depth: int = 0):
+    """The structure of a Yungu answer with every value replaced by its type: safe to log."""
+    if value is None:
+        return "null"
+    if isinstance(value, dict) and depth < 4:
+        return {str(k): _shape(v, depth + 1) for k, v in value.items()}
+    if isinstance(value, list) and depth < 4:
+        return [_shape(value[0], depth + 1)] if value else []
+    return type(value).__name__
+
+
+def _shape_text(value) -> str:
+    """Never raises: it is logged right after a real hand-in, which must still be confirmed."""
+    try:
+        shape = _shape(value)
+        return shape if isinstance(shape, str) else json.dumps(shape, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        return "an unreadable answer"
 
 
 def _checked_doc(title: str, content: str) -> str:
@@ -406,7 +427,8 @@ class Service:
                 task_id = achievement.get("taskId") or mixed.get("taskId")
                 if not task_id:
                     raise Unavailable()
-                self.yungu.call(lambda c: c.mark_submitted(task_id))
+                answer = self.yungu.call(lambda c: c.mark_submitted(task_id))
+                log.info("Mark as submitted: Yungu answered %s", _shape_text(answer))   # types only (NOTES.md 8)
                 try:
                     after = self.yungu.call(lambda c: c.achievement(aid))
                 except ServiceError:
@@ -621,4 +643,16 @@ def create_app(state_dir: Optional[str] = None, client_factory=yungu_client,
     return app
 
 
+def _log_to_journal() -> None:
+    """The service's own lines (yungu_lms.*) at INFO and up on stderr, which systemd keeps in the journal.
+    Python only prints warnings when nothing is set up, and uvicorn sets up its own loggers only."""
+    own = logging.getLogger("yungu_lms")
+    if not own.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s: %(message)s"))
+        own.addHandler(handler)
+    own.setLevel(logging.INFO)
+
+
+_log_to_journal()
 app = create_app()
