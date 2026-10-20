@@ -1,6 +1,8 @@
 """Client additions: request shapes mirror api/NOTES.md sections 4 and 7. No network (responses mocks)."""
+import base64
 import json
 import re
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -187,3 +189,63 @@ def test_oss_put_keeps_its_own_long_timeout_under_a_short_client_timeout(monkeyp
            "endpoint": "https://oss-cn-hangzhou.aliyuncs.com"}
     c._oss_put(sts, "taskFile/x.txt", b"1", "text/plain")
     assert seen["timeout"] == 300
+
+
+# --------------------------------------------------- online documents (NOTES.md section 8)
+DELTA = (Path(__file__).parent / "fixtures" / "online_doc_delta.json").read_text(encoding="utf-8")
+
+
+@responses.activate
+def test_create_online_doc_sends_base64_utf8_delta():
+    doc = {"fileId": 11138501, "fileName": "研究", "type": "onlineDocument", "storeMeta": DELTA}
+    responses.post(BASE + "/api/upload_onlineDocument", json=ok(doc))
+    assert client().create_online_doc("研究", DELTA) == doc
+    call = responses.calls[0]
+    assert call.request.headers["Content-Type"] == "application/json"
+    sent = body_of(call)
+    assert sent == {"title": "研究", "description": base64.b64encode(DELTA.encode("utf-8")).decode(),
+                    "base64Convert": True}
+    assert base64.b64decode(sent["description"]).decode("utf-8") == DELTA   # CJK survives the round trip
+
+
+@responses.activate
+def test_update_online_doc_payload():
+    doc = {"fileId": 11138501, "type": "onlineDocument"}
+    responses.post(BASE + "/api/update_onlineDocument", json=ok(doc))
+    assert client().update_online_doc(11138501, "研究", DELTA, 867961) == doc
+    assert body_of(responses.calls[0]) == {
+        "title": "研究", "description": base64.b64encode(DELTA.encode("utf-8")).decode(),
+        "fileId": 11138501, "achievementId": 867961, "base64Convert": True}
+
+
+@responses.activate
+def test_update_online_doc_without_achievement_sends_null():
+    responses.post(BASE + "/api/update_onlineDocument", json=ok({"fileId": 5}))
+    client().update_online_doc(5, "t", "{}", None)
+    assert body_of(responses.calls[0])["achievementId"] is None
+
+
+@responses.activate
+def test_mark_submitted_payload():
+    responses.post(BASE + "/api/users/taskPublish/status", json=ok(None))
+    assert client().mark_submitted(725048) is None
+    assert body_of(responses.calls[0]) == {"status": 4, "userIds": [ME], "teamIds": None, "taskId": 725048}
+
+
+@responses.activate
+def test_mark_submitted_returns_raw_content():
+    responses.post(BASE + "/api/users/taskPublish/status", json=ok({"x": 1}))
+    assert client().mark_submitted(1) == {"x": 1}
+
+
+@responses.activate
+def test_code_1008_raises_yunguerror():
+    # Yungu answers an over-long document with HTTP 200 and code 1008, not an HTTP error.
+    responses.post(BASE + "/api/upload_onlineDocument",
+                   json={"ifLogin": True, "status": False, "message": "system error", "code": 1008, "content": None})
+    with pytest.raises(YunguError, match="1008"):
+        client().create_online_doc("t", "x")
+
+
+def test_online_doc_limit_is_65535_bytes():
+    assert yungu_task.ONLINE_DOC_MAX_BYTES == 65535

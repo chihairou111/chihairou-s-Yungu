@@ -3,10 +3,12 @@ import random
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from pathlib import Path
 
 import mapping
 import yungu_task
 
+FIXTURES = Path(__file__).parent / "fixtures"
 CST = timezone(timedelta(hours=8))
 NOW = 1792800000000
 ME = 106
@@ -14,7 +16,7 @@ ME = 106
 ASSIGNMENT_KEYS = {"id", "title", "course", "courseId", "dueAt", "assignedAt", "status", "estimatedMinutes",
                    "schoolGroup"}
 DETAIL_KEYS = ASSIGNMENT_KEYS | {"teacher", "instructionsHtml", "attachments", "myFiles", "submittedFileIds",
-                                 "submitted", "comments"}
+                                 "submitted", "comments", "needsFiles"}
 FILE_KEYS = {"id", "name", "kind", "mime", "size", "url", "createdAt"}
 
 
@@ -344,3 +346,32 @@ def test_online_document_is_marked_and_has_no_preview():
     assert f["online"] is True and f["kind"] == "other" and "previewPdfUrl" not in f
     assert f["url"] == "/api/files/11117133" and f["size"] == 0
     assert "online" not in mapping.file_ref({"fileId": 1, "fileName": "a.pdf", "type": "pdf"})
+
+
+def test_online_file_ref_carries_content(load):
+    delta = (FIXTURES / "online_doc_delta.json").read_text(encoding="utf-8")
+    raw = {"fileId": 11138501, "fileName": "研究测试", "type": "onlineDocument", "url": delta, "storeMeta": delta}
+    f = mapping.file_ref(raw)
+    assert f["online"] is True and f["content"] == delta
+
+
+def test_online_file_ref_content_falls_back_to_url_then_empty():
+    base = {"fileId": 1, "fileName": "d", "type": "onlineDocument"}
+    assert mapping.file_ref({**base, "storeMeta": None, "url": '{"ops":[]}'})["content"] == '{"ops":[]}'
+    assert mapping.file_ref({**base, "storeMeta": "", "url": None})["content"] == ""
+
+
+def test_plain_file_ref_has_no_content():
+    assert "content" not in mapping.file_ref({"fileId": 1, "fileName": "a.pdf", "type": "pdf"})
+
+
+def test_detail_needs_files(load):
+    mixed, ach = load("mixed_93251.json"), load("achievement_93251.json")
+    assert ach["needEnclosure"] is False
+    assert mapping.detail(mixed, ach, [], ME, None)["needsFiles"] is False
+    # Achievement wins over the task-level flag; missing everywhere defaults to True (safe).
+    assert mapping.detail({**mixed, "needEnclosure": False}, {**ach, "needEnclosure": True}, [], ME, None)["needsFiles"] is True
+    ach2 = {k: v for k, v in ach.items() if k != "needEnclosure"}
+    mixed2 = {k: v for k, v in mixed.items() if k != "needEnclosure"}
+    assert mapping.detail(mixed2, ach2, [], ME, None)["needsFiles"] is True
+    assert mapping.detail({**mixed2, "needEnclosure": False}, ach2, [], ME, None)["needsFiles"] is False

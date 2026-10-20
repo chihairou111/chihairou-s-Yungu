@@ -154,6 +154,7 @@ def file_ref(raw: dict) -> dict:
         out["previewPdfUrl"] = f"/api/files/{fid}?preview=1"
     if raw.get("type") == ONLINE_DOCUMENT_TYPE:
         out["online"] = True
+        out["content"] = raw.get("storeMeta") or raw.get("url") or ""   # the Quill delta JSON string
     return out
 
 
@@ -210,6 +211,8 @@ def detail(mixed: dict, achievement: dict, comments: List[dict], me: int,
         "myFiles": my_files,
         "submittedFileIds": handed_in,
         "submitted": submitted,
+        # 'Attachment required'. Missing = True, so we never offer a hand-in Yungu might refuse.
+        "needsFiles": bool(achievement.get("needEnclosure", mixed.get("needEnclosure", True))),
         "comments": sorted((comment(c, me) for c in comments or []), key=lambda c: (c["createdAt"], c["id"])),
     }
     if listed and listed.get("submittedAt") is not None and submitted:

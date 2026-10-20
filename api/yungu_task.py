@@ -38,6 +38,11 @@ TODO, ARCHIVED, SUBMITTED = 0, 1, 2
 ROLE_STUDENT = 2
 ACHIEVEMENT_NOT_SUBMITTED = 1   # observed achievementStatus before first submit
 ACHIEVEMENT_SUBMITTED = 4       # observed after submit
+ONLINE_DOC_MAX_BYTES = 65535    # stored delta JSON, UTF-8 bytes; one more -> HTTP 200 code 1008 (NOTES.md section 8)
+
+
+def _b64(text: str) -> str:
+    return base64.b64encode(text.encode("utf-8")).decode("ascii")
 
 
 class YunguError(Exception):
@@ -269,6 +274,27 @@ class YunguTask:
             return self._api("POST", "/api/updateAchievementAndSendMessage",
                              json_body={"achievementId": a["achievementId"], **body})
         return self._api("POST", "/api/submitAchievementSendMessage", json_body=body)
+
+    # ------------------------------------------------------ online documents
+    # Requests and limits: api/NOTES.md section 8. The delta is Quill JSON, sent as base64 of its UTF-8 bytes.
+    def create_online_doc(self, title: str, delta_json: str) -> dict:
+        """Create a new online document (new fileId, not attached to anything yet). Returns Yungu's
+        `content`: fileId, fileName, type 'onlineDocument', storeMeta (the delta JSON)."""
+        return self._api("POST", "/api/upload_onlineDocument", json_body={
+            "title": title, "description": _b64(delta_json), "base64Convert": True})["content"]
+
+    def update_online_doc(self, file_id: int, title: str, delta_json: str, achievement_id: Optional[int]) -> dict:
+        """Overwrite title and content of document `file_id` in place (same fileId)."""
+        return self._api("POST", "/api/update_onlineDocument", json_body={
+            "title": title, "description": _b64(delta_json), "fileId": file_id,
+            "achievementId": achievement_id, "base64Convert": True})["content"]
+
+    def mark_submitted(self, task_id: int) -> dict:
+        """'Mark as submitted': hand in with no files. `task_id` is the task's id, not taskPublishId.
+        Returns the raw `content` (may be None; what Yungu answers is not yet observed)."""
+        return self._api("POST", "/api/users/taskPublish/status", json_body={
+            "status": ACHIEVEMENT_SUBMITTED, "userIds": [self.user_id], "teamIds": None,
+            "taskId": task_id})["content"]
 
     def set_files_and_submit(self, publish_id: int, paths: List[str], team_id=None) -> List[UploadedFile]:
         """Convenience: upload files, save as draft, submit. Replaces any existing files."""
