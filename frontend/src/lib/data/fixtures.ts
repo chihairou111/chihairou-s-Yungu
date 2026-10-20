@@ -1,6 +1,6 @@
 import 'server-only';
 import { dayIndex, weekStartOf } from '../time';
-import type { Assignment, Comment, Course, Feedback, FileKind, FileRef } from '../types';
+import type { Assignment, Comment, Course, Feedback, FileKind, FileRef, Notification } from '../types';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -440,4 +440,36 @@ function submittedSeed(teacher: string, title: string, task: string, fileName: s
     needsFiles: true,
     comments: [],
   };
+}
+
+/**
+ * The notification bell's contents, newest first: three unread (two about mock assignments, one that
+ * links nowhere) and 26 read ones, enough for "Load more". Ids are numeric, as Yungu's messageIds are.
+ */
+export function buildNotifications(now: number): Notification[] {
+  const n = (id: number, hoursAgo: number, read: boolean, title: string, body: string, taskId: number | null): Notification => ({
+    id: String(id),
+    title,
+    body,
+    createdAt: Math.floor((now - hoursAgo * HOUR) / 60_000) * 60_000,
+    read,
+    taskId,
+  });
+  const unread = [
+    n(9100, 2, false, 'CL Business with Personal Finance I learning feedback updated', '`1.8B-[Case Study]-Supply Chain` has new learning feedback. Please review it.', 203),
+    n(9099, 5, false, 'Please finish your homework soon', '`Task 3：开始第一次观察` is due today at 22:00.', 102),
+    n(9098, 26, false, 'Behaviour record', 'A new behaviour record was added to your growth profile.', null),
+  ];
+  const read: Notification[] = [];
+  for (let i = 0; i < 26; i++) {
+    const hoursAgo = 30 + i * 9;
+    read.push(
+      i % 3 === 0
+        ? n(9000 - i, hoursAgo, true, "Today's new tasks", 'You have new tasks today. Open Yungu to see them.', null)
+        : i % 3 === 1
+          ? n(9000 - i, hoursAgo, true, 'New comment on homework', 'Lena Fischer commented on `Task 2：用户访谈提纲`.', 207)
+          : n(9000 - i, hoursAgo, true, 'Learning feedback updated', '`Write Function with return` has new learning feedback.', 202),
+    );
+  }
+  return [...unread, ...read];
 }

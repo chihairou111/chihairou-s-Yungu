@@ -474,3 +474,60 @@ def test_detail_carries_the_feedback(load):
     achievement = {**load("achievement_93251.json"), **sample["achievement"]}
     assert mapping.detail(mixed, achievement, [], ME, None)["feedback"]["score"] == "4.5/5"
     assert mapping.detail(load("mixed_93251.json"), load("achievement_93251.json"), [], ME, None)["feedback"] is None
+
+
+# -------------------------------------------------------------- notifications
+FEEDBACK_ITEM = {
+    "messageId": 7791043, "messageSendTime": "2026-10-20 16:08", "ifRead": True,
+    "title": "大学商科 I学习反馈已更新", "titleEn": "CL Business with Personal Finance I learning feedback updated",
+    "content": "《1.8C-Supply Chain Review》有新的学习反馈，请查看。",
+    "contentEn": "`1.8C-Supply Chain Review` has new learning feedback. Please review it.",
+    "messageUrl": "https://task.yungu.org/#/taskInfo/94827/1/106", "messageType": 24,
+    "templateCode": "NEW_TASK_FEEDBACK", "senderName": "Teacher 1",
+    "attribute": {"taskPublishId": 94827, "distributionType": 1, "messageType": 1, "userId": 106, "taskId": 733171},
+}
+
+
+def test_china_ms_accepts_minute_precision():
+    assert mapping.china_ms("2026-10-20 16:08") == ms(2026, 10, 20, 16, 8)
+
+
+def test_notification_prefers_english_and_links_the_assignment():
+    assert mapping.notification(FEEDBACK_ITEM) == {
+        "id": "7791043",
+        "title": "CL Business with Personal Finance I learning feedback updated",
+        "body": "`1.8C-Supply Chain Review` has new learning feedback. Please review it.",
+        "createdAt": ms(2026, 10, 20, 16, 8),
+        "read": True,
+        "taskId": 94827,
+    }
+
+
+@pytest.mark.parametrize("url,task", [
+    ("https://task.yungu.org/#/taskInfo/94100/1/106", 94100),
+    ("https://task.yungu.org/umiTask#/stuTaskInfo/93251/1/null/1", 93251),
+    ("https://task.yungu.org/#/task", None),
+    ("https://task.yungu.org/#/studentTemplate", None),
+    ("https://task.yungu.org/#/cardDetail/false/1/106/4544147", None),
+    ("https://evaluation.yungu.org/#/portrait", None),
+    (None, None),
+])
+def test_notification_task_id_comes_from_the_link_only(url, task):
+    assert mapping.notification({**FEEDBACK_ITEM, "messageUrl": url})["taskId"] == task
+
+
+@pytest.mark.parametrize("raw,read", [({"ifRead": False}, False), ({"ifRead": 1}, True), ({"ifRead": "1"}, True),
+                                      ({"ifRead": "true"}, True), ({"ifRead": None, "read": True}, True),
+                                      ({"ifRead": 0}, False), ({}, False)])
+def test_notification_read_flag_is_truthy_like_yungus_client(raw, read):
+    item = {k: v for k, v in FEEDBACK_ITEM.items() if k not in ("ifRead", "read")}
+    assert mapping.notification({**item, **raw})["read"] is read
+
+
+def test_notification_falls_back_to_chinese_then_sender():
+    old = {"messageId": 5, "messageSendTime": "2025-01-02 08:00", "ifRead": True, "title": "您有新反馈",
+           "titleEn": None, "content": "老师给了反馈", "contentEn": "", "messageUrl": None, "senderName": "Teacher 2"}
+    n = mapping.notification(old)
+    assert n["title"] == "您有新反馈" and n["body"] == "老师给了反馈" and n["taskId"] is None
+    bare = mapping.notification({"messageId": 6, "senderName": "Teacher 2", "messageSendTime": None})
+    assert bare["title"] == "Teacher 2" and bare["body"] == "" and bare["createdAt"] == 0

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { UiStyle } from '@/lib/style';
 import AppShell from './AppShell';
 import RefreshButton from './RefreshButton';
-import { RefreshProvider, useRegisterDetailRefresh } from './RefreshContext';
+import { RefreshProvider, useOnRefresh, useRegisterDetailRefresh } from './RefreshContext';
 import StyleProvider from './StyleProvider';
 
 const nav = vi.hoisted(() => ({ pathname: '/assignments', refresh: vi.fn(), replace: vi.fn() }));
@@ -93,6 +93,28 @@ describe('refreshing', () => {
     expect(nav.refresh).not.toHaveBeenCalled();
     await act(async () => answer.resolve(noContent()));
     expect(nav.refresh).toHaveBeenCalledOnce();
+  });
+
+  it('tells the shell (the notification dot) once the cache is gone, and only then', async () => {
+    const answer = deferred();
+    fetchMock.mockReturnValueOnce(answer.promise);
+    const heard = vi.fn();
+    function Listener() {
+      useOnRefresh(heard);
+      return null;
+    }
+    render(
+      <StyleProvider initialStyle="expressive">
+        <RefreshProvider>
+          <RefreshButton />
+          <Listener />
+        </RefreshProvider>
+      </StyleProvider>,
+    );
+    await userEvent.click(button());
+    expect(heard).not.toHaveBeenCalled();
+    await act(async () => answer.resolve(noContent()));
+    expect(heard).toHaveBeenCalledOnce();
   });
 
   it('is disabled (but keeps focus) while it runs, so a double click refreshes once', async () => {

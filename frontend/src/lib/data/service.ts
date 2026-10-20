@@ -2,9 +2,10 @@ import 'server-only';
 import { cookies, headers } from 'next/headers';
 import { sanitizeInstructions } from '../sanitize';
 import { SESSION_COOKIE, decodeSession } from '../session-cookie';
-import type { Assignment, AssignmentDetail, ClassEvent, Comment, Course, FileRef } from '../types';
+import type { Assignment, AssignmentDetail, ClassEvent, Comment, Course, FileRef, NotificationPage } from '../types';
 import { AssignmentNotFound, CommentNotFound, DocumentHandedIn, DocumentTooLong, ServiceError, SessionEnded, YunguUnavailable } from './errors';
 import type { SignInResult, StoredFile, YunguData } from './index';
+import { NOTIFICATION_PAGE_SIZE } from './messages';
 
 /** Set to `1` on a request (cookie, or the `X-Refresh: 1` header) to have the service skip its read cache. */
 export const REFRESH_COOKIE = 'yl_refresh';
@@ -158,6 +159,15 @@ export const serviceData: YunguData = {
       if (error instanceof AssignmentNotFound && error.message === SERVICE_COMMENT_NOT_FOUND) throw new CommentNotFound();
       throw error;
     }
+  },
+  async getUnreadCount() {
+    const { unread } = await get<{ unread: number }>('/notifications/count');
+    return unread;
+  },
+  getNotifications: (read, page) =>
+    get<NotificationPage>(`/notifications?read=${read}&page=${encodeURIComponent(page)}&size=${NOTIFICATION_PAGE_SIZE}`),
+  async markNotificationRead(id) {
+    await authed(`/notifications/${encodeURIComponent(id)}/read`, { method: 'POST' });
   },
   async refresh() {
     await authed('/refresh', { method: 'POST' });

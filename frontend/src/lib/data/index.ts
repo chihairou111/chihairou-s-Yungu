@@ -1,9 +1,9 @@
 import 'server-only';
-import type { Assignment, AssignmentDetail, ClassEvent, Comment, Course, FileRef } from '../types';
+import type { Assignment, AssignmentDetail, ClassEvent, Comment, Course, FileRef, NotificationPage } from '../types';
 import { mockData } from './mock';
 import { serviceData } from './service';
 
-export { BLANK_CREDENTIALS_ERROR } from './messages';
+export { BLANK_CREDENTIALS_ERROR, NOTIFICATION_PAGE_SIZE } from './messages';
 export { AssignmentNotFound, CommentNotFound, DocumentHandedIn, DocumentTooLong, ServiceError, SessionEnded, YunguUnavailable } from './errors';
 
 export type SignInResult = { ok: true; displayName: string; token: string } | { ok: false; error: string };
@@ -91,6 +91,12 @@ export interface YunguData {
   addComment(id: number, text: string): Promise<Comment>;
   /** Removes one of the student's own comments; anyone else's is left alone. */
   deleteComment(id: number, commentId: string): Promise<void>;
+  /** How many notifications are unread (the app bar's dot). */
+  getUnreadCount(): Promise<number>;
+  /** One page of unread or read notifications, `NOTIFICATION_PAGE_SIZE` at a time, newest first; listing marks nothing read. */
+  getNotifications(read: boolean, page: number): Promise<NotificationPage>;
+  /** Marks one notification read on Yungu (what clicking it there does). */
+  markNotificationRead(id: string): Promise<void>;
   /** Drops every cached read, so the next ones come fresh from Yungu (the refresh button). */
   refresh(): Promise<void>;
   signIn(loginId: string, password: string): Promise<SignInResult>;

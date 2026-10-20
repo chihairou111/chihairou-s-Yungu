@@ -33,6 +33,24 @@ function currentMarks(): EntryMarks {
   return state && typeof state === 'object' ? (state as EntryMarks) : {};
 }
 
+/** The URL that opens assignment `id` over `pathname?search` (any writer params dropped, the rest kept). */
+export function taskUrl(pathname: string, search: string, id: number): string {
+  const next = new URLSearchParams(search);
+  next.delete('write');
+  next.delete('doc');
+  next.set('task', String(id));
+  return `${pathname}?${next.toString()}`;
+}
+
+/**
+ * Opens assignment `id` over the current page, exactly as `useTaskParam().open` does, for code outside
+ * a page's search-param hooks (the app bar). Only where the page mounts the pop-up (Assignments).
+ */
+export function openTaskHere(id: number): void {
+  const marks: EntryMarks = { ylTask: true };
+  window.history.pushState(marks, '', taskUrl(window.location.pathname, window.location.search, id));
+}
+
 /** Opens an assignment's pop-up; cards read it from context so they work without the router in tests. */
 export const OpenTaskContext = createContext<(id: number) => void>(() => {});
 
@@ -80,11 +98,7 @@ export function useTaskParam(): TaskParam {
     docId: writing && doc ? doc : null,
     open(id) {
       const marks: EntryMarks = { ylTask: true };
-      window.history.pushState(marks, '', url((next) => {
-        next.delete('write');
-        next.delete('doc');
-        next.set('task', String(id));
-      }));
+      window.history.pushState(marks, '', taskUrl(pathname, params.toString(), id));
     },
     close() {
       once(() => {

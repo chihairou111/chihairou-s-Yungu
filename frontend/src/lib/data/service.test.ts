@@ -486,3 +486,43 @@ describe('DATA_SOURCE', () => {
     await expect(load()).rejects.toThrow(/DATA_SOURCE/);
   });
 });
+
+describe('serviceData notifications', () => {
+  it('getUnreadCount GETs /notifications/count and returns the number', async () => {
+    reply(json(200, { unread: 3 }));
+    expect(await data.getUnreadCount()).toBe(3);
+    expect(call().url).toBe('http://127.0.0.1:8100/notifications/count');
+    expect(call().headers.get('authorization')).toBe('Bearer tok-123');
+  });
+
+  it('getNotifications asks for one page of 20, read or unread', async () => {
+    const page = { items: [{ id: '1', title: 't', body: 'b', createdAt: 1, read: false, taskId: null }], hasMore: true };
+    reply(json(200, page));
+    expect(await data.getNotifications(false, 2)).toEqual(page);
+    expect(call().url).toBe('http://127.0.0.1:8100/notifications?read=false&page=2&size=20');
+    reply(json(200, { items: [], hasMore: false }));
+    await data.getNotifications(true, 1);
+    expect(call(1).url).toBe('http://127.0.0.1:8100/notifications?read=true&page=1&size=20');
+  });
+
+  it('notification reads forward X-Refresh like the other reads', async () => {
+    request.cookies.set(REFRESH_COOKIE, '1');
+    reply(json(200, { unread: 0 }));
+    await data.getUnreadCount();
+    expect(call().headers.get('x-refresh')).toBe('1');
+  });
+
+  it('markNotificationRead POSTs to the encoded id and never sends X-Refresh', async () => {
+    request.cookies.set(REFRESH_COOKIE, '1');
+    reply(empty());
+    await data.markNotificationRead('77/9');
+    expect(call().url).toBe('http://127.0.0.1:8100/notifications/77%2F9/read');
+    expect(call().method).toBe('POST');
+    expect(call().headers.get('x-refresh')).toBeNull();
+  });
+
+  it("markNotificationRead passes Yungu's 502 on", async () => {
+    reply(json(502, { error: UNAVAILABLE }));
+    await expect(data.markNotificationRead('1')).rejects.toBeInstanceOf(YunguUnavailable);
+  });
+});

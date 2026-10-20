@@ -116,3 +116,21 @@ export interface AssignmentDetail extends Assignment {
   /** The teacher's grade and feedback; null (or absent) before grading. */
   feedback?: Feedback | null;
 }
+
+/** A Yungu notification (站内信), as the bell on task.yungu.org lists them. */
+export interface Notification {
+  id: string;
+  title: string;
+  body: string;
+  /** When Yungu sent it (ms; Yungu keeps China time to the minute). */
+  createdAt: number;
+  read: boolean;
+  /** The assignment it links to (`#/taskInfo/{taskPublishId}/…`), or null when it links elsewhere or nowhere. */
+  taskId: number | null;
+}
+
+/** One page of notifications, newest first. */
+export interface NotificationPage {
+  items: Notification[];
+  hasMore: boolean;
+}

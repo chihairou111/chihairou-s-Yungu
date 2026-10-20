@@ -42,15 +42,17 @@ _VIDEO = {"mp4", "mov", "m4v", "webm", "avi", "mkv"}
 _AUDIO = {"mp3", "m4a", "wav", "ogg", "aac", "flac"}
 _OFFICE = {"doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "rtf", "pages", "numbers", "key"}
 _OFFICE_MIME = re.compile(r"officedocument|msword|ms-excel|ms-powerpoint|opendocument")
-_TIME = re.compile(r"^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?$")
+_TIME = re.compile(r"^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?$")
+# A notification's link to an assignment: '#/taskInfo/{taskPublishId}/…' (or the inner '#/stuTaskInfo/…').
+_TASK_LINK = re.compile(r"#/(?:stu)?[tT]askInfo/(\d+)(?:[/?]|$)")
 
 
 def china_ms(text) -> Optional[int]:
-    """'2026-10-19 22:32:19[.f]' (China wall-clock) -> epoch ms; None if absent or malformed."""
-    m = _TIME.match(text or "")
+    """'2026-10-19 22:32[:19[.f]]' (China wall-clock) -> epoch ms; None if absent or malformed."""
+    m = _TIME.match(text if isinstance(text, str) else "")
     if not m:
         return None
-    y, mo, d, h, mi, s = (int(g) for g in m.groups()[:6])
+    y, mo, d, h, mi, s = (int(g or 0) for g in m.groups()[:6])
     frac = int((m.group(7) or "0")[:3].ljust(3, "0"))
     return int(datetime(y, mo, d, h, mi, s, tzinfo=CST).timestamp() * 1000) + frac
 
@@ -175,6 +177,26 @@ def comment(raw: dict, me: int) -> dict:
         "mine": raw.get("userId") == me,
         "createdAt": china_ms(raw.get("feedbackTime")) or 0,
         "text": raw.get("descript") or "",
+    }
+
+
+# -------------------------------------------------------------- notifications
+def _truthy(value) -> bool:
+    """Yungu's client counts true, 1, "1" and "true" as read."""
+    return value is True or value == 1 or (isinstance(value, str) and value.strip().lower() in ("1", "true"))
+
+
+def notification(raw: dict) -> dict:
+    """A messageCenter v2/page item -> Notification. English text first (title -> titleEn -> senderName in
+    Yungu's own fallback order, English moved to the front); `taskId` only from a link to an assignment."""
+    link = _TASK_LINK.search(raw.get("messageUrl") or "") if isinstance(raw.get("messageUrl"), str) else None
+    return {
+        "id": str(raw["messageId"]),
+        "title": _text(raw.get("titleEn")) or _text(raw.get("title")) or _text(raw.get("senderName")) or "",
+        "body": _text(raw.get("contentEn")) or _text(raw.get("content")) or "",
+        "createdAt": china_ms(raw.get("messageSendTime")) or 0,
+        "read": _truthy(raw.get("ifRead")) or _truthy(raw.get("read")),
+        "taskId": int(link.group(1)) if link else None,
     }
 
 

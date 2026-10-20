@@ -5,6 +5,7 @@ import { dayIndex, weekStartOf } from '../time';
 import { AssignmentNotFound, CommentNotFound } from './errors';
 import { BLANK_CREDENTIALS_ERROR, data } from './index';
 import { mockData } from './mock';
+import { resetMockStore } from './store';
 
 const DAY = 24 * 3600_000;
 
@@ -177,5 +178,33 @@ describe('mock writes on unknown assignments and comments', () => {
     await expect(mockData.deleteComment(101, theirs.id)).rejects.toBeInstanceOf(CommentNotFound);
     await expect(mockData.deleteComment(101, 'nope')).rejects.toMatchObject({ status: 404, message: 'Comment not found' });
     expect((await mockData.getAssignmentDetail(101))!.comments.some((c) => c.id === theirs.id)).toBe(true);
+  });
+});
+
+describe('mock notifications', () => {
+  it('has three unread, two of them about assignments the mock knows, and read ones in pages of 20', async () => {
+    resetMockStore();
+    expect(await mockData.getUnreadCount()).toBe(3);
+    const unread = await mockData.getNotifications(false, 1);
+    expect(unread.hasMore).toBe(false);
+    expect(unread.items.map((n) => n.taskId)).toEqual([203, 102, null]);
+    for (const id of [203, 102]) expect(await mockData.getAssignmentDetail(id)).not.toBeNull();
+    const first = await mockData.getNotifications(true, 1);
+    const second = await mockData.getNotifications(true, 2);
+    expect(first.items).toHaveLength(20);
+    expect(first.hasMore).toBe(true);
+    expect(second.items).toHaveLength(6);
+    expect(second.hasMore).toBe(false);
+    const times = [...unread.items, ...first.items, ...second.items].map((n) => n.createdAt);
+    expect(times).toEqual([...times].sort((a, b) => b - a));
+  });
+
+  it('marking one read moves it to the read list and lowers the count', async () => {
+    resetMockStore();
+    await mockData.markNotificationRead('9100');
+    expect(await mockData.getUnreadCount()).toBe(2);
+    expect((await mockData.getNotifications(true, 1)).items[0]).toMatchObject({ id: '9100', read: true });
+    await mockData.markNotificationRead('nope');
+    expect(await mockData.getUnreadCount()).toBe(2);
   });
 });

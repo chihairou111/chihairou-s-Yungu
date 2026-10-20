@@ -10,6 +10,10 @@ interface Registry {
   /** The open pop-up offers its refresh while it is open; returns the call that withdraws it. */
   register(refresh: DetailRefresh): () => void;
   current(): DetailRefresh | null;
+  /** Other parts of the shell (the notification dot) hear about each refresh; returns the unsubscribe. */
+  listen(listener: () => void): () => void;
+  /** Tells every listener the service's cache was just dropped. */
+  announce(): void;
 }
 
 const RefreshContext = createContext<Registry | null>(null);
@@ -20,8 +24,16 @@ const RefreshContext = createContext<Registry | null>(null);
  */
 export function RefreshProvider({ children }: { children: ReactNode }) {
   const detail = useRef<DetailRefresh | null>(null);
+  const listeners = useRef(new Set<() => void>());
   const registry = useMemo<Registry>(
     () => ({
+      listen(listener) {
+        listeners.current.add(listener);
+        return () => listeners.current.delete(listener);
+      },
+      announce() {
+        for (const listener of listeners.current) listener();
+      },
       register(refresh) {
         detail.current = refresh;
         return () => {
@@ -41,6 +53,16 @@ export function useRegisterDetailRefresh(refresh: DetailRefresh | null): void {
   useEffect(() => {
     if (registry && refresh) return registry.register(refresh);
   }, [registry, refresh]);
+}
+
+/** Runs `listener` after each app-bar refresh has dropped the service's cache (the newest `listener` is used). */
+export function useOnRefresh(listener: () => void): void {
+  const registry = use(RefreshContext);
+  const latest = useRef(listener);
+  useEffect(() => {
+    latest.current = listener;
+  });
+  useEffect(() => registry?.listen(() => latest.current()), [registry]);
 }
 
 /**
@@ -110,6 +132,7 @@ export function useRefresh(): RefreshState {
     startTransition(async () => {
       try {
         await dropServiceCache();
+        registry?.announce();
         setRefreshFlag(true);
         flagged.current = true;
         startTransition(() => router.refresh());

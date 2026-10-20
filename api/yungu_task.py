@@ -53,8 +53,20 @@ class YunguError(Exception):
 
 def session_expired(resp_json) -> bool:
     """True if a task.yungu.org JSON body says the login session is gone:
-    `ifLogin: false` or `code: 1000` (observed when the SESSION cookie expires)."""
-    return isinstance(resp_json, dict) and (resp_json.get("ifLogin") is False or resp_json.get("code") == 1000)
+    `ifLogin: false` or `code: 1000` (observed when the SESSION cookie expires), or the message
+    service's `unauthorized: true` (its envelope has no ifLogin)."""
+    return isinstance(resp_json, dict) and (resp_json.get("ifLogin") is False or resp_json.get("code") == 1000
+                                            or resp_json.get("unauthorized") is True)
+
+
+def _message_ok(j) -> bool:
+    """Success in either envelope the message endpoints use: the usual `code: 0`, or the message
+    service's `status: true` (with `code: 1001`). An expired session never counts."""
+    if not isinstance(j, dict) or session_expired(j):
+        return False
+    if j.get("code") is not None:                    # a code decides; `status` may not contradict it
+        return j["code"] in (0, 1001) and j.get("status") is not False
+    return j.get("status") is True
 
 
 @dataclass
@@ -77,7 +89,9 @@ class YunguTask:
 
     # ------------------------------------------------------------------ http
     def _api(self, method: str, path: str, *, params=None, json_body=None, base=BASE,
-             referer=BASE + "/umiTask", check=True) -> dict:
+             referer=BASE + "/umiTask", check=True, ok=None) -> dict:
+        """One JSON call. `check` raises YunguError unless the envelope succeeded: `code == 0`, or
+        `ok(body)` when given (the message service answers `status: true, code: 1001`)."""
         headers = {"Accept": "application/json, text/plain, */*", "Referer": referer}
         if json_body is not None:
             headers["Content-Type"] = "application/json"
@@ -88,8 +102,9 @@ class YunguTask:
         if r.status_code != 200:
             raise YunguError(f"{method} {path} -> HTTP {r.status_code}", r)
         j = r.json()
-        if check and j.get("code") != 0:
-            raise YunguError(f"{method} {path} -> code={j.get('code')} message={j.get('message')}", r)
+        if check and not (ok(j) if ok else isinstance(j, dict) and j.get("code") == 0):
+            d = j if isinstance(j, dict) else {}
+            raise YunguError(f"{method} {path} -> code={d.get('code')} message={d.get('message')}", r)
         return j
 
     # ----------------------------------------------------------------- login
@@ -328,6 +343,25 @@ class YunguTask:
 
     def delete_comment(self, feedback_id: int) -> None:
         self._api("GET", "/api/deletedCommentary", params={"feedbackId": feedback_id})
+
+    # --------------------------------------------------------- notifications
+    # 站内信 (the bell on task.yungu.org); requests in api/NOTES.md section 9.
+    def unread_count(self) -> int:
+        content = self._api("GET", "/api/messageCenter/count")["content"] or {}
+        return int(content.get("unreadTotal") or 0)
+
+    def notifications(self, read: bool, page: int = 1, size: int = 20) -> dict:
+        """One page, newest first: content {pageNum, pageSize, total, data:[item]}. Items: messageId,
+        messageSendTime ('YYYY-MM-DD HH:MM', China time), ifRead, title/titleEn, content/contentEn,
+        messageUrl, messageType, templateCode, attribute. Listing marks nothing read."""
+        return self._api("POST", "/message/api/messageCenter/v2/page",
+                         json_body={"pageNo": page, "pageSize": size, "read": read},
+                         ok=_message_ok)["content"] or {}
+
+    def mark_notification_read(self, message_id: int) -> dict:
+        """Mark one notification read (what clicking it on the web does). Yungu's answer was never
+        observed, so any non-error envelope counts; returns it whole."""
+        return self._api("POST", "/api/messageCenter/read", json_body={"ids": [message_id]}, ok=_message_ok)
 
     # -------------------------------------------------------------- calendar
     @staticmethod

@@ -249,3 +249,68 @@ def test_code_1008_raises_yunguerror():
 
 def test_online_doc_limit_is_65535_bytes():
     assert yungu_task.ONLINE_DOC_MAX_BYTES == 65535
+
+
+# --------------------------------------------------------- notifications (NOTES.md section 9)
+def v2(content=None, status=True, code=1001):
+    return {"status": status, "message": "成功", "code": code, "unauthorized": False, "content": content}
+
+
+@responses.activate
+def test_unread_count_reads_unread_total():
+    responses.get(BASE + "/api/messageCenter/count", json=ok({"totalRead": 1725, "unreadTotal": 3}))
+    assert client().unread_count() == 3
+
+
+@responses.activate
+def test_unread_count_missing_is_zero():
+    responses.get(BASE + "/api/messageCenter/count", json=ok({"totalRead": 2}))
+    assert client().unread_count() == 0
+
+
+@responses.activate
+def test_notifications_posts_the_v2_page_and_accepts_its_1001_envelope():
+    page = {"pageNum": 2, "pageSize": 20, "total": 41, "data": [{"messageId": 1}]}
+    responses.post(BASE + "/message/api/messageCenter/v2/page", json=v2(page))
+    assert client().notifications(read=True, page=2, size=20) == page
+    assert body_of(responses.calls[0]) == {"pageNo": 2, "pageSize": 20, "read": True}
+
+
+@responses.activate
+def test_notifications_status_false_raises():
+    responses.post(BASE + "/message/api/messageCenter/v2/page", json=v2(None, status=False, code=500))
+    with pytest.raises(YunguError):
+        client().notifications(read=False, page=1, size=20)
+
+
+@responses.activate
+def test_notifications_unauthorized_counts_as_an_expired_session():
+    responses.post(BASE + "/message/api/messageCenter/v2/page",
+                   json={"status": False, "code": 401, "unauthorized": True, "content": None})
+    with pytest.raises(YunguError) as e:
+        client().notifications(read=False, page=1, size=20)
+    assert session_expired(e.value.resp.json())
+
+
+@responses.activate
+@pytest.mark.parametrize("answer", [ok(None), ok(True), v2(None), {"status": True, "content": None}])
+def test_mark_notification_read_posts_one_id_and_accepts_either_envelope(answer):
+    responses.post(BASE + "/api/messageCenter/read", json=answer)
+    assert client().mark_notification_read(7791043) == answer
+    assert body_of(responses.calls[0]) == {"ids": [7791043]}
+
+
+@responses.activate
+@pytest.mark.parametrize("answer", [{"code": 500, "status": False}, {"code": 1000, "ifLogin": False}, {},
+                                    {"code": 1035, "status": True}, {"code": 1001, "status": False}, []])
+def test_mark_notification_read_error_envelope_raises(answer):
+    responses.post(BASE + "/api/messageCenter/read", json=answer)
+    with pytest.raises(YunguError):
+        client().mark_notification_read(1)
+
+
+@responses.activate
+def test_mark_notification_read_non_200_raises():
+    responses.post(BASE + "/api/messageCenter/read", status=500, body="x")
+    with pytest.raises(YunguError):
+        client().mark_notification_read(1)

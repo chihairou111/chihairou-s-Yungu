@@ -2,7 +2,7 @@
 
 JSON everywhere; `Authorization: Bearer <token>` on everything except POST /session; errors are
 `{"error": str}`. Reads are cached 60 s per endpoint + params (`X-Refresh: 1` bypasses); any write
-(draft, submit, comment, online document) or POST /refresh clears the cache; an upload changes no read and leaves it. Run: `uvicorn service.app:app --host 127.0.0.1 --port 8100`
+(draft, submit, comment, online document, notification read) or POST /refresh clears the cache; an upload changes no read and leaves it. Run: `uvicorn service.app:app --host 127.0.0.1 --port 8100`
 from api/, with YUNGU_STATE_DIR (default /var/lib/yungu-lms).
 """
 import json
@@ -58,6 +58,7 @@ ADD_A_FILE = "Add at least one file."
 NOT_CONFIRMED = "Yungu didn't confirm the hand-in. Check on Yungu."
 DOC_NOT_SAVED = "Yungu couldn't save the document. Try again."
 ASCII_ID = re.compile(r"[0-9]+")
+NOTIFICATION_PAGE_MAX = 100          # Yungu's v2/page honours 100 (research notifications-and-feedback.md)
 
 
 class NotFound(ServiceError):
@@ -369,6 +370,30 @@ class Service:
         rows = self.submitted_list() if submitted else self.todo()
         return next((a for a in rows if a["id"] == aid), None)
 
+    def unread_count(self, refresh=False) -> dict:
+        return self.cache.get(("notifications", "count"),
+                              lambda: {"unread": self.yungu.call(lambda c: c.unread_count())}, refresh)
+
+    def notifications(self, read: bool, page: int, size: int, refresh=False) -> dict:
+        """One page of notifications, newest first. `hasMore` as Yungu's client decides it (what came so
+        far is short of the total), and never after an empty page."""
+        def compute():
+            content = self.yungu.call(lambda c: c.notifications(read, page, size)) or {}
+            rows = [r for r in content.get("data") or [] if isinstance(r, dict) and r.get("messageId") is not None]
+            total = content.get("total") if isinstance(content.get("total"), int) else 0
+            return {"items": [mapping.notification(r) for r in rows],
+                    "hasMore": bool(rows) and (page - 1) * size + len(rows) < total}
+        return self.cache.get(("notifications", read, page, size), compute, refresh)
+
+    def mark_notification_read(self, message_id: int) -> None:
+        """Yungu's answer was never observed before this shipped: anything but a success envelope is a 502,
+        and its shape (types only) is logged so the first real press shows what it was."""
+        try:
+            answer = self.yungu.call(lambda c: c.mark_notification_read(message_id))
+        finally:
+            self.cache.clear()
+        log.info("Mark read: Yungu answered %s", _shape_text(answer))
+
     def file_redirect(self, file_id: int, preview: bool, refresh=False) -> dict:
         def compute():
             return {"redirect": self.yungu.call(lambda c: _redirect(c, file_id, preview))}
@@ -613,6 +638,25 @@ def create_app(state_dir: Optional[str] = None, client_factory=yungu_client,
     @app.get("/assignments/{assignment_id}", dependencies=authed)
     def detail(request: Request, assignment_id: int):
         return service.detail(assignment_id, refresh(request))
+
+    @app.get("/notifications/count", dependencies=authed)
+    def unread_count(request: Request):
+        return service.unread_count(refresh(request))
+
+    @app.get("/notifications", dependencies=authed)
+    def notifications(request: Request, read: str = "", page: str = "1", size: str = "20"):
+        if read not in ("true", "false") or not ASCII_ID.fullmatch(page) or not ASCII_ID.fullmatch(size):
+            raise BadRequest()
+        if int(page) < 1 or not 1 <= int(size) <= NOTIFICATION_PAGE_MAX:
+            raise BadRequest()
+        return service.notifications(read == "true", int(page), int(size), refresh(request))
+
+    @app.post("/notifications/{message_id}/read", status_code=204, dependencies=authed)
+    def mark_notification_read(message_id: str):
+        if not ASCII_ID.fullmatch(message_id):
+            raise NotFound()
+        service.mark_notification_read(int(message_id))
+        return Response(status_code=204)
 
     @app.get("/files/{file_id}", dependencies=authed)
     def get_file(request: Request, file_id: str, preview: str = "0"):

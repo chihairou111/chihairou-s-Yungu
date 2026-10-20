@@ -93,12 +93,21 @@ class World:
         self.mark_confirms = True       # mark_submitted moves the achievement to status 4
         self.after_mark = None          # callable run right after mark_submitted (expiry, blocking)
         self.mark_answer = None         # what mark_submitted returns (Yungu's `content`)
+        self.unread = 1                 # unreadTotal
+        self.messages = [notice(7790000 - i, read=i > 0) for i in range(45)]   # newest first; one unread
+        self.read_answer = {"code": 0, "status": True, "content": None}        # mark_notification_read's answer
 
     def expire_all(self):
         self.valid_from = self.sessions + 1
 
     def count(self, name):
         return sum(1 for c in self.calls if c[0] == name)
+
+
+def notice(message_id, read=True, url=None):
+    return {"messageId": message_id, "messageSendTime": "2026-10-20 16:08", "ifRead": read,
+            "title": f"标题 {message_id}", "titleEn": f"Title {message_id}", "content": "内容", "contentEn": "Body",
+            "messageUrl": url or f"https://task.yungu.org/#/taskInfo/{message_id}/1/106", "messageType": 24}
 
 
 class FakeClient:
@@ -197,6 +206,21 @@ class FakeClient:
     def update_online_doc(self, file_id, title, delta_json, achievement_id):
         self._hit("update_online_doc", file_id, title, delta_json, achievement_id)
         return self._doc(file_id, title, delta_json)
+
+    def unread_count(self):
+        self._hit("unread_count")
+        return self.w.unread
+
+    def notifications(self, read, page=1, size=20):
+        self._hit("notifications", read, page, size)
+        rows = [m for m in self.w.messages if m["ifRead"] is read]
+        total = getattr(self.w, "total_override", None)
+        return {"pageNum": page, "pageSize": size, "total": len(rows) if total is None else total,
+                "data": rows[(page - 1) * size:page * size]}
+
+    def mark_notification_read(self, message_id):
+        self._hit("mark_notification_read", message_id)
+        return self.w.read_answer
 
     def mark_submitted(self, task_id):
         self._hit("mark_submitted", task_id)
@@ -317,6 +341,8 @@ ENDPOINTS = [
     ("DELETE", "/assignments/93251/comments/327994", None), ("POST", "/refresh", None), ("DELETE", "/session", None),
     ("POST", "/assignments/94929/online-docs", {"title": "t", "content": "{}"}),
     ("PUT", "/assignments/94929/online-docs/11130500", {"title": "t", "content": "{}"}),
+    ("GET", "/notifications/count", None), ("GET", "/notifications?read=false", None),
+    ("POST", "/notifications/7790000/read", None),
 ]
 
 
@@ -473,6 +499,7 @@ def test_refresh_clears_the_cache(api, world, auth):
     ("POST", "/assignments/94929/online-docs", {"title": "研究", "content": '{"ops":[{"insert":"x\\n"}]}'}),
     ("PUT", "/assignments/94929/online-docs/11130500", {"title": "研究", "content": '{"ops":[{"insert":"x\\n"}]}'}),
     ("POST", "/assignments/94929/submit", {"fileIds": []}),                 # mark as submitted
+    ("POST", "/notifications/7790000/read", None),
 ])
 def test_writes_clear_the_cache(api, world, auth, method, path, body):
     api.get("/courses", headers=auth)
@@ -1614,3 +1641,88 @@ def test_secrets_never_reach_the_logs_or_responses(api, world, auth, caplog):
     for secret in ("hunter2-xyz", "pw2", "ST-secret-ticket", token):
         assert secret not in caplog.text
     assert "ticket" not in body
+
+
+# ------------------------------------------------------------- notifications
+def test_unread_count(api, world, auth):
+    world.unread = 3
+    assert api.get("/notifications/count", headers=auth).json() == {"unread": 3}
+
+
+def test_notification_reads_are_cached_60_seconds_and_x_refresh_bypasses(api, world, auth, clock):
+    for _ in range(2):
+        api.get("/notifications/count", headers=auth)
+        api.get("/notifications?read=true&page=1&size=20", headers=auth)
+    assert world.count("unread_count") == 1 and world.count("notifications") == 1
+    api.get("/notifications/count", headers={**auth, "X-Refresh": "1"})
+    assert world.count("unread_count") == 2
+    clock.t += 61
+    api.get("/notifications?read=true&page=1&size=20", headers=auth)
+    assert world.count("notifications") == 2
+
+
+def test_notifications_pages_map_items_and_say_whether_more_remain(api, world, auth):
+    first = api.get("/notifications?read=true&page=1&size=20", headers=auth).json()
+    assert len(first["items"]) == 20 and first["hasMore"] is True
+    assert first["items"][0] == {"id": "7789999", "title": "Title 7789999", "body": "Body",
+                                 "createdAt": 1792483680000, "read": True, "taskId": 7789999}
+    third = api.get("/notifications?read=true&page=3&size=20", headers=auth).json()
+    assert len(third["items"]) == 4 and third["hasMore"] is False
+    unread = api.get("/notifications?read=false", headers=auth).json()
+    assert [n["id"] for n in unread["items"]] == ["7790000"] and unread["hasMore"] is False
+    assert ("notifications", (False, 1, 20)) in world.calls
+
+
+def test_an_empty_page_never_claims_more_whatever_the_total_says(api, world, auth):
+    world.messages = []
+    world.total_override = 50
+    assert api.get("/notifications?read=true&page=2", headers=auth).json() == {"items": [], "hasMore": False}
+
+
+@pytest.mark.parametrize("query", ["read=maybe", "", "read=true&page=0", "read=true&size=0", "read=true&size=101",
+                                   "read=true&page=x"])
+def test_notifications_bad_query_is_a_400(api, world, auth, query):
+    r = api.get(f"/notifications?{query}", headers=auth)
+    assert r.status_code == 400 and r.json() == {"error": "Bad request."}
+    assert world.count("notifications") == 0
+
+
+def test_mark_read_sends_the_id_answers_204_and_clears_notification_reads(api, world, auth):
+    api.get("/notifications/count", headers=auth)
+    api.get("/notifications?read=false", headers=auth)
+    r = api.post("/notifications/7790000/read", headers=auth)
+    assert r.status_code == 204 and r.content == b""
+    assert ("mark_notification_read", (7790000,)) in world.calls
+    api.get("/notifications/count", headers=auth)
+    api.get("/notifications?read=false", headers=auth)
+    assert world.count("unread_count") == 2 and world.count("notifications") == 2
+
+
+@pytest.mark.parametrize("mid", ["abc", "１２", "-1"])
+def test_mark_read_unknown_id_shape_is_a_404_without_calling_yungu(api, world, auth, mid):
+    r = api.post(f"/notifications/{mid}/read", headers=auth)
+    assert r.status_code == 404 and world.count("mark_notification_read") == 0
+
+
+def test_mark_read_failure_is_a_502_and_still_clears_the_cache(api, world, auth):
+    api.get("/notifications/count", headers=auth)
+    world.fail = YunguError("POST /api/messageCenter/read -> code=500", json_response({"code": 500}))
+    r = api.post("/notifications/7790000/read", headers=auth)
+    assert r.status_code == 502 and r.json() == {"error": UNREACHABLE}
+    world.fail = None
+    api.get("/notifications/count", headers=auth)
+    assert world.count("unread_count") == 2
+
+
+def test_mark_read_logs_only_the_shape_of_yungus_answer(api, world, auth, caplog):
+    world.read_answer = {"code": 0, "status": True, "content": "secret-ish"}
+    with caplog.at_level("INFO", logger="yungu_lms.app"):
+        assert api.post("/notifications/7790000/read", headers=auth).status_code == 204
+    line = next(r.getMessage() for r in caplog.records if "Mark read" in r.getMessage())
+    assert "secret-ish" not in line and '"content": "str"' in line
+
+
+def test_mark_read_is_retried_once_after_a_relogin(api, world, auth):
+    world.expire_all()
+    assert api.post("/notifications/7790000/read", headers=auth).status_code == 204
+    assert world.count("mark_notification_read") == 2

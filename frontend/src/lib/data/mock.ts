@@ -5,13 +5,15 @@ import type { YunguData } from './index';
 import { TIMETABLE, buildCourses } from './fixtures';
 import { docTooLongMessage } from '../limits';
 import { AssignmentNotFound, CommentNotFound, DocumentHandedIn, DocumentTooLong, ServiceError } from './errors';
-import { BLANK_CREDENTIALS_ERROR } from './messages';
+import { BLANK_CREDENTIALS_ERROR, NOTIFICATION_PAGE_SIZE } from './messages';
 import {
   findOnlineDoc,
   getDetail,
+  listNotifications,
   listSubmitted,
   listTodo,
   loadFile,
+  markNotificationRead,
   markSubmitted,
   putComment,
   removeComment,
@@ -19,6 +21,7 @@ import {
   setFiles,
   storeFile,
   storeOnlineDoc,
+  unreadCount,
 } from './store';
 
 const MIN = 60_000;
@@ -119,6 +122,15 @@ export const mockData: YunguData = {
     const now = Date.now();
     if (!known(id, now).comments.some((c) => c.id === commentId && c.mine)) throw new CommentNotFound();
     removeComment(id, commentId, now);
+  },
+  async getUnreadCount() {
+    return unreadCount(Date.now());
+  },
+  async getNotifications(read, page) {
+    return listNotifications(read, page, NOTIFICATION_PAGE_SIZE, Date.now());
+  },
+  async markNotificationRead(id) {
+    markNotificationRead(id, Date.now());
   },
   async refresh() {
     // Nothing is cached: every read is already fresh.

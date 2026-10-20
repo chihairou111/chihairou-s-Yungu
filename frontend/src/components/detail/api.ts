@@ -16,7 +16,8 @@ export function isSessionEnded(error: unknown): boolean {
   return error instanceof ApiError && error.status === 401;
 }
 
-async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
+/** A same-origin JSON call; failures become `ApiError` (an abort is rethrown as is). */
+export async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
   let res: Response;
   try {
     res = await fetch(url, { cache: 'no-store', ...init });

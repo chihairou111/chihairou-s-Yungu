@@ -1,7 +1,7 @@
 import 'server-only';
 import { sanitizeInstructions } from '../sanitize';
-import type { Assignment, AssignmentDetail, Comment, FileKind, FileRef } from '../types';
-import { buildDetailSeed, buildSubmitted, buildTodo, onlineDoc } from './fixtures';
+import type { Assignment, AssignmentDetail, Comment, FileKind, FileRef, Notification, NotificationPage } from '../types';
+import { buildDetailSeed, buildNotifications, buildSubmitted, buildTodo, onlineDoc } from './fixtures';
 import type { DetailSeed } from './fixtures';
 
 const ME = 'Bruce Zheng';
@@ -45,6 +45,8 @@ interface MockStore {
   /** Bytes of uploaded files only; fixture files are served from public/mock/. */
   blobs: Map<string, Uint8Array>;
   assignments: Map<number, AssignmentState>;
+  /** Seeded on first use, newest first; marking one read flips it in place. */
+  notifications?: Notification[];
 }
 
 const createStore = (): MockStore => ({ refs: new Map(), blobs: new Map(), assignments: new Map() });
@@ -180,4 +182,25 @@ export function putComment(id: number, text: string, now: number): Comment | nul
 export function removeComment(id: number, commentId: string, now: number): void {
   const state = stateFor(id, now);
   if (state) state.comments = state.comments.filter((c) => !(c.id === commentId && c.mine));
+}
+
+function notifications(now: number): Notification[] {
+  return (store().notifications ??= buildNotifications(now));
+}
+
+export function unreadCount(now: number): number {
+  return notifications(now).filter((n) => !n.read).length;
+}
+
+/** One page (1-based) of unread or read notifications, newest first. */
+export function listNotifications(read: boolean, page: number, size: number, now: number): NotificationPage {
+  const all = notifications(now).filter((n) => n.read === read);
+  const items = all.slice((page - 1) * size, page * size).map((n) => ({ ...n }));
+  return { items, hasMore: items.length > 0 && (page - 1) * size + items.length < all.length };
+}
+
+/** Marks one read; an unknown id changes nothing (as far as anyone can tell, Yungu does the same). */
+export function markNotificationRead(id: string, now: number): void {
+  const found = notifications(now).find((n) => n.id === id);
+  if (found) found.read = true;
 }

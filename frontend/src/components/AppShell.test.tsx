@@ -139,8 +139,8 @@ describe('Settings menu', () => {
   it('sits left of the avatar as a labelled menu button', () => {
     renderStyled('expressive');
     const buttons = within(screen.getByRole('banner')).getAllByRole('button');
-    expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(['Refresh', 'Settings', 'Account: Bruce Zheng']);
-    expect(buttons[1]).toHaveAttribute('aria-haspopup', 'menu');
+    expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(['Notifications', 'Refresh', 'Settings', 'Account: Bruce Zheng']);
+    expect(buttons[2]).toHaveAttribute('aria-haspopup', 'menu');
   });
 
   it('lists both styles under "Style" with the current one checked', async () => {
