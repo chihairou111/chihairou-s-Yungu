@@ -4,12 +4,26 @@ import Underline from '@tiptap/extension-underline';
 import LinkMark from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
 import TextAlign from '@tiptap/extension-text-align';
-import { BLOCK_PASSTHROUGH, EMBED_NODE, INLINE_PASSTHROUGH, embedLabel } from '@/lib/quill-delta';
+import { BLOCK_PASSTHROUGH, EMBED_NODE, INLINE_PASSTHROUGH, embedKind, embedLabel } from '@/lib/quill-delta';
+
+/** A JSON object stored in a data attribute, or null if it is missing or isn't one. */
+function jsonObject(raw: string | null): Record<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+const jsonAttribute = (value: unknown) => (value == null ? null : JSON.stringify(value));
 
 /**
  * A Yungu image, video, file or audio embed, kept exactly as Yungu stored it (`value` is the original
- * insert object, e.g. `{ image: { url, uid } }`). Shown as a non-editable labelled block; it can be moved
- * or deleted but not edited, and is never created from pasted HTML.
+ * insert object, e.g. `{ image: { url, uid } }`). Shown as a non-editable labelled block that can be moved
+ * or deleted but not edited. Its data rides in `data-*` attributes, so it survives the writer's HTML draft
+ * and copy/paste; HTML without a valid `data-yungu-embed` value is never turned into one.
  */
 const YunguEmbed = Node.create({
   name: EMBED_NODE,
@@ -19,17 +33,25 @@ const YunguEmbed = Node.create({
   draggable: false,
   addAttributes() {
     return {
-      kind: { default: 'other', rendered: false },
-      value: { default: null, rendered: false },
+      kind: { default: 'other', rendered: false, parseHTML: (el) => embedKind(jsonObject(el.getAttribute('data-yungu-embed'))) },
+      value: {
+        default: null,
+        parseHTML: (el) => jsonObject(el.getAttribute('data-yungu-embed')),
+        renderHTML: (attrs) => ({ 'data-yungu-embed': jsonAttribute(attrs.value) }),
+      },
       /** The embed op's own attributes, if it had any. */
-      attributes: { default: null, rendered: false },
+      attributes: {
+        default: null,
+        parseHTML: (el) => jsonObject(el.getAttribute('data-quill-attributes')),
+        renderHTML: (attrs) => ({ 'data-quill-attributes': jsonAttribute(attrs.attributes) }),
+      },
     };
   },
   parseHTML() {
-    return [];
+    return [{ tag: 'div[data-yungu-embed]', getAttrs: (el) => (jsonObject(el.getAttribute('data-yungu-embed')) ? null : false) }];
   },
-  renderHTML({ node }) {
-    return ['div', { class: 'yungu-embed', 'data-yungu-embed': node.attrs.kind, contenteditable: 'false' }, `[${embedLabel(node.attrs.value)}]`];
+  renderHTML({ node, HTMLAttributes }) {
+    return ['div', { ...HTMLAttributes, class: 'yungu-embed', contenteditable: 'false' }, `[${embedLabel(node.attrs.value)}]`];
   },
 });
 
@@ -37,7 +59,18 @@ const YunguEmbed = Node.create({
 const QuillBlockPassthrough = Extension.create({
   name: 'quillBlockPassthrough',
   addGlobalAttributes() {
-    return [{ types: ['paragraph', 'heading'], attributes: { [BLOCK_PASSTHROUGH]: { default: null, rendered: false } } }];
+    return [
+      {
+        types: ['paragraph', 'heading'],
+        attributes: {
+          [BLOCK_PASSTHROUGH]: {
+            default: null,
+            parseHTML: (el) => jsonObject(el.getAttribute('data-quill-block')),
+            renderHTML: (attrs) => ({ 'data-quill-block': jsonAttribute(attrs[BLOCK_PASSTHROUGH]) }),
+          },
+        },
+      },
+    ];
   },
 });
 
@@ -45,13 +78,51 @@ const QuillBlockPassthrough = Extension.create({
 const QuillInlinePassthrough = Mark.create({
   name: INLINE_PASSTHROUGH,
   addAttributes() {
-    return { attributes: { default: null, rendered: false } };
+    return {
+      attributes: {
+        default: null,
+        parseHTML: (el) => jsonObject(el.getAttribute('data-quill-inline')),
+        renderHTML: (attrs) => ({ 'data-quill-inline': jsonAttribute(attrs.attributes) }),
+      },
+    };
   },
   parseHTML() {
-    return [];
+    return [{ tag: 'span[data-quill-inline]', getAttrs: (el) => (jsonObject(el.getAttribute('data-quill-inline')) ? null : false) }];
   },
-  renderHTML() {
-    return ['span', 0];
+  renderHTML({ HTMLAttributes }) {
+    return ['span', HTMLAttributes, 0];
+  },
+});
+
+/**
+ * Strike-through and quotes as Yungu's editor makes them: kept when opened or pasted, but with no input
+ * rules (`~~x~~`, `> `) or shortcuts, since the toolbar doesn't offer them.
+ */
+const Strike = Mark.create({
+  name: 'strike',
+  parseHTML() {
+    return [
+      { tag: 's' },
+      { tag: 'del' },
+      { tag: 'strike' },
+      { style: 'text-decoration', consuming: false, getAttrs: (style) => (style.includes('line-through') ? {} : false) },
+    ];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ['s', HTMLAttributes, 0];
+  },
+});
+
+const Blockquote = Node.create({
+  name: 'blockquote',
+  content: 'block+',
+  group: 'block',
+  defining: true,
+  parseHTML() {
+    return [{ tag: 'blockquote' }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ['blockquote', HTMLAttributes, 0];
   },
 });
 
@@ -64,6 +135,8 @@ const QuillInlinePassthrough = Mark.create({
 export const WRITER_EXTENSIONS = [
   StarterKit.configure({
     heading: { levels: [1, 2] },
+    blockquote: false,
+    strike: false,
     code: false,
     codeBlock: false,
     horizontalRule: false,
@@ -71,6 +144,8 @@ export const WRITER_EXTENSIONS = [
     link: false,
   }),
   Underline,
+  Strike,
+  Blockquote,
   // Not inclusive (Link makes it so whenever autolink is on): text typed at a link's end stays outside it.
   LinkMark.extend({ inclusive: () => false }).configure({
     openOnClick: false,

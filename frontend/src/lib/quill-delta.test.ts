@@ -149,6 +149,81 @@ describe('round trip of Yungu-written documents (Review Focus 3)', () => {
   });
 });
 
+describe('the writer’s HTML draft and the clipboard keep what we don’t edit', () => {
+  const KEPT: Delta = {
+    ops: [
+      { attributes: { color: '#e60000' }, insert: 'red 红' },
+      { attributes: { indent: 1, list: 'bullet' }, insert: '\n' },
+      { insert: 'quoted item' },
+      { attributes: { list: 'ordered', blockquote: true }, insert: '\n' },
+      { insert: OSS_IMAGE },
+      { insert: { file: { url: 'https://x.aliyuncs.com/f.pdf', name: '报告 "a".pdf', uid: 'f' } }, attributes: { width: '50%' } },
+      { insert: 'end' },
+      { attributes: { align: 'center', header: 3 }, insert: '\n' },
+    ],
+  };
+
+  it('survives getHTML → a new editor (the local draft path)', () => {
+    for (const delta of [KEPT, YUNGU_EXAMPLE]) {
+      const first = new Editor({ extensions: WRITER_EXTENSIONS, content: deltaToDoc(delta) });
+      const html = first.getHTML();
+      first.destroy();
+      const second = new Editor({ extensions: WRITER_EXTENSIONS, content: html });
+      const saved = docToDelta(second.getJSON()).delta;
+      second.destroy();
+      expectEquivalent(saved, delta);
+    }
+  });
+
+  it('survives cut and paste inside the editor', () => {
+    const editor = new Editor({ extensions: WRITER_EXTENSIONS, content: deltaToDoc(KEPT) });
+    editor.commands.selectAll();
+    const { dom } = editor.view.serializeForClipboard(editor.state.selection.content());
+    editor.commands.clearContent();
+    editor.view.pasteHTML(dom.innerHTML, new Event('paste') as ClipboardEvent);
+    const saved = docToDelta(editor.getJSON()).delta;
+    editor.destroy();
+    expectEquivalent(saved, KEPT);
+  });
+
+  it('ignores data attributes that don’t hold a JSON object', () => {
+    const editor = new Editor({
+      extensions: WRITER_EXTENSIONS,
+      content: '<div data-yungu-embed="not json">x</div><div data-yungu-embed="[1]">y</div><p data-quill-block="{bad"><span data-quill-inline="&quot;s&quot;">z</span></p>',
+    });
+    const saved = docToDelta(editor.getJSON()).delta;
+    editor.destroy();
+    expect(saved).toEqual({ ops: [{ insert: 'x\ny\nz\n' }] });
+  });
+});
+
+describe('the editor’s trailing empty paragraph', () => {
+  const cases: Delta[] = [
+    { ops: [{ insert: 'a' }, { attributes: { list: 'bullet' }, insert: '\n' }] },
+    { ops: [{ insert: '标题' }, { attributes: { header: 1 }, insert: '\n' }] },
+    { ops: [{ insert: 'q' }, { attributes: { blockquote: true }, insert: '\n' }] },
+    { ops: [{ insert: 'x\n' }, { insert: OSS_IMAGE }, { insert: '\n' }] },
+  ];
+
+  it('is not saved as an extra blank line after the first transaction', () => {
+    for (const delta of cases) {
+      const editor = new Editor({ extensions: WRITER_EXTENSIONS, content: deltaToDoc(delta) });
+      editor.commands.setTextSelection(1);
+      expect(editor.state.doc.lastChild?.type.name).toBe('paragraph');
+      const saved = docToDelta(editor.getJSON()).delta;
+      editor.destroy();
+      expect(saved).toEqual(delta);
+    }
+  });
+
+  it('a Yungu blank last line after a formatted line normalises away', () => {
+    const withBlank: Delta = { ops: [{ insert: 'a' }, { attributes: { list: 'bullet' }, insert: '\n' }, { insert: '\n' }] };
+    expect(normalizeDelta(withBlank)).toEqual(cases[0]);
+    expectEquivalent(throughEditor(withBlank).delta, withBlank);
+    expect(normalizeDelta({ ops: [{ insert: 'p\n' }, { insert: '\n' }] })).toEqual({ ops: [{ insert: 'p\n\n' }] });
+  });
+});
+
 describe('our toolbar’s formats → Yungu delta', () => {
   const text = (t: string, marks?: JSONContent['marks']): JSONContent => ({ type: 'text', text: t, ...(marks ? { marks } : {}) });
   const para = (...content: JSONContent[]): JSONContent => ({ type: 'paragraph', content });
@@ -371,7 +446,7 @@ describe('deltaToHtml (Review Focus 5)', () => {
 
   it('shows images stored on Yungu’s OSS host', () => {
     const html = deltaToHtml({ ops: [{ insert: OSS_IMAGE }, { insert: '\n' }] });
-    expect(html).toContain('<img src="https://yungu-task.oss-cn-hangzhou.aliyuncs.com/a/b.png" alt="Image">');
+    expect(html).toContain('<img src="https://yungu-task.oss-cn-hangzhou.aliyuncs.com/a/b.png" alt="Image" referrerpolicy="no-referrer">');
   });
 });
 

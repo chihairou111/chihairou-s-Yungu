@@ -75,7 +75,8 @@ export function parseDelta(json: string): Delta | null {
 /**
  * The canonical form two deltas are compared in: legacy forms made modern (`list: true` → ordered,
  * `bullet: true` → bullet, Quill 0.x `insert: 1` images → image embeds), empty inserts and non-insert ops
- * dropped, empty attribute objects removed, adjacent text inserts with equal attributes merged.
+ * dropped, empty attribute objects removed, adjacent text inserts with equal attributes merged, and a
+ * trailing empty line after a formatted last line dropped.
  */
 export function normalizeDelta(delta: Delta): Delta {
   const ops: DeltaOp[] = [];
@@ -106,6 +107,12 @@ export function normalizeDelta(delta: Delta): Delta {
     } else {
       ops.push(op as DeltaOp);
     }
+  }
+  // A plain "\n" right after a formatted line's "\n" is the empty line an editor keeps after a list,
+  // heading or quote at the end of a document (TipTap's trailing node; Quill doesn't need it): a no-op.
+  const [prev, last] = ops.slice(-2);
+  if (ops.length >= 2 && last.insert === '\n' && !last.attributes && prev.attributes && typeof prev.insert === 'string' && prev.insert.endsWith('\n')) {
+    ops.pop();
   }
   return { ops };
 }
@@ -337,7 +344,12 @@ export function docToDelta(doc: JSONContent): { delta: Delta; flattened: boolean
     }
   }
 
-  blocks(doc.content, { depth: 0 });
+  // The empty paragraph the editor keeps after a final list, heading, quote or embed isn't the writer's.
+  const top = doc.content ?? [];
+  const end = top[top.length - 1];
+  const trailing =
+    top.length > 1 && end.type === 'paragraph' && !end.content?.length && !end.attrs?.textAlign && !end.attrs?.[BLOCK_PASSTHROUGH] && top[top.length - 2].type !== 'paragraph';
+  blocks(trailing ? top.slice(0, -1) : top, { depth: 0 });
   // Quill documents always end with a newline.
   const last = ops[ops.length - 1];
   if (!last || typeof last.insert !== 'string' || !last.insert.endsWith('\n')) push('\n');
@@ -390,7 +402,7 @@ function embedHtml(value: Record<string, unknown>): string {
   if (embedKind(value) === 'image') {
     const image = value.image;
     const src = ossUrl(isObject(image) ? image.url : image);
-    if (src) return `<p><img src="${escapeHtml(src)}" alt="Image"></p>`;
+    if (src) return `<p><img src="${escapeHtml(src)}" alt="Image" referrerpolicy="no-referrer"></p>`;
   }
   return `<p class="yungu-embed">[${escapeHtml(embedLabel(value))}]</p>`;
 }
@@ -398,7 +410,7 @@ function embedHtml(value: Record<string, unknown>): string {
 /**
  * Preview HTML in the structure of Yungu's own viewer: h1/h2/p, strong/em/u/s, ul/ol>li, blockquote,
  * alignment as an inline `text-align`. All text is escaped; links are http(s) only and open in a new tab;
- * images show only from Yungu's OSS host, every other embed is a labelled placeholder. Safe to inject.
+ * images show only from Yungu's OSS host (no referrer sent), every other embed is a labelled placeholder. Safe to inject.
  */
 export function deltaToHtml(delta: Delta): string {
   let html = '';
