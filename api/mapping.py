@@ -14,6 +14,12 @@ Field decisions (chosen from recorded fixtures, tests/fixtures/):
   * No deadline (`deadlineTimeMillis` / `endTime` null; the dashboard's dueAt is always a number): a
     Submitted item is due at its hand-in time (never late, filed under the week it was handed in); a
     To-do item gets NO_DEADLINE_MS (2099-12-31 23:59:59 China), so it sorts last and is never overdue.
+  * AssignmentDetail.feedback: the teacher's grade, from getAchievementDetail's
+    evaluationItemResultResponse.itemResultResponses[0] (empty = not graded or not released). scoreType 1
+    is numeric ("4.5/5", out of the evaluation's totalScore, else the task's); 2 is a level (its English
+    name, e.g. "Extraordinary [5]"). Rubric criteria take their names and levels from
+    getMixedPublishDetail.evaluationItemRubricsResponses when the result points at it. AI feedback fields
+    are null everywhere so far and are ignored. NOTES.md section 9.
   * FileRef.online: true for Yungu online documents (type "onlineDocument"); Yungu serves no file for them.
   * FileRef.kind: from the extension / guessed mime (mirrors the frontend's fileKind); Yungu's own
     `type` is only a fallback because it calls .numbers files "pdf". Apple iWork files count as
@@ -216,6 +222,54 @@ def needs_files(mixed: dict, achievement: dict) -> bool:
     return True
 
 
+def _text(value) -> Optional[str]:
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _criterion(raw: dict, rubrics: List[dict]) -> dict:
+    """One itemIndicatorResultModelList row -> {name, result, description?}, the rubric's wording first."""
+    rubric = next((r for r in rubrics if r.get("id") == raw.get("indicatorId")), {})
+    level = next((i for i in rubric.get("list") or [] if i.get("id") == raw.get("evaluationCriterionItemId")), {})
+    out = {
+        "name": (_text(raw.get("indicatorEname")) or _text(rubric.get("ename")) or _text(raw.get("indicatorName"))
+                 or _text(rubric.get("name")) or ""),
+        "result": (_text(level.get("ename")) or _text(level.get("name")) or _text(raw.get("levelName"))
+                   or _text(raw.get("score")) or ""),
+    }
+    description = _text(level.get("descriptionEn")) or _text(level.get("description")) or _text(raw.get("description"))
+    if description:
+        out["description"] = description
+    return out
+
+
+def feedback(mixed: dict, achievement: dict) -> Optional[dict]:
+    """The teacher's grade and written feedback -> AssignmentDetail.feedback; None before grading (or when
+    there is nothing to show: no score, no comment, no criteria)."""
+    evaluation = achievement.get("evaluationItemResultResponse") or {}
+    results = evaluation.get("itemResultResponses") or []
+    result = results[0] if results and isinstance(results[0], dict) else None
+    if result is None or result.get("status") not in (None, 1):      # Yungu shows a result only at status 1
+        return None
+    if result.get("scoreType") == 2:
+        level = result.get("criterionItemResponse") or {}
+        score = _text(level.get("levelEName")) or _text(level.get("levelName")) or ""
+    else:
+        points = _text(str(result["score"])) if result.get("score") is not None else None
+        total = _text(str(evaluation.get("totalScore") or mixed.get("totalScore") or ""))
+        score = f"{points}/{total}" if points and total else points or ""
+    rubrics = [r for r in mixed.get("evaluationItemRubricsResponses") or [] if isinstance(r, dict)]
+    criteria = [_criterion(c, rubrics) for c in result.get("itemIndicatorResultModelList") or [] if isinstance(c, dict)]
+    comment_text = _text(result.get("feedback"))
+    if not score and not comment_text and not criteria:
+        return None
+    return {
+        "score": score,
+        "comment": comment_text,
+        "criteria": criteria,
+        "updatedAt": china_ms(result.get("modifyTime")) or china_ms(result.get("createTime")),
+    }
+
+
 def detail(mixed: dict, achievement: dict, comments: List[dict], me: int,
            submitted_ids: Optional[List[str]], listed: Optional[dict] = None) -> dict:
     """getMixedPublishDetail + getAchievementDetail + comments -> AssignmentDetail.
@@ -248,6 +302,7 @@ def detail(mixed: dict, achievement: dict, comments: List[dict], me: int,
         "submitted": submitted,
         "needsFiles": needs_files(mixed, achievement),
         "comments": sorted((comment(c, me) for c in comments or []), key=lambda c: (c["createdAt"], c["id"])),
+        "feedback": feedback(mixed, achievement),
     }
     if listed and listed.get("submittedAt") is not None and submitted:
         out["submittedAt"] = listed["submittedAt"]

@@ -16,7 +16,7 @@ ME = 106
 ASSIGNMENT_KEYS = {"id", "title", "course", "courseId", "dueAt", "assignedAt", "status", "estimatedMinutes",
                    "schoolGroup"}
 DETAIL_KEYS = ASSIGNMENT_KEYS | {"teacher", "instructionsHtml", "attachments", "myFiles", "submittedFileIds",
-                                 "submitted", "comments", "needsFiles"}
+                                 "submitted", "comments", "needsFiles", "feedback"}
 FILE_KEYS = {"id", "name", "kind", "mime", "size", "url", "createdAt"}
 
 
@@ -404,3 +404,73 @@ def test_detail_null_need_enclosure_means_files_required(load):
     assert mapping.detail(mixed_missing, {**ach, "needEnclosure": None}, [], ME, None)["needsFiles"] is True
     assert mapping.detail({**mixed, "needEnclosure": None}, {**ach, "needEnclosure": None}, [], ME, None)["needsFiles"] is True
     assert mapping.detail({**mixed, "needEnclosure": None}, {**ach, "needEnclosure": False}, [], ME, None)["needsFiles"] is False
+
+
+# ------------------------------------------------------------------ feedback
+def fb(load, name):
+    sample = load("feedback_samples.json")[name]
+    return mapping.feedback(sample["mixed"], sample["achievement"])
+
+
+def test_feedback_numeric_score_out_of_the_total_without_a_comment(load):
+    assert fb(load, "numeric_no_comment") == {"score": "5/5", "comment": None, "criteria": [],
+                                              "updatedAt": ms(2026, 10, 20, 16, 8, 55)}
+
+
+def test_feedback_numeric_score_with_the_teachers_comment(load):
+    f = fb(load, "numeric_comment")
+    assert f["score"] == "4.5/5" and f["comment"] == "缺1.4单词笔记。"
+
+
+def test_feedback_level_grade_shows_the_english_level_name(load):
+    f = fb(load, "level_comment")
+    assert f["score"] == "Extraordinary [5]" and f["comment"].startswith("订正很认真")
+    assert f["criteria"] == []
+
+
+def test_feedback_rubric_criteria_take_names_and_levels_from_the_rubric(load):
+    f = fb(load, "level_rubric")
+    assert f["score"] == "Advanced [4]" and f["comment"] is None
+    assert f["updatedAt"] == ms(2026, 6, 29, 14, 34, 14)
+    [c] = f["criteria"]
+    assert c["name"] == "Values-Aligned Decision-Making and Action" and c["result"] == "Proficient"
+    assert c["description"].startswith("在做决策时")
+
+
+def test_feedback_is_null_before_grading_and_without_an_evaluation(load):
+    assert fb(load, "not_graded") is None
+    assert mapping.feedback({}, {}) is None
+    assert mapping.feedback({}, {"evaluationItemResultResponse": None}) is None
+
+
+def test_feedback_hidden_result_or_empty_result_is_null():
+    def ach(**r):
+        return {"evaluationItemResultResponse": {"totalScore": "5", "itemResultResponses": [r]}}
+    assert mapping.feedback({}, ach(scoreType=1, score="5", status=0)) is None
+    assert mapping.feedback({}, ach(scoreType=1, score=None, feedback="  ", status=1)) is None
+
+
+def test_feedback_comment_only_and_score_without_a_total():
+    def ach(total, **r):
+        return {"evaluationItemResultResponse": {"totalScore": total, "itemResultResponses": [{"status": 1, **r}]}}
+    f = mapping.feedback({}, ach(None, scoreType=1, score=None, feedback=" late submission. "))
+    assert f["score"] == "" and f["comment"] == "late submission." and f["updatedAt"] is None
+    assert mapping.feedback({"totalScore": "10"}, ach(None, scoreType=1, score="8"))["score"] == "8/10"
+    assert mapping.feedback({}, ach(None, scoreType=1, score="8"))["score"] == "8"
+    level = mapping.feedback({}, ach("5", scoreType=2, criterionItemResponse={"levelName": "超越 [5]", "levelEName": None}))
+    assert level["score"] == "超越 [5]"
+
+
+def test_feedback_criterion_without_a_rubric_falls_back_to_its_own_fields():
+    ach = {"evaluationItemResultResponse": {"itemResultResponses": [{"status": 1, "scoreType": 1, "score": "3",
+           "itemIndicatorResultModelList": [{"indicatorId": 9, "indicatorName": "论点", "indicatorEname": None,
+                                             "score": "掌握", "levelName": None, "description": None}]}]}}
+    assert mapping.feedback({}, ach)["criteria"] == [{"name": "论点", "result": "掌握"}]
+
+
+def test_detail_carries_the_feedback(load):
+    sample = load("feedback_samples.json")["numeric_comment"]
+    mixed = {**load("mixed_93251.json"), **sample["mixed"]}
+    achievement = {**load("achievement_93251.json"), **sample["achievement"]}
+    assert mapping.detail(mixed, achievement, [], ME, None)["feedback"]["score"] == "4.5/5"
+    assert mapping.detail(load("mixed_93251.json"), load("achievement_93251.json"), [], ME, None)["feedback"] is None

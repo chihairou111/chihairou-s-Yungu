@@ -1,6 +1,6 @@
 import 'server-only';
 import { dayIndex, weekStartOf } from '../time';
-import type { Assignment, Comment, Course, FileKind, FileRef } from '../types';
+import type { Assignment, Comment, Course, Feedback, FileKind, FileRef } from '../types';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -245,6 +245,8 @@ export interface DetailSeed {
   /** The teacher requires at least one file; false lets the student mark it as submitted with none. */
   needsFiles: boolean;
   comments: Comment[];
+  /** The teacher's grade (graded submitted fixtures only). */
+  feedback?: Feedback | null;
 }
 
 const SAMPLE: Record<FileKind, { url: string; mime: string; size: number } | undefined> = {
@@ -364,7 +366,18 @@ export function buildDetailSeed(id: number, now: number): DetailSeed | undefined
     case 202:
       return submittedSeed('Marcus Webb', 'Write Function with return', 'Write three functions that <strong>return</strong> a value and test them.', 'functions.pdf', now);
     case 203:
-      return submittedSeed('Sofia Alvarez', '1.8B-[Case Study]-Supply Chain', 'Read the case study and answer the discussion questions.', 'supply-chain.pdf', now);
+      return {
+        ...submittedSeed('Sofia Alvarez', '1.8B-[Case Study]-Supply Chain', 'Read the case study and answer the discussion questions.', 'supply-chain.pdf', now),
+        feedback: {
+          score: '9/10',
+          comment: 'Clear analysis of the bottlenecks. Next time, back the cost claims with a number from the case.\nWell done on the diagram.',
+          criteria: [
+            { name: 'Analysis', result: 'Exemplary', description: 'Explains every link in the chain and why it matters.' },
+            { name: 'Evidence', result: 'Proficient', description: 'Uses the case facts, with a few claims left unsupported.' },
+          ],
+          updatedAt: now - 2 * DAY,
+        },
+      };
     case 204:
       return submittedSeed('Henry Cole', 'Lab Report: Projectile Motion', 'Write up your projectile motion lab with data tables and a conclusion.', 'lab-report.pdf', now);
     case 205:

@@ -73,6 +73,26 @@ export interface Comment {
   text: string;
 }
 
+/** One rubric criterion's result in a teacher's feedback. */
+export interface FeedbackCriterion {
+  name: string;
+  /** The level reached ("Proficient") or the criterion's own score. */
+  result: string;
+  /** What that level means, from the rubric. */
+  description?: string;
+}
+
+/** The teacher's grade and written feedback on the student's work (Yungu's evaluation result). */
+export interface Feedback {
+  /** "4.5/5" for a numeric grade, the level name ("Extraordinary [5]") for a level grade; "" when there is none. */
+  score: string;
+  /** The teacher's written feedback; null when they wrote none. */
+  comment: string | null;
+  criteria: FeedbackCriterion[];
+  /** When the grade was last changed (ms); null when Yungu does not say. */
+  updatedAt: number | null;
+}
+
 export interface AssignmentDetail extends Assignment {
   teacher: string;
   /** Teacher-authored HTML, already sanitised with `sanitizeInstructions`. */
@@ -93,4 +113,6 @@ export interface AssignmentDetail extends Assignment {
    */
   needsFiles: boolean;
   comments: Comment[];
+  /** The teacher's grade and feedback; null (or absent) before grading. */
+  feedback?: Feedback | null;
 }

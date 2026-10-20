@@ -22,6 +22,14 @@ describe('mock data', () => {
     expect(groups.upcoming.length).toBeGreaterThanOrEqual(2);
   });
 
+  it('one submitted fixture carries a teacher grade; the rest have none', async () => {
+    const graded = await data.getAssignmentDetail(203);
+    expect(graded?.feedback).toMatchObject({ score: '9/10', criteria: [{ name: 'Analysis' }, { name: 'Evidence' }] });
+    expect(graded?.feedback?.comment).toBeTruthy();
+    expect((await data.getAssignmentDetail(202))?.feedback).toBeNull();
+    expect((await data.getAssignmentDetail(101))?.feedback).toBeNull();
+  });
+
   it('getSubmitted returns submitted items with submittedAt, at least one late', async () => {
     const done = await data.getSubmitted();
     expect(done.length).toBeGreaterThanOrEqual(6);

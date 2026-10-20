@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '../test-render';
+import { act, render, screen, waitFor, within } from '../test-render';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AssignmentDetail, FileRef } from '@/lib/types';
@@ -103,6 +103,23 @@ describe('AssignmentDialog', () => {
     expect(screen.getByText('Due today · 22:00')).toBeInTheDocument();
     expect(screen.getByText('About 45 min')).toBeInTheDocument();
     expect(screen.getByText('本周任务：完成第一次城中村观察。')).toBeInTheDocument();
+  });
+
+  it("shows the teacher's feedback just before Your work once graded, and nothing before", async () => {
+    const graded = { score: '4.5/5', comment: '缺1.4单词笔记。', criteria: [], updatedAt: NOW - DAY };
+    api.fetchDetail.mockResolvedValue(detail({ submitted: true, status: 'Submitted', feedback: graded }));
+    openTask(94616);
+    const { unmount } = render(<AssignmentDialog now={NOW} />);
+    const feedback = await screen.findByRole('region', { name: 'Feedback' });
+    expect(within(feedback).getByText('4.5/5')).toBeInTheDocument();
+    const work = screen.getByRole('region', { name: 'Your work' });
+    expect(feedback.compareDocumentPosition(work) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    unmount();
+
+    api.fetchDetail.mockResolvedValue(detail({ feedback: null }));
+    render(<AssignmentDialog now={NOW} />);
+    await screen.findByRole('region', { name: 'Your work' });
+    expect(screen.queryByRole('region', { name: 'Feedback' })).toBeNull();
   });
 
   it('marks the due date in the error tone when overdue or due today, not when later', async () => {

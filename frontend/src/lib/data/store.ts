@@ -114,6 +114,7 @@ export function getDetail(id: number, now: number): AssignmentDetail | null {
     submitted: a.status === 'Submitted',
     needsFiles: state.seed.needsFiles,
     comments: [...state.comments].sort((x, y) => x.createdAt - y.createdAt),
+    feedback: state.seed.feedback ?? null,
   };
 }
 

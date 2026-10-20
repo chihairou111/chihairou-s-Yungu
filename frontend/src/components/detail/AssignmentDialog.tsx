@@ -22,6 +22,7 @@ import AttachmentsSection from './AttachmentsSection';
 import CommentsSection from './CommentsSection';
 import { DetailContext, type DetailActions } from './DetailContext';
 import DetailHeader from './DetailHeader';
+import FeedbackSection from './FeedbackSection';
 import Instructions from './Instructions';
 import { EASE_OUT, FADE_MS, popIn } from './motion';
 import { useTaskParam } from './useTaskParam';
@@ -317,8 +318,11 @@ function TopBar({ children, onClose }: { children: ReactNode; onClose: () => voi
   );
 }
 
-/** The scrolling body with its two areas: content (and comments) on the left, Your work on the right. */
-function Body({ content, work, comments }: { content: ReactNode; work: ReactNode; comments?: ReactNode }) {
+/**
+ * The scrolling body with its two areas: content (and comments) on the left, Your work (with the
+ * teacher's feedback above it, once graded) on the right.
+ */
+function Body({ content, work, comments, feedback }: { content: ReactNode; work: ReactNode; comments?: ReactNode; feedback?: ReactNode }) {
   return (
     <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain' }}>
       <Box
@@ -334,21 +338,19 @@ function Body({ content, work, comments }: { content: ReactNode; work: ReactNode
         }}
       >
         <Stack sx={{ gridArea: 'content', gap: 4, minWidth: 0 }}>{content}</Stack>
-        <Paper
-          variant="outlined"
-          component="section"
-          aria-label="Your work"
-          sx={(theme) => ({
-            gridArea: 'work',
-            alignSelf: 'start',
-            position: { md: 'sticky' },
-            top: { md: theme.spacing(3) },
-            p: 2.5,
-            borderRadius: `${theme.yungu.shape.large}px`,
-          })}
+        <Stack
+          sx={(theme) => ({ gridArea: 'work', alignSelf: 'start', position: { md: 'sticky' }, top: { md: theme.spacing(3) }, gap: 2, minWidth: 0 })}
         >
-          {work}
-        </Paper>
+          {feedback}
+          <Paper
+            variant="outlined"
+            component="section"
+            aria-label="Your work"
+            sx={(theme) => ({ p: 2.5, borderRadius: `${theme.yungu.shape.large}px` })}
+          >
+            {work}
+          </Paper>
+        </Stack>
         {comments && <Box sx={{ gridArea: 'comments', minWidth: 0 }}>{comments}</Box>}
       </Box>
     </Box>
@@ -377,6 +379,7 @@ function DetailView({ detail, now, titleId, onClose, onWrite, workFocus }: Detai
             <AttachmentsSection files={detail.attachments} />
           </>
         }
+        feedback={<FeedbackSection feedback={detail.feedback} />}
         work={<YourWork onWrite={onWrite} focusOnMount={workFocus} />}
         comments={<CommentsSection taskId={detail.id} comments={detail.comments} />}
       />

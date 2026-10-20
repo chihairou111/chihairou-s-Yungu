@@ -405,6 +405,14 @@ def test_detail_combines_listing_detail_achievement_and_comments(api, world, aut
     assert [c["mine"] for c in d["comments"]] == [False, True, False]
 
 
+def test_detail_carries_the_teachers_feedback(api, world, auth, load):
+    sample = load("feedback_samples.json")["level_rubric"]
+    world.mixed[93251] = {**world.mixed[93251], **sample["mixed"]}
+    world.ach[93251] = {**world.ach[93251], **sample["achievement"]}
+    f = api.get("/assignments/93251", headers=auth).json()["feedback"]
+    assert f["score"] == "Advanced [4]" and f["criteria"][0]["result"] == "Proficient"
+
+
 def test_todo_detail_takes_the_school_group_from_the_todo_list(api, world, auth):
     d = api.get("/assignments/94929", headers=auth).json()
     assert d["schoolGroup"] == "Due recently" and d["submitted"] is False
