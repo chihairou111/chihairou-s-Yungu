@@ -17,12 +17,16 @@ import NotificationsOutlined from '@mui/icons-material/NotificationsOutlined';
 import { chinaRelativeTime } from '@/lib/time';
 import type { Notification } from '@/lib/types';
 import { ApiError, isSessionEnded } from './detail/api';
+import { EASE_OUT } from './detail/motion';
 import { openTaskHere } from './detail/useTaskParam';
 import { fetchNotifications, fetchUnreadCount, markNotificationRead } from './notifications-api';
 import { useOnRefresh } from './RefreshContext';
 
 /** How often the unread count is checked again while the tab is visible. */
 export const POLL_MS = 5 * 60_000;
+/** The menu growing from the bell, and shrinking back into it. */
+const MENU_IN_MS = 200;
+const MENU_OUT_MS = 150;
 /** An item folding out of Unread or into Read. */
 const FOLD_MS = 200;
 /** The page that mounts the assignment pop-up. */
@@ -213,10 +217,11 @@ export default function NotificationsMenu() {
             color="error"
             overlap="circular"
             invisible={count === 0}
-            sx={{
-              '& .MuiBadge-dot': { width: 10, height: 10, borderRadius: '50%', border: '2px solid', borderColor: 'background.paper' },
+            sx={(theme) => ({
+              // Ringed in the app bar's own surface, so the dot reads as cut out of the bell.
+              '& .MuiBadge-dot': { width: 10, height: 10, borderRadius: '50%', border: '2px solid', borderColor: theme.yungu.header.bg },
               '@media (prefers-reduced-motion: reduce)': { '& .MuiBadge-badge': { transition: 'none' } },
-            }}
+            })}
           >
             <NotificationsOutlined />
           </Badge>
@@ -228,8 +233,12 @@ export default function NotificationsMenu() {
         onClose={close}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+        // Grows from the bell on the pop-up's strong ease-out, at a fixed pace: MUI's 'auto' timing
+        // stretches with the list's height (to ~380ms when full); leaving is quicker than arriving.
+        // (The Popover's own prop: a `timeout` in the transition's slot props is overridden by it.)
+        transitionDuration={reduceMotion ? 0 : { enter: MENU_IN_MS, exit: MENU_OUT_MS }}
         slotProps={{
-          ...(reduceMotion && { transition: { timeout: 0 } }),
+          transition: { easing: EASE_OUT },
           paper: {
             role: 'dialog',
             'aria-labelledby': headingId,
@@ -441,7 +450,7 @@ function Item({ n, now, onOpen, onMarkRead }: { n: Notification; now: number; on
                 content: '""',
                 position: 'absolute',
                 inset: 0,
-                transition: theme.transitions.create('background-color', { duration: theme.transitions.duration.shortest }),
+                transition: theme.transitions.create('background-color', { duration: theme.transitions.duration.shortest, easing: 'ease' }),
               },
               '&:hover::after': { bgcolor: 'action.hover' },
               '&:active::after': { bgcolor: 'action.selected' },

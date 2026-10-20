@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Notification } from '@/lib/types';
 import { ApiError } from './detail/api';
+import theme from '@/theme';
 import NotificationsMenu, { POLL_MS } from './NotificationsMenu';
 
 const nav = vi.hoisted(() => ({ pathname: '/assignments', push: vi.fn(), replace: vi.fn() }));
@@ -100,6 +101,30 @@ describe('NotificationsMenu', () => {
     expect(within(within(menu).getByRole('list', { name: 'Read' })).getAllByRole('listitem')).toHaveLength(20);
     expect(api.fetchNotifications).toHaveBeenCalledWith(false, 1);
     expect(api.fetchNotifications).toHaveBeenCalledWith(true, 1);
+  });
+
+  it('opens from the bell in 200ms on the pop-up\'s strong ease-out, however tall the list is', async () => {
+    // A browser that does not ask for reduced motion (jsdom has no matchMedia, which MUI reads as asking).
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+    }));
+    render(<NotificationsMenu />);
+    const menu = await openMenu();
+    // Opacity over the whole 200ms; the scale over two thirds of it, on the strong ease-out.
+    expect(menu.style.transition).toContain('opacity 200ms');
+    expect(menu.style.transition).toMatch(/transform 133(\.\d+)?ms cubic-bezier\(0\.23, 1, 0\.32, 1\)/);
+    vi.unstubAllGlobals();
+  });
+
+  it('rings the dot in the app bar\'s own surface, so it reads as cut out of the bell', async () => {
+    render(<NotificationsMenu />);
+    const button = await screen.findByRole('button', { name: 'Notifications, 2 unread' });
+    expect(button.querySelector('.MuiBadge-dot')).toHaveStyle({ borderColor: theme.yungu.header.bg });
   });
 
   it('says so when nothing is unread', async () => {
