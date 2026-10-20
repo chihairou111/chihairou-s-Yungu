@@ -6,7 +6,8 @@ import type { AssignmentDetail, FileRef } from '@/lib/types';
 import { HOUR, NOW, todo } from '../test-fixtures';
 import { ApiError } from './api';
 import { shortcutLabel } from './EditorToolbar';
-import WriteView, { WRITER_EXTENSIONS } from './WriteView';
+import WriteView from './WriteView';
+import { WRITER_EXTENSIONS } from './writerExtensions';
 
 const api = vi.hoisted(() => ({ renderPdf: vi.fn() }));
 vi.mock('./api', async (importOriginal) => ({

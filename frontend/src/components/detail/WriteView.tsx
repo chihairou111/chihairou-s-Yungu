@@ -2,10 +2,6 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { EditorContent, useEditor } from '@tiptap/react';
-import StarterKit from '@tiptap/starter-kit';
-import Underline from '@tiptap/extension-underline';
-import LinkMark from '@tiptap/extension-link';
-import Placeholder from '@tiptap/extension-placeholder';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -23,6 +19,7 @@ import CloudSyncOutlined from '@mui/icons-material/CloudSyncOutlined';
 import type { Theme } from '@mui/material/styles';
 import type { AssignmentDetail, FileRef } from '@/lib/types';
 import { VISUALLY_HIDDEN } from '../visually-hidden';
+import { WRITER_EXTENSIONS } from './writerExtensions';
 import { ApiError, isSessionEnded, renderPdf } from './api';
 import EditorToolbar from './EditorToolbar';
 import { useDraft, type DraftStatus } from './useDraft';
@@ -31,33 +28,6 @@ import { useWorkContext } from './WorkContext';
 
 /** Width of the writing column. */
 const COLUMN_PX = 760;
-
-/**
- * Only what the toolbar offers (and the server's PDF sanitiser keeps): paragraphs, line breaks, bold,
- * italic, underline, two heading levels, both lists and links. Pasted code, quotes, rules, strike-through
- * or images fall back to plain text instead of producing markup the PDF would drop.
- */
-export const WRITER_EXTENSIONS = [
-  StarterKit.configure({
-    heading: { levels: [1, 2] },
-    blockquote: false,
-    code: false,
-    codeBlock: false,
-    horizontalRule: false,
-    strike: false,
-    underline: false,
-    link: false,
-  }),
-  Underline,
-  // Not inclusive (Link makes it so whenever autolink is on): text typed at a link's end stays outside it.
-  LinkMark.extend({ inclusive: () => false }).configure({
-    openOnClick: false,
-    defaultProtocol: 'https',
-    HTMLAttributes: { target: null, rel: null, class: null },
-    isAllowedUri: (url, ctx) => ctx.defaultValidate(url) && /^(https?:|mailto:)/i.test(url),
-  }),
-  Placeholder.configure({ placeholder: 'Start writing…' }),
-];
 
 /** The text as it will read in the PDF: comfortable measure, clear heading steps, themed caret and selection. */
 const documentSx = (theme: Theme) => ({
