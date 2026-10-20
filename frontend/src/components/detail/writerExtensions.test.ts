@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { Editor } from '@tiptap/core';
-import { docToDelta } from '@/lib/quill-delta';
+import { deltaToDoc, docToDelta } from '@/lib/quill-delta';
 import { WRITER_EXTENSIONS } from './writerExtensions';
 
 let editor: Editor;
@@ -80,5 +80,47 @@ describe('writer schema: kept but not offered', () => {
       { insert: 'two\n' },
     ]);
     expect(editor.getJSON().content?.map((n) => n.type)).toEqual(['paragraph', 'paragraph', 'paragraph']);
+  });
+
+  it('a pasted embed is kept only as one of Yungu’s four kinds with an https address', () => {
+    editor = new Editor({ extensions: WRITER_EXTENSIONS });
+    const embed = (value: unknown, attributes?: unknown) =>
+      `<div data-yungu-embed='${JSON.stringify(value)}'${attributes ? ` data-quill-attributes='${JSON.stringify(attributes)}'` : ''}>[x]</div>`;
+    editor.view.pasteHTML(
+      embed({ file: { url: 'javascript:alert(1)', name: 'a.pdf' } }) +
+        embed({ image: { url: 'http://x.aliyuncs.com/i.png' } }) +
+        embed({ image: 'data:image/svg+xml,<svg onload=alert(1)>' }) +
+        embed({ video: { url: 'https://x.aliyuncs.com/v.mp4', previewImage: 'javascript:alert(1)' } }) +
+        embed({ audio: { url: 'not a url' } }) +
+        embed({ iframe: 'https://evil.example' }) +
+        embed({ formula: 'e=mc^2' }) +
+        embed({ image: { url: 'https://x.aliyuncs.com/i.png', uid: 'u' } }, { link: 'javascript:alert(1)', width: '50%' }) +
+        embed({ file: { url: 'https://x.aliyuncs.com/f.pdf', name: 'f.pdf', uid: 'f' } }) +
+        '<p>after</p>',
+      new Event('paste') as ClipboardEvent,
+    );
+    expect(saved()).toEqual({
+      ops: [
+        { insert: { image: { url: 'https://x.aliyuncs.com/i.png', uid: 'u' } }, attributes: { width: '50%' } },
+        { insert: { file: { url: 'https://x.aliyuncs.com/f.pdf', name: 'f.pdf', uid: 'f' } } },
+        { insert: 'after\n' },
+      ],
+    });
+  });
+
+  it('embeds from an opened Yungu document are kept whatever they hold, also through the local draft', () => {
+    const delta = {
+      ops: [
+        { insert: { formula: 'e=mc^2' } },
+        { insert: { image: { url: 'http://old.example/i.png' } } },
+        { insert: { file: { url: '/relative/f.pdf', name: 'f.pdf' } } },
+        { insert: 'end\n' },
+      ],
+    };
+    const first = new Editor({ extensions: WRITER_EXTENSIONS, content: deltaToDoc(delta) });
+    expect(docToDelta(first.getJSON()).delta).toEqual(delta);
+    editor = new Editor({ extensions: WRITER_EXTENSIONS, content: first.getHTML() });
+    first.destroy();
+    expect(saved()).toEqual(delta);
   });
 });

@@ -65,6 +65,8 @@ async function editor(): Promise<HTMLElement> {
 }
 
 const DRAFT = 'yl_write_draft_94616';
+const FLATTENED_COPY =
+  "Nested lists, line breaks inside a paragraph, small headings and checklists will be saved as plain lines.";
 
 // ProseMirror measures the caret to scroll it into view; jsdom has no layout, so give it empty boxes.
 beforeAll(() => {
@@ -213,6 +215,39 @@ describe('WriteView', () => {
     expect(localStorage.getItem(`${DRAFT}_title`)).toBeNull();
   });
 
+  it('leaving mid-save never wipes a draft written since in a reopened writer', async () => {
+    let finish!: (file: FileRef) => void;
+    api.createOnlineDoc.mockReturnValue(new Promise<FileRef>((resolve) => (finish = resolve)));
+    const first = open();
+    await userEvent.type(await editor(), 'first');
+    await userEvent.click(saveButton());
+    first.unmount();
+    const second = open();
+    await userEvent.type(await editor(), ' more');
+    // jsdom puts the reopened writer's caret at the start of the restored text.
+    await waitFor(() => expect(localStorage.getItem(DRAFT)).toBe('<p> morefirst</p>'));
+    finish(SAVED);
+    await waitFor(() => expect(work.add).toHaveBeenCalledWith(SAVED));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(localStorage.getItem(DRAFT)).toBe('<p> morefirst</p>');
+    second.unmount();
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
+  it('leaving mid-save still forgets the draft it saved', async () => {
+    let finish!: (file: FileRef) => void;
+    api.createOnlineDoc.mockReturnValue(new Promise<FileRef>((resolve) => (finish = resolve)));
+    const view = open();
+    await userEvent.type(await editor(), 'Hello');
+    await userEvent.click(saveButton());
+    view.unmount();
+    expect(localStorage.getItem(DRAFT)).toBe('<p>Hello</p>');
+    finish(SAVED);
+    await waitFor(() => expect(work.add).toHaveBeenCalledWith(SAVED));
+    await waitFor(() => expect(localStorage.getItem(DRAFT)).toBeNull());
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
   it('falls back to the assignment title when the title is cleared', async () => {
     api.createOnlineDoc.mockResolvedValue(SAVED);
     open();
@@ -284,13 +319,24 @@ describe('WriteView', () => {
     open();
     await editor();
     await userEvent.click(saveButton());
-    expect(
-      await screen.findByText("Yungu can't keep nested lists or line breaks inside a paragraph — they'll be saved as separate lines."),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(FLATTENED_COPY)).toBeInTheDocument();
     expect(api.createOnlineDoc).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole('button', { name: 'Save anyway' }));
     await waitFor(() => expect(api.createOnlineDoc).toHaveBeenCalledWith(94616, 'Task 3：开始第一次观察', delta('one', 'two')));
     await waitFor(() => expect(onDone).toHaveBeenCalledWith(SAVED));
+  });
+
+  it('warns too when an opened document has a heading level or checklist the writer shows as a plain line', async () => {
+    const lossy = onlineDoc('doc-1', '课堂反思', JSON.stringify({ ops: [{ insert: '小标题' }, { attributes: { header: 3 }, insert: '\n' }] }));
+    api.updateOnlineDoc.mockResolvedValue(lossy);
+    work.files = [lossy];
+    open('doc-1');
+    await editor();
+    await userEvent.click(saveButton());
+    expect(await screen.findByText(FLATTENED_COPY)).toBeInTheDocument();
+    expect(api.updateOnlineDoc).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Save anyway' }));
+    await waitFor(() => expect(api.updateOnlineDoc).toHaveBeenCalledWith(94616, 'doc-1', '课堂反思', delta('小标题')));
   });
 
   describe('an existing online document', () => {

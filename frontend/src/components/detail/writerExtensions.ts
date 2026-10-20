@@ -1,4 +1,6 @@
 import { Extension, Mark, Node } from '@tiptap/core';
+import { Fragment, Slice, type Node as PMNode } from '@tiptap/pm/model';
+import { Plugin, PluginKey } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
 import LinkMark from '@tiptap/extension-link';
@@ -6,6 +8,7 @@ import Placeholder from '@tiptap/extension-placeholder';
 import TextAlign from '@tiptap/extension-text-align';
 import {
   BLOCK_PASSTHROUGH,
+  DROPPED_FORMAT,
   EMBED_NODE,
   INLINE_PASSTHROUGH,
   OWNED_INLINE_ATTRIBUTES,
@@ -13,6 +16,7 @@ import {
   embedKind,
   embedLabel,
   passthroughOf,
+  pastedEmbed,
 } from '@/lib/quill-delta';
 
 /** A JSON object stored in a data attribute, or null if it is missing or isn't one. */
@@ -32,7 +36,8 @@ const jsonAttribute = (value: unknown) => (value == null ? null : JSON.stringify
  * A Yungu image, video, file or audio embed, kept exactly as Yungu stored it (`value` is the original
  * insert object, e.g. `{ image: { url, uid } }`). Shown as a non-editable labelled block that can be moved
  * or deleted but not edited. Its data rides in `data-*` attributes, so it survives the writer's HTML draft
- * and copy/paste; HTML without a valid `data-yungu-embed` value is never turned into one.
+ * and copy/paste; HTML without a valid `data-yungu-embed` value is never turned into one, and a pasted (or
+ * dropped) one is kept only when `pastedEmbed` accepts it — Yungu's viewer shows it to the teacher.
  */
 const YunguEmbed = Node.create({
   name: EMBED_NODE,
@@ -62,7 +67,26 @@ const YunguEmbed = Node.create({
   renderHTML({ node, HTMLAttributes }) {
     return ['div', { ...HTMLAttributes, class: 'yungu-embed', contenteditable: 'false' }, `[${embedLabel(node.attrs.value)}]`];
   },
+  addProseMirrorPlugins() {
+    return [new Plugin({ key: new PluginKey('yunguEmbedPaste'), props: { transformPasted: (slice) => checkedSlice(slice) } })];
+  },
 });
+
+/** The pasted content with every embed `pastedEmbed` refuses left out, and the others' attributes checked. */
+function checkedFragment(fragment: Fragment): Fragment {
+  const nodes: PMNode[] = [];
+  fragment.forEach((node) => {
+    if (node.type.name === EMBED_NODE) {
+      const kept = pastedEmbed(node.attrs.value, node.attrs.attributes);
+      if (kept) nodes.push(node.type.create({ ...node.attrs, value: kept.value, attributes: kept.attributes }));
+    } else {
+      nodes.push(node.isLeaf ? node : node.copy(checkedFragment(node.content)));
+    }
+  });
+  return Fragment.fromArray(nodes);
+}
+
+const checkedSlice = (slice: Slice) => new Slice(checkedFragment(slice.content), slice.openStart, slice.openEnd);
 
 /** Quill line attributes the writer doesn't edit (indent, other header levels, …), carried on the line. */
 const QuillBlockPassthrough = Extension.create({
@@ -77,6 +101,14 @@ const QuillBlockPassthrough = Extension.create({
             // Pasted HTML can't make a line a list, heading, quote or aligned behind the writer's back.
             parseHTML: (el) => passthroughOf(jsonObject(el.getAttribute('data-quill-block')), OWNED_LINE_ATTRIBUTES),
             renderHTML: (attrs) => ({ 'data-quill-block': jsonAttribute(attrs[BLOCK_PASSTHROUGH]) }),
+          },
+          // A Yungu heading level or list kind shown as a plain line (see DROPPED_FORMAT). Pasted, it can
+          // only bring the warning; a line split off it is a new plain line.
+          [DROPPED_FORMAT]: {
+            default: null,
+            keepOnSplit: false,
+            parseHTML: (el) => (el.getAttribute('data-quill-dropped') === 'true' ? true : null),
+            renderHTML: (attrs) => (attrs[DROPPED_FORMAT] ? { 'data-quill-dropped': 'true' } : {}),
           },
         },
       },

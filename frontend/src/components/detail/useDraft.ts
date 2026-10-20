@@ -47,6 +47,11 @@ export interface Draft {
   /** Keeps the title with the draft; null forgets it (back to the assignment's own title). */
   setTitle(title: string | null): void;
   clear(): void;
+  /**
+   * Forgets the stored draft only while it still holds exactly this text and title (null: the default
+   * title): for a save that finishes after the writer closed, when another writer may have written since.
+   */
+  clearIfUnchanged(html: string, title: string | null): void;
 }
 
 function read(key: string): { value: string | null; ok: boolean } {
@@ -132,6 +137,14 @@ export function useDraft(taskId: number, doc?: { id: string; base: string }): Dr
     setStatus((s) => (s === 'unavailable' ? s : 'idle'));
   }, [key, titleKey, baseKey]);
 
+  const clearIfUnchanged = useCallback(
+    (html: string, title: string | null) => {
+      flush();
+      if ((read(key).value ?? '') === html && read(titleKey).value === title) clear();
+    },
+    [key, titleKey, flush, clear],
+  );
+
   // Leaving the writer (or the page) must not drop the last half-second of typing.
   useEffect(() => {
     const onHide = () => void flush();
@@ -142,5 +155,5 @@ export function useDraft(taskId: number, doc?: { id: string; base: string }): Dr
     };
   }, [flush]);
 
-  return { html: initial.html, title: initial.title, base: initial.base, status, setHtml, setTitle, clear };
+  return { html: initial.html, title: initial.title, base: initial.base, status, setHtml, setTitle, clear, clearIfUnchanged };
 }

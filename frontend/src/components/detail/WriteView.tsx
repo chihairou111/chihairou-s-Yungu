@@ -35,7 +35,7 @@ import { useWorkContext } from './WorkContext';
 const COLUMN_PX = 760;
 
 export const FLATTENED =
-  "Yungu can't keep nested lists or line breaks inside a paragraph — they'll be saved as separate lines.";
+  "Nested lists, line breaks inside a paragraph, small headings and checklists will be saved as plain lines.";
 const NOT_LISTED = 'Saved on Yungu, but not added to Your work. Try again.';
 
 /**
@@ -280,6 +280,9 @@ function Writer({ detail, titleId, doc, onBack, onDone }: Omit<WriteViewProps, '
     setFailure(null);
     setSaving(true);
     editor.setEditable(false, false);
+    // What the stored draft holds for this text (see useDraft's setHtml / setTitle above).
+    const draftHtml = doc || !editor.isEmpty ? editor.getHTML() : '';
+    const draftTitle = title === defaultTitle ? null : title;
     try {
       const saved = await send(title.trim() || defaultTitle, content);
       const listed = doc ? await work.replace(doc.file.id, saved) : await work.add(saved);
@@ -289,7 +292,9 @@ function Writer({ detail, titleId, doc, onBack, onDone }: Omit<WriteViewProps, '
         return;
       }
       created.current = null;
-      draft.clear();
+      // Left mid-save: the writer may be open again on this draft, so only forget it if it is still this text.
+      if (mounted.current) draft.clear();
+      else draft.clearIfUnchanged(draftHtml, draftTitle);
       if (mounted.current) onDone(saved);
     } catch (error) {
       if (mounted.current) setFailure(failureOf(error));

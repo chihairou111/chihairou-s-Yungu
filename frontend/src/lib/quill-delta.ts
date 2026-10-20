@@ -24,6 +24,11 @@ export type EmbedKind = 'image' | 'video' | 'file' | 'audio' | 'other';
 export const EMBED_NODE = 'yunguEmbed';
 export const BLOCK_PASSTHROUGH = 'quillBlock';
 export const INLINE_PASSTHROUGH = 'quillInline';
+/**
+ * Set on a paragraph that was a Yungu line format the writer can't show (heading 3–6, a checklist):
+ * saving it as a plain line is a loss, so `docToDelta` reports it like a flattening.
+ */
+export const DROPPED_FORMAT = 'quillDropped';
 
 const EMBED_KINDS = ['image', 'video', 'file', 'audio'] as const;
 const ALIGNMENTS = ['center', 'right', 'justify'];
@@ -141,12 +146,15 @@ type BlockKind =
   | { type: 'heading'; level: 1 | 2 }
   | { type: 'list'; list: 'ordered' | 'bullet' }
   | { type: 'quote'; level?: 1 | 2 };
-type TextLine = { kind: 'text'; segments: Segment[]; block: BlockKind; align: string | null; rest: Attributes | null };
+type TextLine = { kind: 'text'; segments: Segment[]; block: BlockKind; align: string | null; rest: Attributes | null; dropped: boolean };
 type EmbedLine = { kind: 'embed'; value: Record<string, unknown>; attributes: Attributes | null };
 type Line = TextLine | EmbedLine;
 
-/** A line's "\n" attributes → what we edit (block kind, align) and what we only carry (`rest`). */
-function classify(attrs: Attributes): Pick<TextLine, 'block' | 'align' | 'rest'> {
+/**
+ * A line's "\n" attributes → what we edit (block kind, align), what we only carry (`rest`), and whether a
+ * heading level or list kind we can't show is lost (`dropped`: the line becomes a plain one).
+ */
+function classify(attrs: Attributes): Pick<TextLine, 'block' | 'align' | 'rest' | 'dropped'> {
   const rest = { ...attrs };
   let block: BlockKind = { type: 'paragraph' };
   const header = attrs.header === 1 || attrs.header === 2 ? attrs.header : undefined;
@@ -166,7 +174,9 @@ function classify(attrs: Attributes): Pick<TextLine, 'block' | 'align' | 'rest'>
     align = attrs.align;
     delete rest.align;
   }
-  return { block, align, rest: passthroughOf(rest, OWNED_LINE_ATTRIBUTES) };
+  const listed = block.type === 'list';
+  const dropped = (!!attrs.header && !header && !listed) || (!!attrs.list && !listed);
+  return { block, align, rest: passthroughOf(rest, OWNED_LINE_ATTRIBUTES), dropped };
 }
 
 function toLines(delta: Delta): Line[] {
@@ -237,6 +247,7 @@ function textblock(line: TextLine, type: 'paragraph' | 'heading', level?: 1 | 2)
   if (type === 'heading') attrs.level = level;
   if (line.align) attrs.textAlign = line.align;
   if (line.rest) attrs[BLOCK_PASSTHROUGH] = line.rest;
+  if (line.dropped) attrs[DROPPED_FORMAT] = true;
   const content = line.segments.map((s): JSONContent => {
     const marks = marksOf(s.attributes);
     return marks ? { type: 'text', text: s.text, marks } : { type: 'text', text: s.text };
@@ -283,7 +294,8 @@ type Context = { list?: 'ordered' | 'bullet'; quote?: boolean; depth: number };
  * The writer's TipTap document as a Yungu delta. `flattened` is true when something Quill can't hold had
  * to be flattened: a line break inside a block (each becomes a new line of the same block), a list inside
  * a list item (its items become lines of their own list, one level up), a list item's second block, or a
- * list inside a quote (the list wins).
+ * list inside a quote (the list wins), or a line that was a Yungu format the writer can't show (heading
+ * 3–6, a checklist) and is now a plain one.
  */
 export function docToDelta(doc: JSONContent): { delta: Delta; flattened: boolean } {
   const ops: DeltaOp[] = [];
@@ -315,6 +327,7 @@ export function docToDelta(doc: JSONContent): { delta: Delta; flattened: boolean
 
   function line(node: JSONContent, ctx: Context) {
     const attrs = lineAttributes(node, ctx);
+    if (node.attrs?.[DROPPED_FORMAT] === true) flattened = true;
     for (const child of node.content ?? []) {
       if (child.type === 'text' && child.text) push(child.text, inlineAttributes(child.marks));
       else if (child.type === 'hardBreak') {
@@ -362,7 +375,7 @@ export function docToDelta(doc: JSONContent): { delta: Delta; flattened: boolean
   const top = doc.content ?? [];
   const end = top[top.length - 1];
   const trailing =
-    top.length > 1 && end.type === 'paragraph' && !end.content?.length && !end.attrs?.textAlign && !end.attrs?.[BLOCK_PASSTHROUGH] && top[top.length - 2].type !== 'paragraph';
+    top.length > 1 && end.type === 'paragraph' && !end.content?.length && !end.attrs?.textAlign && !end.attrs?.[BLOCK_PASSTHROUGH] && !end.attrs?.[DROPPED_FORMAT] && top[top.length - 2].type !== 'paragraph';
   blocks(trailing ? top.slice(0, -1) : top, { depth: 0 });
   // Quill documents always end with a newline.
   const last = ops[ops.length - 1];
@@ -378,12 +391,22 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
-/** Only absolute http(s) addresses become links. */
+/** Only absolute http(s) addresses and mailto: (as the writer allows) become links. */
 function safeHref(href: unknown): string | null {
-  if (typeof href !== 'string' || !/^https?:\/\//i.test(href)) return null;
+  if (typeof href !== 'string' || !/^(https?:\/\/|mailto:)/i.test(href)) return null;
   try {
     const url = new URL(href);
-    return url.protocol === 'http:' || url.protocol === 'https:' ? href : null;
+    return ['http:', 'https:', 'mailto:'].includes(url.protocol) ? href : null;
+  } catch {
+    return null;
+  }
+}
+
+function httpsUrl(url: unknown): URL | null {
+  if (typeof url !== 'string') return null;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' ? parsed : null;
   } catch {
     return null;
   }
@@ -391,13 +414,26 @@ function safeHref(href: unknown): string | null {
 
 /** Media load directly only from Yungu's OSS storage over https. */
 function ossUrl(url: unknown): string | null {
-  if (typeof url !== 'string') return null;
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === 'https:' && parsed.hostname.endsWith('.aliyuncs.com') ? url : null;
-  } catch {
-    return null;
-  }
+  return httpsUrl(url)?.hostname.endsWith('.aliyuncs.com') ? (url as string) : null;
+}
+
+/** An embed's address: `{ image: { url } }`, or the bare string some (legacy) embeds hold. */
+function embedUrl(value: Record<string, unknown>): unknown {
+  const inner = value[embedKind(value)];
+  return isObject(inner) ? inner.url : inner;
+}
+
+/**
+ * An embed pasted into the writer, as it may be kept: only Yungu's four kinds, every address in it https
+ * (Yungu's viewer turns a file's into a link and a video's preview into an image for the teacher), and
+ * no link on it. Null for anything else, which is then not pasted. Embeds of an opened Yungu document
+ * never come through here.
+ */
+export function pastedEmbed(value: unknown, attributes: unknown): { value: Record<string, unknown>; attributes: Attributes | null } | null {
+  if (!isObject(value) || Object.keys(value).length !== 1 || embedKind(value) === 'other' || !httpsUrl(embedUrl(value))) return null;
+  const inner = value[embedKind(value)];
+  if (isObject(inner) && inner.previewImage != null && !httpsUrl(inner.previewImage)) return null;
+  return { value, attributes: passthroughOf(attributes, OWNED_INLINE_ATTRIBUTES) };
 }
 
 function inlineHtml(segment: Segment): string {
@@ -413,18 +449,24 @@ function inlineHtml(segment: Segment): string {
 }
 
 function embedHtml(value: Record<string, unknown>): string {
-  if (embedKind(value) === 'image') {
-    const image = value.image;
-    const src = ossUrl(isObject(image) ? image.url : image);
-    if (src) return `<p><img src="${escapeHtml(src)}" alt="Image" referrerpolicy="no-referrer"></p>`;
+  const kind = embedKind(value);
+  const src = kind === 'other' ? null : ossUrl(embedUrl(value));
+  if (src) {
+    const at = escapeHtml(src);
+    // Nothing plays or loads until asked (no autoplay, no preload, no poster from elsewhere).
+    if (kind === 'image') return `<p><img src="${at}" alt="Image" referrerpolicy="no-referrer"></p>`;
+    if (kind === 'video' || kind === 'audio') return `<p><${kind} controls preload="none" src="${at}"></${kind}></p>`;
+    return `<p><a href="${at}" target="_blank" rel="noopener noreferrer">${escapeHtml(embedLabel(value))}</a></p>`;
   }
   return `<p class="yungu-embed">[${escapeHtml(embedLabel(value))}]</p>`;
 }
 
 /**
  * Preview HTML in the structure of Yungu's own viewer: h1/h2/p, strong/em/u/s, ul/ol>li, blockquote,
- * alignment as an inline `text-align`. All text is escaped; links are http(s) only and open in a new tab;
- * images show only from Yungu's OSS host (no referrer sent), every other embed is a labelled placeholder. Safe to inject.
+ * alignment as an inline `text-align`. All text is escaped; links are http(s) or mailto: only and open in a
+ * new tab. Only from Yungu's OSS host over https: images show (no referrer sent), video and audio get
+ * controls and load nothing until played, files are links; every other embed is a labelled placeholder.
+ * Safe to inject.
  */
 export function deltaToHtml(delta: Delta): string {
   let html = '';

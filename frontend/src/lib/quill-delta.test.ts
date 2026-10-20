@@ -150,7 +150,10 @@ describe('round trip of Yungu-written documents (Review Focus 3)', () => {
         { attributes: { align: 'left', indent: 1 }, insert: '\n' },
       ],
     };
-    expect(throughEditor(delta).delta).toEqual({
+    const saved = throughEditor(delta);
+    // A smaller heading and a checklist become plain lines: the writer says so before saving.
+    expect(saved.flattened).toBe(true);
+    expect(saved.delta).toEqual({
       ops: [
         { attributes: { color: 'red' }, insert: 'odd' },
         { insert: '\nchecked\nboth' },
@@ -159,6 +162,40 @@ describe('round trip of Yungu-written documents (Review Focus 3)', () => {
         { attributes: { indent: 1 }, insert: '\n' },
       ],
     });
+  });
+
+  it('says so when a heading level or list kind it can’t show would become a plain line', () => {
+    for (const attributes of [{ header: 3 }, { header: 6 }, { list: 'checked' }, { list: 'unchecked' }, { header: 4, blockquote: true }]) {
+      const delta: Delta = { ops: [{ insert: 'kept' }, { insert: '\n' }, { insert: 'line' }, { attributes, insert: '\n' }] };
+      const saved = throughEditor(delta);
+      expect(saved.flattened, JSON.stringify(attributes)).toBe(true);
+      // Also when the writer reopens from its local draft (editor HTML).
+      const first = new Editor({ extensions: WRITER_EXTENSIONS, content: deltaToDoc(delta) });
+      const second = new Editor({ extensions: WRITER_EXTENSIONS, content: first.getHTML() });
+      first.destroy();
+      expect(docToDelta(second.getJSON()).flattened, JSON.stringify(attributes)).toBe(true);
+      // Gone once that line is deleted.
+      second.commands.setContent(second.getJSON().content!.slice(0, 1));
+      expect(docToDelta(second.getJSON())).toEqual({ delta: { ops: [{ insert: 'kept\n' }] }, flattened: false });
+      // A new line typed after it is a plain line of the writer's own.
+      second.destroy();
+    }
+  });
+
+  it('does not warn for what it keeps: the Yungu example, headings 1–2, both lists, legacy lists', () => {
+    expect(throughEditor(YUNGU_EXAMPLE).flattened).toBe(false);
+    const legacy: Delta = { ops: [{ insert: 'a' }, { attributes: { list: true }, insert: '\n' }, { insert: 'b' }, { attributes: { bullet: true }, insert: '\n' }] };
+    expect(throughEditor(legacy).flattened).toBe(false);
+  });
+
+  it('a line split from a demoted heading is the writer’s own plain line', () => {
+    const editor = new Editor({ extensions: WRITER_EXTENSIONS, content: deltaToDoc({ ops: [{ insert: 'h3' }, { attributes: { header: 3 }, insert: '\n' }] }) });
+    editor.commands.focus('end');
+    editor.commands.splitBlock();
+    editor.commands.insertContent('new');
+    const [, second] = editor.getJSON().content!;
+    editor.destroy();
+    expect(second.attrs?.quillDropped ?? null).toBeNull();
   });
 
   it('treats a delta with only text after the last newline as a final line', () => {
@@ -485,6 +522,66 @@ describe('deltaToHtml (Review Focus 5)', () => {
     expect(html).toContain('[File: &lt;b onmouseover=alert(1)&gt;x&lt;/b&gt;.pdf]');
     expect(html).toContain('[Audio]');
     expect(html).toContain('[Embedded content]');
+  });
+
+  it('plays video and audio stored on Yungu’s OSS host on request only, and links its files safely', () => {
+    const html = deltaToHtml({
+      ops: [
+        { insert: { video: { url: 'https://yungu-task.oss-cn-hangzhou.aliyuncs.com/v.mp4', uid: 'v', previewImage: 'https://evil.example/p.png' } } },
+        { insert: { audio: { url: 'https://yungu-task.oss-cn-hangzhou.aliyuncs.com/a.mp3', uid: 'a' } } },
+        { insert: { file: { url: 'https://yungu-task.oss-cn-hangzhou.aliyuncs.com/f.pdf?x=1&y="2"', name: '报告 <b>"a"</b>.pdf', uid: 'f' } } },
+        { insert: { file: { url: 'https://yungu-task.oss-cn-hangzhou.aliyuncs.com/g.pdf' } } },
+        { insert: '\n' },
+      ],
+    });
+    expect(html).toContain('<p><video controls preload="none" src="https://yungu-task.oss-cn-hangzhou.aliyuncs.com/v.mp4"></video></p>');
+    expect(html).toContain('<p><audio controls preload="none" src="https://yungu-task.oss-cn-hangzhou.aliyuncs.com/a.mp3"></audio></p>');
+    expect(html).toContain(
+      '<p><a href="https://yungu-task.oss-cn-hangzhou.aliyuncs.com/f.pdf?x=1&amp;y=&quot;2&quot;" target="_blank" rel="noopener noreferrer">File: 报告 &lt;b&gt;&quot;a&quot;&lt;/b&gt;.pdf</a></p>',
+    );
+    expect(html).toContain('<a href="https://yungu-task.oss-cn-hangzhou.aliyuncs.com/g.pdf" target="_blank" rel="noopener noreferrer">File</a>');
+    expect(html).not.toMatch(/autoplay|poster|evil\.example/);
+  });
+
+  it('keeps media from anywhere else, or not over https, a placeholder', () => {
+    const html = deltaToHtml({
+      ops: [
+        { insert: { video: { url: 'http://bucket.aliyuncs.com/v.mp4' } } },
+        { insert: { video: { url: 'https://bucket.aliyuncs.com.evil.example/v.mp4' } } },
+        { insert: { audio: { url: 'javascript:alert(1)//.aliyuncs.com' } } },
+        { insert: { audio: 'https://bucket.aliyuncs.com/a.mp3"onplay="alert(1)' } },
+        { insert: { file: { url: 'https://task.yungu.org/api/files/1', name: 'x.pdf' } } },
+        { insert: { file: { url: 'javascript:alert(1)', name: 'y.pdf' } } },
+        { insert: '\n' },
+      ],
+    });
+    const parsed = document.createElement('template');
+    parsed.innerHTML = html;
+    const tags = [...parsed.content.querySelectorAll('*')].map((el) => el.tagName.toLowerCase());
+    expect(tags.filter((t) => t !== 'p' && t !== 'br')).toEqual(['audio']);
+    // A bare-string audio value keeps its quotes escaped: no attribute escapes the src.
+    const audio = parsed.content.querySelector('audio')!;
+    expect([...audio.attributes].map((a) => a.name)).toEqual(['controls', 'preload', 'src']);
+    expect(html).not.toMatch(/javascript:|task\.yungu\.org|evil\.example/);
+    expect(html).toContain('[Video]');
+    expect(html).toContain('[File: x.pdf]');
+    expect(html).toContain('[File: y.pdf]');
+  });
+
+  it('opens mailto: links like the writer allows, and nothing else but http(s)', () => {
+    const html = deltaToHtml({
+      ops: [
+        { attributes: { link: 'mailto:teacher@yungu.org' }, insert: 'mail' },
+        { attributes: { link: 'mailto:"><script>alert(1)</script>' }, insert: 'odd' },
+        { attributes: { link: 'tel:123' }, insert: 'tel' },
+        { attributes: { link: 'ftp://x.example/f' }, insert: 'ftp' },
+        { insert: '\n' },
+      ],
+    });
+    expect(html).toContain('<a href="mailto:teacher@yungu.org" target="_blank" rel="noopener noreferrer">mail</a>');
+    expect(html).toContain('href="mailto:&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"');
+    expect(html).not.toContain('tel:');
+    expect(html).not.toContain('ftp:');
   });
 
   it('shows images stored on Yungu’s OSS host', () => {

@@ -451,7 +451,7 @@ function nestDocHeadings(html: string): string {
 /**
  * An online document, read: its text as a page lit in the dark room, set like the assignment's
  * instructions. The page scrolls on its own; nothing is fetched (the text came with the document, and
- * only Yungu's storage serves its images — anything else is a labelled placeholder).
+ * only Yungu's storage serves its media, which load only when played — anything else is a labelled placeholder).
  */
 function DocPage({ file, delta }: { file: FileRef; delta: Delta }) {
   const html = nestDocHeadings(deltaToHtml(delta));
@@ -476,7 +476,7 @@ function DocPage({ file, delta }: { file: FileRef; delta: Delta }) {
         })}
       >
         <Box
-          // Built by deltaToHtml from escaped parts only: http(s) links, Yungu-hosted images, placeholders.
+          // Built by deltaToHtml from escaped parts only: http(s)/mailto links, Yungu-hosted media and file links, placeholders.
           dangerouslySetInnerHTML={{ __html: html }}
           sx={[proseSx, docExtrasSx]}
         />
@@ -496,4 +496,17 @@ const docExtrasSx = (theme: Theme) => ({
   // Yungu writes a quote one line at a time; consecutive lines read as one quote.
   '& blockquote + blockquote': { mt: -1.25 },
   '& .yungu-embed': { ...embedSx(theme), my: 1.25 },
+  // Yungu-hosted media, played only on request: as wide as the text at most, set like an image.
+  // Nothing is preloaded, so the size can't come from the file: a 16:9 frame until it plays.
+  '& video': {
+    display: 'block',
+    width: '100%',
+    height: 'auto',
+    aspectRatio: '16 / 9',
+    maxHeight: '70vh',
+    my: 1.5,
+    borderRadius: `${theme.yungu.shape.small}px`,
+    bgcolor: 'common.black',
+  },
+  '& audio': { display: 'block', width: '100%', maxWidth: 480, my: 1.25 },
 });
