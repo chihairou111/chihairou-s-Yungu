@@ -40,7 +40,7 @@ export type StoredFile = { ref: FileRef; bytes: Uint8Array } | { redirect: strin
  * (their own uploads and the attachments of their assignments), and `deleteComment` must only remove the
  * student's own comments. The mock trusts its in-memory store; the Route Handlers check only the session.
  *
- * Errors (the service implementation; the mock does not fail): a 401 throws `SessionEnded` carrying the
+ * Errors (the service implementation; the mock throws only the refusals named below): a 401 throws `SessionEnded` carrying the
  * service's message, a 502 or an unreachable service `YunguUnavailable`, other statuses `ServiceError`
  * (e.g. 413 "Files up to 50 MB."), a 404 on a write `AssignmentNotFound`, an online document over Yungu's limit
  * `DocumentTooLong` (413) and an update of a handed-in one `DocumentHandedIn` (409), and `deleteComment` on a comment
@@ -75,7 +75,9 @@ export interface YunguData {
   /**
    * Hands the files in (or updates an earlier hand-in); moves the task to Submitted. An empty list is
    * "Mark as submitted": allowed only when `needsFiles` is false, the task is not submitted and the draft
-   * has no files; otherwise a 400 "Add at least one file.", and a 502 when Yungu does not confirm it.
+   * has no files; otherwise a 400 "Add at least one file.", and a 502 when Yungu does not confirm it. The
+   * service answers success without a second mark when it finds the task already marked (an earlier
+   * answer lost); the mock keeps the 400.
    */
   submit(id: number, fileIds: string[]): Promise<{ submittedAt: number }>;
   /**
