@@ -26,6 +26,8 @@ const color: ColorRoles = {
   onPrimaryContainer: '#001b3e',
   secondaryContainer: '#dae2f9',
   onSecondaryContainer: '#131c2b',
+  successContainer: '#dcf3e3',
+  onSuccessContainer: '#1b6c3a',
 };
 
 /** M3 elevation levels 1–3 (key + ambient shadow). */

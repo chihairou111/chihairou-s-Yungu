@@ -29,6 +29,9 @@ describe('the theme (the one Rounded, Material 3 style)', () => {
     }
     expect(contrastRatio(c.onSecondaryContainer, c.secondaryContainer)).toBeGreaterThanOrEqual(4.5);
     expect(contrastRatio(c.onPrimaryContainer, c.primaryContainer)).toBeGreaterThanOrEqual(4.5);
+    // Behaviour points: bonus on its green container, deductions on the error pair.
+    expect(contrastRatio(c.onSuccessContainer, c.successContainer)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(palette.error.dark, palette.error.light)).toBeGreaterThanOrEqual(4.5);
   });
 
   it('card and list titles are 600, since the CJK fallback has no 500', () => {

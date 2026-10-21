@@ -74,11 +74,25 @@ describe('BehaviourView card', () => {
   });
 });
 
+describe('BehaviourView structure', () => {
+  it('week groups are groups, not landmarks', () => {
+    show();
+    expect(screen.queryAllByRole('region').map((r) => r.getAttribute('aria-label') ?? r.getAttribute('aria-labelledby'))).toHaveLength(2);
+    expect(screen.getAllByRole('group')).toHaveLength(2);
+  });
+
+  it("bonus colours come from the theme's success container", () => {
+    show();
+    const badge = within(row('课堂发言积极')).getByText('+2').parentElement!;
+    expect(badge).toHaveStyle({ backgroundColor: 'rgb(220, 243, 227)', color: 'rgb(27, 108, 58)' });
+  });
+});
+
 describe('BehaviourView list', () => {
   it('lists records newest first under This week and Earlier in October', () => {
     show();
-    const thisWeek = screen.getByRole('region', { name: 'This week' });
-    const earlier = screen.getByRole('region', { name: 'Earlier in October' });
+    const thisWeek = screen.getByRole('group', { name: 'This week' });
+    const earlier = screen.getByRole('group', { name: 'Earlier in October' });
     expect(within(thisWeek).getAllByRole('listitem').map((li) => li.querySelector('[data-name]')?.textContent)).toEqual([
       '作业未按时提交',
       '课堂发言积极',
@@ -144,8 +158,34 @@ describe('BehaviourView month switcher', () => {
     show();
     expect(screen.getByRole('heading', { level: 2, name: 'October 2026' })).toBeVisible();
     expect(screen.getByRole('link', { name: 'Previous month' })).toHaveAttribute('href', '/behaviour?month=2026-09');
-    expect(screen.getByRole('button', { name: 'Next month' })).toBeDisabled();
+    expect(screen.getByRole('link', { name: 'Next month' })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('link', { name: 'Previous month' })).not.toHaveAttribute('aria-disabled');
     expect(screen.getByRole('link', { name: 'This month' })).toHaveAttribute('href', '/behaviour');
+  });
+
+  it('an arrow at a bound stays focusable but goes nowhere', async () => {
+    show();
+    await userEvent.click(screen.getByRole('link', { name: 'Next month' }));
+    expect(nav.push).not.toHaveBeenCalled();
+  });
+
+  it('stepping onto a bound keeps focus on the arrow (it is not replaced by another element)', async () => {
+    const { rerender } = show(EMPTY('2026-09'));
+    const next = screen.getByRole('link', { name: 'Next month' });
+    await userEvent.click(next);
+    expect(nav.push).toHaveBeenCalledWith('/behaviour?month=2026-10');
+    rerender(<BehaviourView behaviour={OCTOBER} now={NOW} />);
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: 'Next month' }));
+    expect(document.activeElement).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('the same at the earliest month', async () => {
+    const { rerender } = show(EMPTY('2025-10'));
+    await userEvent.click(screen.getByRole('link', { name: 'Previous month' }));
+    rerender(<BehaviourView behaviour={EMPTY('2025-09')} now={NOW} />);
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: 'Previous month' }));
+    expect(document.activeElement).toHaveAttribute('aria-disabled', 'true');
   });
 
   it('a past month steps both ways', () => {
@@ -156,7 +196,7 @@ describe('BehaviourView month switcher', () => {
 
   it('stops at the start of the previous school year', () => {
     show(EMPTY('2025-09'));
-    expect(screen.getByRole('button', { name: 'Previous month' })).toBeDisabled();
+    expect(screen.getByRole('link', { name: 'Previous month' })).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByRole('link', { name: 'Next month' })).toHaveAttribute('href', '/behaviour?month=2025-10');
   });
 

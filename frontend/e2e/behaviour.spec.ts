@@ -41,7 +41,7 @@ test('the nav opens Behaviour on this month; the arrows step months in the URL',
   await expect(page.getByRole('banner').getByRole('heading', { level: 1 })).toHaveText('Behaviour');
   await expect(page.getByRole('heading', { level: 2, name: current.label })).toBeVisible();
   await expect(page.getByRole('region', { name: /^凌云积分 −?\d+$/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Next month' })).toBeDisabled();
+  await expect(page.getByRole('link', { name: 'Next month' })).toHaveAttribute('aria-disabled', 'true');
   await expect(page.getByText(/base/i)).toHaveCount(0);
 
   await page.getByRole('link', { name: 'Previous month' }).click();
@@ -93,6 +93,12 @@ test('side by side, the card stays put while the list scrolls; on a phone the ca
   await page.mouse.wheel(0, 600);
   await expect.poll(async () => (await list.boundingBox())!.y).toBeLessThan(0);
   expect((await card.boundingBox())!.y).toBeGreaterThan(0); // still on screen, under the header
+
+  // A short window (a laptop with the keyboard up, a phone on its side): the card scrolls away with the page.
+  await page.setViewportSize({ width: 900, height: 480 });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.mouse.wheel(0, 700);
+  await expect.poll(async () => (await card.boundingBox())!.y).toBeLessThan(0);
 });
 
 test('the bell opens the Behaviour page for a behaviour record', async ({ page }) => {

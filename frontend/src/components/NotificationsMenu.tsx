@@ -14,7 +14,7 @@ import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import NotificationsOutlined from '@mui/icons-material/NotificationsOutlined';
-import { chinaMonth } from '@/lib/behaviour';
+import { chinaMonth, earliestMonth } from '@/lib/behaviour';
 import { chinaRelativeTime } from '@/lib/time';
 import type { Notification } from '@/lib/types';
 import { ApiError, isSessionEnded } from './detail/api';
@@ -200,9 +200,11 @@ export default function NotificationsMenu() {
     close();
     if (!n.read) void markRead(n, { refocus: false });
     if (n.taskId === null) {
-      // A behaviour record: the month it was sent in (China time), which is this month's page for a new one.
+      // A behaviour record: the month it was sent in (China time); this month's page for a new one, or one
+      // older than the page steps back to (or with no time at all).
       const month = chinaMonth(n.createdAt);
-      router.push(month === chinaMonth(Date.now()) ? BEHAVIOUR : `${BEHAVIOUR}?month=${month}`);
+      const plain = month < earliestMonth(Date.now()) || month >= chinaMonth(Date.now());
+      router.push(plain ? BEHAVIOUR : `${BEHAVIOUR}?month=${month}`);
     } else if (pathname === ASSIGNMENTS) openTaskHere(n.taskId);
     else router.push(`${ASSIGNMENTS}?task=${n.taskId}`);
   }

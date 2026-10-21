@@ -2740,6 +2740,25 @@ def test_a_total_without_a_number_is_a_502(api, world, auth, total):
     assert r.status_code == 502 and r.json() == {"error": UNREACHABLE}
 
 
+@pytest.mark.parametrize("missing", ["positiveScore", "negativeScore"])
+def test_a_total_without_a_side_is_logged_by_shape_only(api, world, auth, caplog, load, missing):
+    detail = load("behaviour_detail.json")["2026-10"]
+    world.behaviour_total_override = {**detail, missing: None}
+    caplog.set_level("INFO")
+    r = api.get("/behaviour?month=2026-10", headers=auth)
+    assert r.status_code == 200 and r.json()["score"] == 91                # the score still stands
+    hits = [x for x in caplog.records if "without" in x.getMessage() and x.levelname == "WARNING"]
+    assert len(hits) == 1 and missing in hits[0].getMessage()
+    text = hits[0].getMessage()
+    assert "91" not in text and "106" not in text and "Bruce" not in text and "郑" not in text
+
+
+def test_a_complete_total_logs_nothing(api, world, auth, caplog):
+    caplog.set_level("INFO")
+    api.get("/behaviour?month=2026-10", headers=auth)
+    assert not [x for x in caplog.records if x.levelname == "WARNING"]
+
+
 def test_behaviour_after_an_expired_session_signs_in_again(api, world, auth):
     world.expire_all()
     r = api.get("/behaviour?month=2026-10", headers=auth)

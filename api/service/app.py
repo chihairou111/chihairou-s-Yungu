@@ -656,6 +656,11 @@ class Student:
         def compute():
             total = self._call(lambda c: c.behaviour_total(start, end))
             rows = self._call(records)
+            for side in ("positiveScore", "negativeScore"):
+                value = total.get(side) if isinstance(total, dict) else None
+                if isinstance(total, dict) and (isinstance(value, bool) or not isinstance(value, (int, float))):
+                    # Shown as 0; the shape (types only) says what Yungu sent instead.
+                    log.warning("Behaviour: stu/detail answered without %s (%s)", side, _shape_text(total))
             try:
                 return mapping.behaviour(month, total, rows)
             except ValueError:

@@ -35,9 +35,11 @@ const BAND_PX = BAND_ABOVE_PX + STACKED_CARD_PX + BAND_BELOW_PX;
 /** Side by side: the card stays this far below the page header. */
 const CARD_TOP_PX = 24;
 
-/** Bonus green (M3 tonal pair, AA on its container); deductions use the theme's error pair, like Overdue. */
-const PLUS = { fg: '#1b6c3a', bg: '#dcf3e3' };
+/** Bonus: the theme's success container; deductions: its error pair, like Overdue. Both AA. */
+const plus = (theme: Theme) => ({ fg: theme.yungu.color.onSuccessContainer, bg: theme.yungu.color.successContainer });
 const minus = (theme: Theme) => ({ fg: theme.palette.error.dark, bg: theme.palette.error.light });
+/** Below this window height a sticky card would leave too little of the list; it scrolls away instead. */
+const SHORT = '@media (max-height: 560px)';
 
 /**
  * A stepped-to month arriving: from the dimmed state, rising a few px into place (strong ease-out, 200ms).
@@ -83,16 +85,21 @@ export default function BehaviourView({ behaviour, now: serverNow }: BehaviourVi
     startTransition(() => router.push(href));
   };
   const monthHref = (m: string) => `${BEHAVIOUR}?month=${m}`;
-  const step = (target: string | null, label: string, Icon: typeof ChevronLeft) =>
-    target ? (
-      <IconButton component={Link} href={monthHref(target)} onClick={(e: MouseEvent<HTMLAnchorElement>) => go(e, monthHref(target))} aria-label={label}>
-        <Icon />
-      </IconButton>
-    ) : (
-      <IconButton disabled aria-label={label}>
-        <Icon />
-      </IconButton>
-    );
+  // At a bound the arrow stays the same focusable link, marked unavailable and going nowhere: swapping
+  // it for a disabled button would drop keyboard focus to the page when a step lands on the bound.
+  const step = (target: string | null, label: string, Icon: typeof ChevronLeft) => (
+    <IconButton
+      component={Link}
+      href={monthHref(target ?? month)}
+      aria-label={label}
+      aria-disabled={target ? undefined : 'true'}
+      disableRipple={!target}
+      onClick={(e: MouseEvent<HTMLAnchorElement>) => (target ? go(e, monthHref(target)) : e.preventDefault())}
+      sx={target ? undefined : { color: 'action.disabled', cursor: 'default', '&:hover': { bgcolor: 'transparent' } }}
+    >
+      <Icon />
+    </IconButton>
+  );
 
   return (
     <>
@@ -131,6 +138,8 @@ export default function BehaviourView({ behaviour, now: serverNow }: BehaviourVi
             '--heading-top': `${BAND_PX}px`,
             display: 'grid',
             gap: 0,
+            // A short window: the card scrolls away, so headings stick right under the page header.
+            [SHORT]: { '--heading-top': '0px' },
             [PANES]: {
               '--card-top': `${CARD_TOP_PX}px`,
               '--heading-top': '0px',
@@ -187,6 +196,7 @@ function ScoreCard({ behaviour }: { behaviour: Behaviour }) {
         zIndex: 2,
         ...belowPageHeader(t, 'var(--card-top)'),
         [STACKED]: { bgcolor: 'background.default', mt: `-${BAND_ABOVE_PX}px`, pt: `${BAND_ABOVE_PX}px`, pb: `${BAND_BELOW_PX}px` },
+        [SHORT]: { position: 'static' },
       })}
     >
       <Box
@@ -237,7 +247,7 @@ function ScoreCard({ behaviour }: { behaviour: Behaviour }) {
             [STACKED]: { gridTemplateColumns: 'auto', alignContent: 'end', justifyItems: 'start', gap: 0.75, mt: 0, pb: 0.75 },
           }}
         >
-          <Chip label="Bonus" value={formatPoints(behaviour.bonus)} count={behaviour.bonusCount} tone={PLUS} />
+          <Chip label="Bonus" value={formatPoints(behaviour.bonus)} count={behaviour.bonusCount} tone={plus(theme)} />
           <Chip label="Deductions" value={formatPoints(behaviour.deduction)} count={behaviour.deductionCount} tone={red} />
         </Box>
       </Box>
@@ -278,7 +288,7 @@ function Chip({ label, value, count, tone }: { label: string; value: string; cou
 function Group({ label, records: list }: { label: string; records: BehaviourRecord[] }) {
   const id = useId();
   return (
-    <Box component="section" aria-labelledby={id}>
+    <Box role="group" aria-labelledby={id}>
       <Typography
         id={id}
         variant="body2"
@@ -309,7 +319,7 @@ function Row({ record: r }: { record: BehaviourRecord }) {
   const theme = useTheme();
   // A revoked record keeps its sign but loses its colour: struck through in the secondary text tone,
   // which still reads at AA (a fade would not).
-  const tone = r.kind === 'tier' || r.revoked ? null : (r.points ?? 0) >= 0 ? PLUS : minus(theme);
+  const tone = r.kind === 'tier' || r.revoked ? null : (r.points ?? 0) >= 0 ? plus(theme) : minus(theme);
   const badge = r.points === null ? `Level ${r.level ?? ''}`.trim() : formatPoints(r.points);
   const meta = [r.subject, r.recorder, r.revoked ? 'not counted' : r.kind === 'tier' ? 'no points' : null].filter((x): x is string => Boolean(x));
   const struck = r.revoked ? { textDecorationLine: 'line-through', color: 'text.secondary' } : {};

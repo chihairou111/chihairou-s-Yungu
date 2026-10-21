@@ -25,6 +25,9 @@ export interface ColorRoles {
   onPrimaryContainer: string;
   secondaryContainer: string;
   onSecondaryContainer: string;
+  /** Good news on a tonal container (a behaviour bonus); the error pair carries the opposite. */
+  successContainer: string;
+  onSuccessContainer: string;
 }
 
 /** Nav rail geometry and colours. Colours are sx values (palette paths or CSS colours). */

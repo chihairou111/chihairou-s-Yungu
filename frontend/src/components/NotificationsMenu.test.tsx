@@ -219,6 +219,15 @@ describe('NotificationsMenu', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Notifications' })).toBeNull());
   });
 
+  it('a behaviour record from before the months the page shows opens this month', async () => {
+    const ancient = { ...note('5', true, null, 0, 'Behaviour record'), createdAt: 0, target: 'behaviour' as const };
+    serve({ unread: [], read: [ancient], more: false });
+    render(<NotificationsMenu />);
+    const menu = await openMenu();
+    await userEvent.click(within(menu).getByRole('button', { name: 'Behaviour record' }));
+    expect(nav.push).toHaveBeenCalledWith('/behaviour');
+  });
+
   it("an older behaviour record opens the month it was sent in (China time)", async () => {
     // Sep 30 23:30 China is still September, though UTC (and the test's host clock) say otherwise.
     const late = { ...note('6', true, null, 0, 'Behaviour record'), createdAt: Date.UTC(2026, 8, 30, 15, 30), target: 'behaviour' as const };

@@ -759,3 +759,16 @@ def test_the_september_capture_maps_too():
     assert (b["score"], b["bonus"], b["deduction"]) == (74, 5, -31)
     assert len(b["records"]) == 19 and sum(r["kind"] == "tier" for r in b["records"]) == 2
     assert (b["bonusCount"], b["deductionCount"]) == (3, 14)
+
+
+def test_a_later_revocation_listed_in_the_originals_month_is_one_uncounted_row():
+    """Live (2026-10-21, read-only): Yungu lists a revocation under the original's window even when it is
+    dated a later month (a May tier record revoked on Jul 6 is in May's list; July's is empty), and the
+    window's totals net the pair out. So the pair never splits: one revoked row, counted on neither side."""
+    original = {**rec(41, "-5", "2026-05-08T01:55:01.000+00:00"), "revokeIcon": True}
+    revocation = rec(41, "+5", "2026-07-06T09:55:56.000+00:00", type_=2, revoke=True)
+    kept = rec(42, "-3", "2026-05-09T01:00:00.000+00:00")
+    total = {"score": 97.0, "positiveScore": 0.0, "negativeScore": -3.0}
+    b = mapping.behaviour("2026-05", total, [revocation, original, kept])
+    assert [(r["id"], r["points"], r["revoked"]) for r in b["records"]] == [("42", -3, False), ("41", -5, True)]
+    assert (b["deduction"], b["deductionCount"], b["bonusCount"]) == (-3, 1, 0)
