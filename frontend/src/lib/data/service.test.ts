@@ -428,6 +428,20 @@ describe('serviceData sessions', () => {
     expect(bodyOf()).toEqual({ loginId: '170104022', password: 'pw' });
   });
 
+  it('signIn passes on the browser address nginx set (X-Real-IP), for the service to count refusals by', async () => {
+    request.headers = new Headers({ 'x-real-ip': '203.0.113.7' });
+    reply(json(200, { ok: false, error: 'x' }));
+    await data.signIn('170104022', 'pw');
+    expect(call().headers.get('x-real-ip')).toBe('203.0.113.7');
+    expect(call().headers.get('content-type')).toBe('application/json');
+  });
+
+  it('signIn sends no address when the request has none', async () => {
+    reply(json(200, { ok: false, error: 'x' }));
+    await data.signIn('170104022', 'pw');
+    expect(call().headers.get('x-real-ip')).toBeNull();
+  });
+
   it("signIn returns Yungu's refusal as a sign-in error", async () => {
     reply(json(200, { ok: false, error: '用户名或密码错误' }));
     expect(await data.signIn('170104022', 'bad')).toEqual({ ok: false, error: '用户名或密码错误' });

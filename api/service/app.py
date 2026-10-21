@@ -67,12 +67,12 @@ FILE_URL = re.compile(r"/api/files/([0-9]+)")
 # Every POST /session is a real CAS login. A login id with this many refused sign-ins within the window
 # waits the window out (429, no Yungu call); and only so many sign-ins run at once. Both keep bursts of
 # bad passwords from getting the server's address throttled by Yungu, which the owner's re-login needs.
-# The owner's login id (owner.json) is never held to that: its saved password, typed again, always goes
-# through; anything else typed for its id gets a slower back-off of its own and a sign-in slot of its own.
+# The owner's login id (owner.json) gets a higher threshold and a sign-in slot of its own.
 MAX_FAILED_SIGN_INS = 5
 MAX_FAILED_OWNER_SIGN_INS = 20
+MAX_FAILED_SIGN_INS_PER_ADDRESS = 10        # across every login id, per client address (see sign_in route)
 FAILED_SIGN_IN_WINDOW_SECONDS = 15 * 60
-MAX_TRACKED_LOGIN_IDS = 10000
+MAX_TRACKED = 10000                          # login ids, and addresses, with recent refusals
 MAX_CONCURRENT_SIGN_INS = 3                  # for every other login id; the owner's id has one more
 TOO_MANY_ATTEMPTS = "Too many attempts. Try again in a few minutes."
 SIGN_INS_BUSY = "Too many sign-ins right now. Try again in a moment."
@@ -354,20 +354,51 @@ def _shown_files(value) -> Iterable[str]:
             yield from _shown_files(item)
 
 
-class SignInGate:
-    """Sign-in throttling, by login id (as typed, trimmed, case-folded): MAX_FAILED_SIGN_INS refusals
-    within the window → TooManyAttempts until the oldest falls out; and MAX_CONCURRENT_SIGN_INS at once
-    (beyond: TooManyAttempts(SIGN_INS_BUSY) at once, no waiting). Only Yungu's refusals count: Yungu
-    being down does not. A success clears its id.
+class _Failures:
+    """Refusal times per key, within FAILED_SIGN_IN_WINDOW_SECONDS; at most MAX_TRACKED keys (the
+    longest untouched go first). Callers hold SignInGate's lock."""
 
-    The owner's id: its saved password typed again (`saved`) passes untouched; anything else typed for it
-    counts against MAX_FAILED_OWNER_SIGN_INS and runs in a slot of its own, so strangers' failures on
-    other ids, or three slow sign-ins, can never keep the owner out."""
+    def __init__(self):
+        self._items: "OrderedDict[str, Deque[float]]" = OrderedDict()
+
+    def count(self, key: str, now: float) -> int:
+        times = self._items.get(key)
+        while times and now - times[0] >= FAILED_SIGN_IN_WINDOW_SECONDS:
+            times.popleft()
+        return len(times or ())
+
+    def add(self, key: str, now: float) -> None:
+        self.count(key, now)
+        self._items.setdefault(key, deque()).append(now)
+        self._items.move_to_end(key)
+        for stale in [k for k in self._items if not self.count(k, now)]:
+            del self._items[stale]
+        while len(self._items) > MAX_TRACKED:
+            self._items.popitem(last=False)
+
+    def clear(self, key: str) -> None:
+        self._items.pop(key, None)
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+
+class SignInGate:
+    """Sign-in throttling. Before any Yungu call: a login id (trimmed, case-folded) with
+    MAX_FAILED_SIGN_INS refusals in the window, or a client address with MAX_FAILED_SIGN_INS_PER_ADDRESS
+    refusals across all ids, gets TooManyAttempts; past MAX_CONCURRENT_SIGN_INS at once,
+    TooManyAttempts(SIGN_INS_BUSY), no waiting. Every Yungu refusal counts for its id and its address;
+    Yungu being down does not; a success clears both. The answer never depends on the password typed:
+    nothing is ever compared against a saved one.
+
+    The owner's login id has a higher threshold (MAX_FAILED_OWNER_SIGN_INS) and a sign-in slot of its
+    own, so strangers' failures on other ids, or three slow sign-ins, cannot keep it out."""
 
     def __init__(self, clock: Callable[[], float]):
         self._clock = clock
         self._lock = threading.Lock()
-        self._failures: "OrderedDict[str, Deque[float]]" = OrderedDict()
+        self._ids = _Failures()
+        self._addresses = _Failures()
         self._running = threading.BoundedSemaphore(MAX_CONCURRENT_SIGN_INS)
         self._owner_slot = threading.BoundedSemaphore(1)
 
@@ -375,46 +406,31 @@ class SignInGate:
     def _key(login_id: str) -> str:
         return login_id.strip().casefold()
 
-    def _recent(self, key: str, now: float) -> Deque[float]:
-        times = self._failures.get(key) or deque()
-        while times and now - times[0] >= FAILED_SIGN_IN_WINDOW_SECONDS:
-            times.popleft()
-        return times
-
-    def run(self, login_id: str, sign_in: Callable[[], T], owner_login: Optional[str] = None,
-            saved: bool = False) -> T:
-        if saved:
-            return sign_in()
+    def run(self, login_id: str, address: str, sign_in: Callable[[], T], owner_login: Optional[str] = None) -> T:
         key = self._key(login_id)
         owners = owner_login is not None and key == self._key(owner_login)
         limit, slot = (MAX_FAILED_OWNER_SIGN_INS, self._owner_slot) if owners else (MAX_FAILED_SIGN_INS, self._running)
         with self._lock:
-            if len(self._recent(key, self._clock())) >= limit:
+            now = self._clock()
+            if (self._ids.count(key, now) >= limit
+                    or self._addresses.count(address, now) >= MAX_FAILED_SIGN_INS_PER_ADDRESS):
                 raise TooManyAttempts()
         if not slot.acquire(blocking=False):
             raise TooManyAttempts(SIGN_INS_BUSY)
         try:
             result = sign_in()
         except SignInRefused:
-            self._failed(key)
+            with self._lock:
+                now = self._clock()
+                self._ids.add(key, now)
+                self._addresses.add(address, now)
             raise
         finally:
             slot.release()
         with self._lock:
-            self._failures.pop(key, None)
+            self._ids.clear(key)
+            self._addresses.clear(address)
         return result
-
-    def _failed(self, key: str) -> None:
-        with self._lock:
-            now = self._clock()
-            times = self._recent(key, now)
-            times.append(now)
-            self._failures[key] = times
-            self._failures.move_to_end(key)
-            for stale in [k for k, t in self._failures.items() if not self._recent(k, now)]:
-                del self._failures[stale]
-            while len(self._failures) > MAX_TRACKED_LOGIN_IDS:
-                self._failures.popitem(last=False)
 
 
 class AccountLock:
@@ -491,11 +507,10 @@ class Service:
             raise SignInAgain()
         return Student(self, user_id)
 
-    def sign_in(self, login_id: str, password: str) -> dict:
+    def sign_in(self, login_id: str, password: str, address: str = "") -> dict:
         self.yungu.sweep()
-        user_id, user = self._gate.run(login_id, lambda: self.yungu.sign_in(login_id, password),
-                                       owner_login=self.auth.owner_login(),
-                                       saved=self.auth.is_saved_login(login_id, password))
+        user_id, user = self._gate.run(login_id, address, lambda: self.yungu.sign_in(login_id, password),
+                                       owner_login=self.auth.owner_login())
         self.account(user_id).cache.clear()
         return {"ok": True, "displayName": _display_name(user, login_id), "token": self.auth.issue_token(user_id)}
 
@@ -836,12 +851,18 @@ def create_app(state_dir: Optional[str] = None, client_factory=yungu_client,
     Me = Depends(student)
 
     # ------------------------------------------------------------ session
+    def client_address(request: Request) -> str:
+        """The browser's address: X-Real-IP, which nginx sets and the dashboard passes on. Trusted only
+        because the service listens on 127.0.0.1; without it, the socket peer."""
+        forwarded = request.headers.get("x-real-ip", "").strip()
+        return (forwarded or (request.client.host if request.client else ""))[:64]
+
     @app.post("/session")
-    def sign_in(body: SignInBody):
+    def sign_in(body: SignInBody, request: Request):
         if not body.loginId.strip() or not body.password.strip():
             return {"ok": False, "error": BLANK_CREDENTIALS}
         try:
-            return service.sign_in(body.loginId.strip(), body.password)
+            return service.sign_in(body.loginId.strip(), body.password, client_address(request))
         except SignInRefused as e:
             return {"ok": False, "error": e.message}
         except TooManyAttempts as e:

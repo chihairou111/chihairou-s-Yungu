@@ -19,8 +19,10 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 import mapping
+import service.app as service_app
 from service.app import (LIST_PAGE_SIZE, MAX_CONCURRENT_SIGN_INS, MAX_FAILED_OWNER_SIGN_INS, MAX_FAILED_SIGN_INS,
-                         MAX_UPLOAD_BYTES, YUNGU_TIMEOUT_SECONDS, KnownFiles, create_app)
+                         MAX_FAILED_SIGN_INS_PER_ADDRESS, MAX_UPLOAD_BYTES, YUNGU_TIMEOUT_SECONDS, KnownFiles,
+                         create_app)
 from service.auth import MAX_TOKENS_PER_ACCOUNT
 from service.cache import ReadCache
 from service.yungu import IDLE_SECONDS, LOGIN_RETRY_SECONDS
@@ -966,8 +968,13 @@ def test_a_non_owner_keeps_only_its_newest_tokens(api, world, auth):
 
 
 # ---------------------------------------------- sign-in throttling (fix round 1)
-def bad_sign_in(api, login_id="S207"):
-    return api.post("/session", json={"loginId": login_id, "password": "wrong"})
+def bad_sign_in(api, login_id="S207", ip=None):
+    return api.post("/session", json={"loginId": login_id, "password": "wrong"},
+                    headers={"X-Real-IP": ip} if ip else {})
+
+
+def sign_in_from(api, ip, login_id="S207", password=B_PW):
+    return api.post("/session", json={"loginId": login_id, "password": password}, headers={"X-Real-IP": ip})
 
 
 def test_five_failed_sign_ins_in_15_minutes_back_off_without_calling_yungu(api, world, clock):
@@ -1025,11 +1032,16 @@ def test_the_longest_allowed_login_id_and_password_still_reach_yungu(api, world)
     assert world.logins == ["S" + "2" * 63]
 
 
-def test_strangers_failing_on_the_owners_id_never_lock_out_its_saved_password(api, world, auth):
-    statuses = [bad_sign_in(api, "S106").status_code for _ in range(MAX_FAILED_OWNER_SIGN_INS + 3)]
+def test_once_the_owners_id_is_locked_even_its_password_gets_429(api, world, auth, clock):
+    # No oracle: the locked answer never depends on the password typed, and nothing is compared locally.
+    statuses = [bad_sign_in(api, "S106", ip=f"10.0.0.{i}").status_code for i in range(MAX_FAILED_OWNER_SIGN_INS + 3)]
     assert statuses == [200] * MAX_FAILED_OWNER_SIGN_INS + [429] * 3          # a slower back-off of its own
-    assert len(world.logins) == 1 + MAX_FAILED_OWNER_SIGN_INS
-    assert api.get("/courses", headers=sign_in(api)).status_code == 200     # the owner's password still gets in
+    logins = len(world.logins)
+    r = sign_in_from(api, "10.0.1.1", "S106", "hunter2-xyz")
+    assert r.status_code == 429 and r.json() == {"ok": False, "error": TOO_MANY}
+    assert len(world.logins) == logins == 1 + MAX_FAILED_OWNER_SIGN_INS
+    clock.t += 15 * 60 + 1
+    assert sign_in_from(api, "10.0.1.1", "S106", "hunter2-xyz").json()["ok"] is True
 
 
 def test_the_owners_id_backs_off_only_after_many_failures(api, world, auth):
@@ -1049,13 +1061,77 @@ def test_slow_strangers_never_block_the_owners_sign_in(api, world, auth):
     try:
         wait_until(lambda: len(world.peer.logins) == MAX_CONCURRENT_SIGN_INS)
         assert within(3, lambda: bad_sign_in(api, "S208")).json() == {"ok": False, "error": BUSY}
-        assert within(3, lambda: sign_in(api))                            # the owner, by its saved password
+        assert within(3, lambda: sign_in(api))                            # the owner's id: the slot kept for it
         api.delete("/session", headers=sign_in(api))
-        assert within(3, lambda: sign_in(api))                            # signed out: the slot kept for its id
+        assert within(3, lambda: sign_in(api))                            # signed out too
     finally:
         world.peer.login_hang.set()
         for t in hung:
             t.join(10)
+
+
+def test_refusals_from_one_address_across_ids_back_off_that_address(api, world):
+    for i in range(MAX_FAILED_SIGN_INS_PER_ADDRESS):
+        assert bad_sign_in(api, f"S3{i:02d}", ip="203.0.113.7").status_code == 200
+    r = sign_in_from(api, "203.0.113.7")
+    assert r.status_code == 429 and r.json() == {"ok": False, "error": TOO_MANY} and world.peer.logins == []
+    assert sign_in_from(api, "198.51.100.2").json()["ok"] is True             # another address is not held up
+
+
+def test_refusals_for_one_id_from_many_addresses_still_back_off_that_id(api, world):
+    for i in range(MAX_FAILED_SIGN_INS):
+        bad_sign_in(api, "S207", ip=f"198.51.100.{i}")
+    assert sign_in_from(api, "192.0.2.99").status_code == 429 and world.peer.logins == ["S207"] * MAX_FAILED_SIGN_INS
+
+
+def test_without_a_forwarded_address_the_socket_peer_counts(api, world):
+    for i in range(MAX_FAILED_SIGN_INS_PER_ADDRESS):
+        bad_sign_in(api, f"S3{i:02d}")
+    assert api.post("/session", json={"loginId": "S207", "password": B_PW}).status_code == 429
+    assert sign_in_from(api, "198.51.100.3").json()["ok"] is True
+
+
+def test_a_success_clears_the_addresss_count(api, world):
+    for i in range(MAX_FAILED_SIGN_INS_PER_ADDRESS - 1):
+        bad_sign_in(api, f"S3{i:02d}", ip="203.0.113.9")
+    assert sign_in_from(api, "203.0.113.9").json()["ok"] is True
+    for i in range(MAX_FAILED_SIGN_INS_PER_ADDRESS - 1):
+        assert bad_sign_in(api, f"S4{i:02d}", ip="203.0.113.9").status_code == 200
+
+
+def test_the_failure_trackers_are_bounded(api, world, monkeypatch):
+    monkeypatch.setattr(service_app, "MAX_TRACKED", 3)
+    for i in range(6):
+        bad_sign_in(api, f"S5{i:02d}", ip=f"192.0.2.{i}")
+    gate = api.app.state.service._gate
+    assert len(gate._ids) <= 3 and len(gate._addresses) <= 3
+
+
+def test_an_owner_record_without_a_login_id_still_knows_the_owners_id(make, world, state_dir):
+    old_state(state_dir, json.dumps({"userId": ME}))                        # the saved login names it
+    api = make()
+    for i in range(MAX_FAILED_SIGN_INS + 2):
+        assert bad_sign_in(api, "S106", ip=f"10.1.0.{i}").status_code == 200
+
+
+def test_the_owners_next_sign_in_records_its_login_id(make, world, state_dir):
+    old_state(state_dir, json.dumps({"userId": ME}))
+    (state_dir / "credentials.json").unlink()                                # signed out: only owner.json knows
+    api = make()
+    assert sign_in(api)
+    assert json.loads((state_dir / "owner.json").read_text()) == {"userId": ME, "loginId": "S106"}
+    assert mode(state_dir / "owner.json") == 0o600
+
+
+@pytest.mark.parametrize("users", ["file", "empty dir"])
+def test_any_users_path_is_saved_state(make, world, state_dir, users):
+    state_dir.mkdir(mode=0o700)
+    if users == "file":
+        (state_dir / "users").write_text("x")
+    else:
+        (state_dir / "users").mkdir(mode=0o700)
+    b_sign_in(make())
+    assert not (state_dir / "owner.json").exists()
 
 
 def test_sign_ins_beyond_the_concurrent_cap_are_refused_without_calling_yungu(api, world):

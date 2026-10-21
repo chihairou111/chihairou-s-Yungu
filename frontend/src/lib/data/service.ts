@@ -174,8 +174,13 @@ export const serviceData: YunguData = {
   },
   async signIn(loginId, password): Promise<SignInResult> {
     let answer: { ok?: unknown; displayName?: unknown; token?: unknown; error?: unknown };
+    // The browser's address as nginx set it (it replaces any the browser sent): the service counts
+    // refused sign-ins per address as well as per student ID. It only ever sees us, at 127.0.0.1.
+    const init = jsonInit('POST', { loginId, password });
+    const address = (await headers()).get('x-real-ip');
+    if (address) init.headers = { ...(init.headers as Record<string, string>), 'X-Real-IP': address };
     try {
-      answer = await body(await send('/session', jsonInit('POST', { loginId, password })));
+      answer = await body(await send('/session', init));
     } catch (error) {
       // Yungu down (502), or any other refusal: a message on the sign-in form, not a crash.
       if (error instanceof ServiceError) return { ok: false, error: error.message };

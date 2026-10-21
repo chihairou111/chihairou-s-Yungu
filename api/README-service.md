@@ -32,11 +32,14 @@ service (with `submitted-files.json` at the top) is moved into `users/<owner>/` 
   the owner unused for 12 h is signed out and forgotten (the owner never); such an account keeps its 10
   newest tokens.
 - **Sign-in throttling:** login id over 64 or password over 256 characters → 400 before anything else.
-  5 refused sign-ins for one login id within 15 min → 429 "Too many attempts. Try again in a few minutes."
-  with no Yungu call until the oldest is 15 min old; at most 3 sign-ins at once (beyond: 429 "Too many
-  sign-ins right now. Try again in a moment."). Yungu being down does not count. The owner's login id
-  (owner.json) is exempt: its saved password typed again always goes through; anything else typed for it
-  backs off only after 20 refusals and runs in a sign-in slot of its own.
+  Before any Yungu call: a login id with 5 refused sign-ins in 15 min, or a client address with 10 refused
+  sign-ins across all ids in 15 min, gets 429 "Too many attempts. Try again in a few minutes."; past 3
+  sign-ins at once, 429 "Too many sign-ins right now. Try again in a moment.". Every Yungu refusal counts
+  for its id and its address; Yungu being down does not; a success clears both. The answer never depends
+  on the password typed (nothing is compared against the saved one). The owner's login id (owner.json, or
+  the saved login's) has a threshold of 20 and a sign-in slot of its own. The address is `X-Real-IP`, set
+  by nginx and passed on by the dashboard's sign-in (trusted because the service listens on 127.0.0.1);
+  without it, the socket peer.
 
 ## Run by hand
     cd /root/yungu-lms/api

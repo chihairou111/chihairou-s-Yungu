@@ -15,7 +15,6 @@ Every other account's password is never stored, and its tokens live only in memo
 mapped to the one Yungu userId it was issued for: a restart ends them, as it ends their Yungu session.
 """
 import hashlib
-import hmac
 import logging
 import secrets
 import threading
@@ -72,8 +71,7 @@ class Auth:
             if isinstance(user_id, int) and not isinstance(user_id, bool):
                 self._owner = user_id
                 return "owner", user_id
-        elif not any(self._state.exists(name) for name in (CREDENTIALS, TOKENS, OLD_RECORD)) \
-                and not self._state.has_entries(USERS):
+        elif not any(self._state.exists(name) for name in (CREDENTIALS, TOKENS, OLD_RECORD, USERS)):
             return "fresh", None
         if not self._warned:
             self._warned = True
@@ -83,21 +81,18 @@ class Auth:
     def owner(self) -> Optional[int]:
         return self._record()[1]
 
-    def owner_login(self) -> Optional[str]:
-        """The login id owner.json records for a valid owner, else None."""
-        if self.owner() is None:
-            return None
+    def _recorded_login(self) -> Optional[str]:
         o = self._state.read(OWNER)
         login_id = o.get("loginId") if isinstance(o, dict) else None
         return login_id if isinstance(login_id, str) and login_id.strip() else None
 
-    def is_saved_login(self, login_id: str, password: str) -> bool:
-        """The owner's saved login, typed again (compared in constant time). Never for anyone else."""
-        creds = self.credentials() if self.owner() is not None else None
-        if creds is None:
-            return False
-        same_id = creds.login_id.strip().casefold() == login_id.strip().casefold()
-        return hmac.compare_digest(creds.password.encode(), password.encode()) and same_id
+    def owner_login(self) -> Optional[str]:
+        """The owner's login id: as owner.json records it, else as its saved login has it; None with no
+        valid owner. (owner.json gains it on the owner's next sign-in: see claim_owner.)"""
+        if self.owner() is None:
+            return None
+        creds = self.credentials()
+        return self._recorded_login() or (creds.login_id if creds else None)
 
     def claim_owner(self, login_id: str, user_id: int) -> bool:
         """After a successful sign-in: is `user_id` the owner? Only on a fresh state dir does it become the
@@ -111,7 +106,11 @@ class Auth:
                 self._state.write(OWNER, {"userId": user_id, "loginId": login_id})
                 self._owner = user_id
                 return True
-            return state == "owner" and owner == user_id
+            if state != "owner" or owner != user_id:
+                return False
+            if self._recorded_login() is None:              # an owner.json from before it kept the login id
+                self._state.write(OWNER, {"userId": user_id, "loginId": login_id})
+            return True
 
     def remember(self, login_id: str, password: str) -> None:
         """The owner's password (replacing an older one). Never called for any other account."""
