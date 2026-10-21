@@ -2,7 +2,8 @@ import 'server-only';
 import { weekStartOf } from '../time';
 import type { ClassEvent } from '../types';
 import type { YunguData } from './index';
-import { TIMETABLE, buildCourses } from './fixtures';
+import { chinaMonth } from '../behaviour';
+import { TIMETABLE, buildBehaviour, buildCourses } from './fixtures';
 import { docTooLongMessage } from '../limits';
 import { AssignmentNotFound, CommentNotFound, DocumentHandedIn, DocumentTooLong, ServiceError } from './errors';
 import { BLANK_CREDENTIALS_ERROR, NOTIFICATION_PAGE_SIZE } from './messages';
@@ -72,6 +73,11 @@ export const mockData: YunguData = {
       courseId: slot.courseId,
     }));
     return events.sort((a, b) => a.start - b.start);
+  },
+  async getBehaviour(month) {
+    // The service's 400 for a malformed or future month (the page never asks for one).
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || month > chinaMonth(Date.now())) throw new ServiceError(400, 'Bad request.');
+    return buildBehaviour(month, Date.now());
   },
   async getAssignmentDetail(id) {
     return getDetail(id, Date.now());

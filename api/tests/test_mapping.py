@@ -500,6 +500,7 @@ def test_notification_prefers_english_and_links_the_assignment():
         "createdAt": ms(2026, 10, 20, 16, 8),
         "read": True,
         "taskId": 94827,
+        "target": None,
     }
 
 
@@ -514,6 +515,30 @@ def test_notification_prefers_english_and_links_the_assignment():
 ])
 def test_notification_task_id_comes_from_the_link_only(url, task):
     assert mapping.notification({**FEEDBACK_ITEM, "messageUrl": url})["taskId"] == task
+
+
+BEHAVIOUR_ITEM = {
+    "messageId": 7791200, "messageSendTime": "2026-10-20 14:58", "ifRead": False, "title": "行为管理通知",
+    "titleEn": None, "content": "2026-10-20 14:58，Teacher 1（记录人）给你【作业反馈（突出）】+2分", "contentEn": None,
+    "messageUrl": "https://task.yungu.org/#/studentTemplate", "messageType": 11, "templateCode": "BEHAVIOR_RECORD",
+    "senderName": "Teacher 1", "attribute": {},
+}
+
+
+@pytest.mark.parametrize("raw,target", [
+    ({}, "behaviour"),
+    ({"messageUrl": None}, "behaviour"),                                   # Yungu sometimes leaves the link out
+    ({"templateCode": "BEHAVIOR_TIER", "messageUrl": None}, "behaviour"),  # a tier penalty is a behaviour record too
+    ({"templateCode": None}, None),                                        # 校内安排 shares messageType 11: not by link alone
+    ({"templateCode": "NEW_TASK_FEEDBACK"}, None),
+])
+def test_notification_target_names_the_behaviour_page_for_behaviour_records(raw, target):
+    n = mapping.notification({**BEHAVIOUR_ITEM, **raw})
+    assert n["target"] == target and n["taskId"] is None
+
+
+def test_an_assignment_notification_has_no_target():
+    assert mapping.notification(FEEDBACK_ITEM)["target"] is None
 
 
 @pytest.mark.parametrize("raw,read", [({"ifRead": False}, False), ({"ifRead": 1}, True), ({"ifRead": "1"}, True),
@@ -574,6 +599,24 @@ def test_month_window_is_the_china_calendar_month():
 def test_month_window_rejects_anything_but_yyyy_mm(bad):
     with pytest.raises(ValueError):
         mapping.month_window(bad)
+
+
+STAFF_ID_KEYS = ("creatorId", "revokeUserId")
+
+
+def test_the_behaviour_capture_carries_no_real_staff_ids():
+    """Staff user ids are placeholders (Teacher N -> 9000 + N, Yungu's system -> -1), and the system's
+    revocation reads as the system on both name fields, like its recordActor."""
+    for month in behaviour_fixture("behaviour_records.json").values():
+        for row in month["data"]:
+            for key, name in (("creatorId", row["creatorName"]), ("revokeUserId", row["revokeUserName"])):
+                value = row[key]
+                if value is None:
+                    continue
+                if value == -1:
+                    assert (row["revokeUserName"], row["revokeUserEnName"]) == ("系统判定", "System")
+                else:
+                    assert value == 9000 + int(name.removeprefix("Teacher "))
 
 
 def test_behaviour_from_the_live_october_capture():

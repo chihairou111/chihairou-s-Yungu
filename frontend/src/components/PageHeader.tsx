@@ -87,6 +87,22 @@ function belowToolbar(toolbar: Styles): Styles {
   );
 }
 
+/**
+ * `top` offsets (at every breakpoint) for something that sticks under the app bar and the page header,
+ * `extra` (a CSS length) further down: a page's own sticky headings and panels.
+ */
+export function belowPageHeader(theme: Theme, extra = '0px'): Styles {
+  const shift = (toolbar: Styles): Styles =>
+    Object.fromEntries(
+      Object.entries(toolbar).map(([key, value]) =>
+        key === 'minHeight'
+          ? ['top', `calc(${typeof value === 'number' ? `${value}px` : String(value)} + ${PAGE_HEADER_PX}px + ${extra})`]
+          : [key, value && typeof value === 'object' ? shift(value as Styles) : value],
+      ),
+    );
+  return shift(theme.mixins.toolbar as Styles);
+}
+
 interface PageHeaderProps {
   children: ReactNode;
 }

@@ -3,9 +3,11 @@ import AssignmentTurnedIn from '@mui/icons-material/AssignmentTurnedIn';
 import AssignmentTurnedInOutlined from '@mui/icons-material/AssignmentTurnedInOutlined';
 import CalendarMonth from '@mui/icons-material/CalendarMonth';
 import CalendarMonthOutlined from '@mui/icons-material/CalendarMonthOutlined';
+import Star from '@mui/icons-material/Star';
+import StarBorder from '@mui/icons-material/StarBorder';
 
 export interface NavItem {
-  href: '/assignments' | '/calendar';
+  href: '/assignments' | '/calendar' | '/behaviour';
   label: string;
   /** Outlined icon for the resting state, filled icon when active. */
   Icon: typeof SvgIcon;
@@ -16,6 +18,7 @@ export interface NavItem {
 export const NAV_ITEMS: readonly NavItem[] = [
   { href: '/assignments', label: 'Assignments', Icon: AssignmentTurnedInOutlined, ActiveIcon: AssignmentTurnedIn },
   { href: '/calendar', label: 'Calendar', Icon: CalendarMonthOutlined, ActiveIcon: CalendarMonth },
+  { href: '/behaviour', label: 'Behaviour', Icon: StarBorder, ActiveIcon: Star },
 ];
 
 export function isActive(pathname: string, href: string): boolean {

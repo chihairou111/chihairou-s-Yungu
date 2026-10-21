@@ -2,7 +2,7 @@ import 'server-only';
 import { cookies, headers } from 'next/headers';
 import { sanitizeInstructions } from '../sanitize';
 import { SESSION_COOKIE, decodeSession } from '../session-cookie';
-import type { Assignment, AssignmentDetail, ClassEvent, Comment, Course, FileRef, NotificationPage } from '../types';
+import type { Assignment, AssignmentDetail, Behaviour, ClassEvent, Comment, Course, FileRef, NotificationPage } from '../types';
 import { AssignmentNotFound, CommentNotFound, DocumentHandedIn, DocumentTooLong, ServiceError, SessionEnded, YunguUnavailable } from './errors';
 import type { SignInResult, StoredFile, YunguData } from './index';
 import { NOTIFICATION_PAGE_SIZE } from './messages';
@@ -123,6 +123,7 @@ export const serviceData: YunguData = {
   getSubmitted: () => get<Assignment[]>('/submitted'),
   getWeek: (weekStart) => get<ClassEvent[]>(`/week?start=${encodeURIComponent(weekStart)}`),
   getCourses: () => get<Course[]>('/courses'),
+  getBehaviour: (month) => get<Behaviour>(`/behaviour?month=${encodeURIComponent(month)}`),
   async getAssignmentDetail(id) {
     const detail = await orNull(() => get<AssignmentDetail>(`/assignments/${id}`));
     // The service passes Yungu's own HTML through; it is sanitised here, before it reaches a page.

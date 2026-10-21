@@ -127,10 +127,53 @@ export interface Notification {
   read: boolean;
   /** The assignment it links to (`#/taskInfo/{taskPublishId}/…`), or null when it links elsewhere or nowhere. */
   taskId: number | null;
+  /** A page of ours it opens instead: `'behaviour'` for a behaviour record (Yungu's `BEHAVIOR_RECORD`). */
+  target?: 'behaviour' | null;
 }
 
 /** One page of notifications, newest first. */
 export interface NotificationPage {
   items: Notification[];
   hasMore: boolean;
+}
+
+/** Where a behaviour record counts: a bonus (positive points), a deduction (negative), or a tier penalty (a level, no points). */
+export type BehaviourKind = 'bonus' | 'deduction' | 'tier';
+
+/** One record of the month (Yungu 综合评价 → 学生行为), as the service's `GET /behaviour` sends it. */
+export interface BehaviourRecord {
+  /** Unique in the month; tier records are `tier-<n>`. */
+  id: string;
+  /** The behaviour, as Yungu writes it (usually Chinese). */
+  name: string;
+  /** Signed points (negative for a deduction); null for a tier record. */
+  points: number | null;
+  /** Tier 1–3 for a tier record, else null. */
+  level: number | null;
+  kind: BehaviourKind;
+  /** When it was recorded (ms). */
+  at: number;
+  /** The subject; null when Yungu says "Others". */
+  subject: string | null;
+  /** The teacher who recorded it ("System" for tier records). */
+  recorder: string | null;
+  /** The teacher's remark. */
+  remark: string | null;
+  /** Revoked on Yungu: shown once, struck through, and not counted. */
+  revoked: boolean;
+}
+
+/** A month of 凌云积分: Yungu's own totals and every record behind them, newest first. */
+export interface Behaviour {
+  /** `YYYY-MM`, China time. */
+  month: string;
+  /** Yungu's score for the month (stu/detail), never a sum of the records. */
+  score: number;
+  bonus: number;
+  /** Negative (or 0). */
+  deduction: number;
+  /** Counted records on each side (not revoked, not tiers). */
+  bonusCount: number;
+  deductionCount: number;
+  records: BehaviourRecord[];
 }

@@ -1,6 +1,6 @@
 import 'server-only';
 import { dayIndex, weekStartOf } from '../time';
-import type { Assignment, Comment, Course, Feedback, FileKind, FileRef, Notification } from '../types';
+import type { Assignment, Behaviour, BehaviourRecord, Comment, Course, Feedback, FileKind, FileRef, Notification } from '../types';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -443,8 +443,8 @@ function submittedSeed(teacher: string, title: string, task: string, fileName: s
 }
 
 /**
- * The notification bell's contents, newest first: three unread (two about mock assignments, one that
- * links nowhere) and 26 read ones, enough for "Load more". Ids are numeric, as Yungu's messageIds are.
+ * The notification bell's contents, newest first: three unread (two about mock assignments, one behaviour
+ * record that opens the Behaviour page) and 26 read ones (one more behaviour record among them), enough for "Load more". Ids are numeric, as Yungu's messageIds are.
  */
 export function buildNotifications(now: number): Notification[] {
   const n = (id: number, hoursAgo: number, read: boolean, title: string, body: string, taskId: number | null): Notification => ({
@@ -454,15 +454,24 @@ export function buildNotifications(now: number): Notification[] {
     createdAt: Math.floor((now - hoursAgo * HOUR) / 60_000) * 60_000,
     read,
     taskId,
+    target: null,
   });
-  const unread = [
+  const unread: Notification[] = [
     n(9100, 2, false, 'CL Business with Personal Finance I learning feedback updated', '`1.8B-[Case Study]-Supply Chain` has new learning feedback. Please review it.', 203),
     n(9099, 5, false, 'Please finish your homework soon', '`Task 3：开始第一次观察` is due today at 22:00.', 102),
-    n(9098, 26, false, 'Behaviour record', 'A new behaviour record was added to your growth profile.', null),
+    {
+      ...n(9098, 26, false, 'Behaviour record', 'Grace Liu（记录人）给你【课堂发言积极】+2分，备注：小组讨论时主动分享。', null),
+      target: 'behaviour',
+    },
   ];
   const read: Notification[] = [];
   for (let i = 0; i < 26; i++) {
     const hoursAgo = 30 + i * 9;
+    // One older behaviour record, already read: opening it marks nothing.
+    if (i === 3) {
+      read.push({ ...n(9000 - i, hoursAgo, true, 'Behaviour record', 'Daniel Moore（记录人）给你【按时完成作业】+1分。', null), target: 'behaviour' });
+      continue;
+    }
     read.push(
       i % 3 === 0
         ? n(9000 - i, hoursAgo, true, "Today's new tasks", 'You have new tasks today. Open Yungu to see them.', null)
@@ -472,4 +481,91 @@ export function buildNotifications(now: number): Notification[] {
     );
   }
   return [...unread, ...read];
+}
+
+/** One behaviour record of the template: `daysBefore` the anchor day at China wall clock `clock`. */
+interface BehaviourSeed {
+  daysBefore: number;
+  clock: string;
+  name: string;
+  points: number | null;
+  level?: number;
+  subject: string | null;
+  recorder: string;
+  remark?: string;
+  revoked?: boolean;
+}
+
+/** A varied month: both signs, remarks, one revoked deduction, one tier penalty (no points), over about three weeks. */
+const BEHAVIOUR_SEEDS: BehaviourSeed[] = [
+  { daysBefore: 0, clock: '07:33', name: '作业未按时提交', points: -3, subject: 'H Algebra 2 I', recorder: 'Daniel Moore', remark: '课后任务第三题没有交' },
+  { daysBefore: 1, clock: '10:20', name: '课堂发言积极', points: 2, subject: 'CL Business with Personal Finance I', recorder: 'Grace Liu', remark: '小组讨论时主动分享' },
+  { daysBefore: 2, clock: '08:05', name: '校服未穿', points: null, level: 1, subject: null, recorder: 'System' },
+  { daysBefore: 2, clock: '07:50', name: '未穿校服', points: -5, subject: null, recorder: 'Lena Fischer' },
+  { daysBefore: 6, clock: '14:02', name: '课堂使用手机', points: -5, subject: 'H Physics I', recorder: 'Priya Raman', revoked: true },
+  { daysBefore: 7, clock: '16:40', name: '帮助同学', points: 3, subject: 'Self Study（System）', recorder: 'Priya Raman', remark: '主动帮同学讲解物理题' },
+  { daysBefore: 9, clock: '21:10', name: '宿舍内务不合格', points: -4, subject: null, recorder: 'Lena Fischer' },
+  { daysBefore: 11, clock: '20:15', name: '晚自习讲话', points: -5, subject: null, recorder: 'Daniel Moore', remark: '提醒两次后仍在讲话' },
+  { daysBefore: 12, clock: '17:30', name: '值日认真', points: 2, subject: null, recorder: 'Grace Liu' },
+  { daysBefore: 13, clock: '09:12', name: '作业反馈（突出）', points: 2, subject: 'CL English Language & Composition 1', recorder: 'Grace Liu', remark: '作业有进步' },
+  { daysBefore: 14, clock: '07:55', name: '迟到', points: -2, subject: 'Chinese I', recorder: 'Lena Fischer' },
+  { daysBefore: 16, clock: '18:00', name: '按时完成作业', points: 1, subject: 'CL Computer Science Principles I', recorder: 'Daniel Moore' },
+  { daysBefore: 17, clock: '11:45', name: '课堂睡觉', points: -2, subject: 'H Physics I', recorder: 'Priya Raman' },
+  { daysBefore: 19, clock: '15:20', name: '小组合作突出', points: 2, subject: 'Product Design I', recorder: 'Grace Liu' },
+  { daysBefore: 20, clock: '22:40', name: '熄灯后讲话', points: -3, subject: null, recorder: 'Lena Fischer' },
+  { daysBefore: 21, clock: '13:05', name: '主动整理教室', points: 1, subject: null, recorder: 'Daniel Moore' },
+];
+/** Always kept (the revoked record and the tier one); the rest vary a little from month to month. */
+const KEPT_SEEDS = new Set([2, 4]);
+const keptIn = (mo: number) => (_seed: BehaviourSeed, i: number) => KEPT_SEEDS.has(i) || (i + mo) % 6 !== 0;
+
+/** July and August: the summer, with no records. */
+const QUIET_MONTHS = new Set([7, 8]);
+
+/**
+ * A month of 凌云积分 for the mock: the template laid back from the anchor (now, for this month; the last
+ * day at 21:00 China, for a past one), keeping what falls inside the month and not after now. Totals as
+ * Yungu computes them: 100 base plus the counted records (revoked and tier records left out).
+ */
+export function buildBehaviour(month: string, now: number): Behaviour {
+  const [y, mo] = month.split('-').map(Number);
+  const offset = 8 * HOUR;
+  const start = Date.UTC(y, mo - 1, 1) - offset;
+  const end = Date.UTC(y, mo, 1) - offset;
+  const anchor = Math.min(now, end - 3 * HOUR);
+  const anchorDay = Math.floor((anchor + offset) / DAY) * DAY - offset;
+  const records: BehaviourRecord[] = QUIET_MONTHS.has(mo)
+    ? []
+    : BEHAVIOUR_SEEDS.filter(keptIn(mo)).map((seed, i): BehaviourRecord => {
+        const [h, m] = seed.clock.split(':').map(Number);
+        const tier = seed.points === null;
+        return {
+          id: tier ? `tier-${mo * 100 + i}` : String(y * 10_000 + mo * 100 + i),
+          name: seed.name,
+          points: seed.points,
+          level: seed.level ?? null,
+          kind: tier ? 'tier' : seed.points! > 0 ? 'bonus' : 'deduction',
+          at: anchorDay - seed.daysBefore * DAY + h * HOUR + m * MIN,
+          subject: seed.subject,
+          recorder: seed.recorder,
+          remark: seed.remark ?? null,
+          revoked: seed.revoked ?? false,
+        };
+      })
+        .filter((r) => r.at >= start && r.at < end && r.at <= now)
+        .sort((a, b) => b.at - a.at);
+  const counted = records.filter((r) => !r.revoked && r.kind !== 'tier');
+  const side = (kind: 'bonus' | 'deduction') => counted.filter((r) => r.kind === kind);
+  const total = (list: BehaviourRecord[]) => list.reduce((sum, r) => sum + (r.points ?? 0), 0);
+  const bonus = total(side('bonus'));
+  const deduction = total(side('deduction'));
+  return {
+    month,
+    score: 100 + bonus + deduction,
+    bonus,
+    deduction,
+    bonusCount: side('bonus').length,
+    deductionCount: side('deduction').length,
+    records,
+  };
 }

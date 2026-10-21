@@ -1,5 +1,5 @@
 import 'server-only';
-import type { Assignment, AssignmentDetail, ClassEvent, Comment, Course, FileRef, NotificationPage } from '../types';
+import type { Assignment, AssignmentDetail, Behaviour, ClassEvent, Comment, Course, FileRef, NotificationPage } from '../types';
 import { mockData } from './mock';
 import { serviceData } from './service';
 
@@ -61,6 +61,11 @@ export interface YunguData {
   getWeek(weekStart: number): Promise<ClassEvent[]>;
   /** Every course the student takes, each with its display color. */
   getCourses(): Promise<Course[]>;
+  /**
+   * One China month (`YYYY-MM`) of 凌云积分: Yungu's score and totals and the records behind them, newest
+   * first. A malformed or future month is a 400 (`ServiceError`); pages keep to the allowed range themselves.
+   */
+  getBehaviour(month: string): Promise<Behaviour>;
   /** Everything the assignment pop-up shows; null when the id is unknown. */
   getAssignmentDetail(id: number): Promise<AssignmentDetail | null>;
   /** Stores a student's file and returns its reference; the file is not part of any assignment until saved or submitted. */

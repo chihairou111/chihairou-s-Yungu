@@ -47,6 +47,7 @@ describe('serviceData reads', () => {
     ['getSubmitted', () => data.getSubmitted(), '/submitted'],
     ['getCourses', () => data.getCourses(), '/courses'],
     ['getWeek', () => data.getWeek(1760889600000), '/week?start=1760889600000'],
+    ['getBehaviour', () => data.getBehaviour('2026-09'), '/behaviour?month=2026-09'],
   ])('%s GETs %s with the session token and returns the body', async (_name, run, path) => {
     reply(json(200, [{ id: 1 }]));
     expect(await run()).toEqual([{ id: 1 }]);
@@ -154,6 +155,7 @@ describe('serviceData timeouts: a stalled Yungu or a hung service is "Can\'t rea
     ['getSubmitted', () => data.getSubmitted()],
     ['getWeek', () => data.getWeek(0)],
     ['getCourses', () => data.getCourses()],
+    ['getBehaviour', () => data.getBehaviour('2026-10')],
     ['getAssignmentDetail', () => data.getAssignmentDetail(93251)],
     ['getFile', () => data.getFile('1')],
   ])('%s gives up after the read budget with YunguUnavailable', async (_name, run) => {

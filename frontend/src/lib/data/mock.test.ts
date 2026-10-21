@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { COURSE_COLORS } from '../colors';
 import { groupTodo, isSubmittedLate } from '../priority';
 import { dayIndex, weekStartOf } from '../time';
-import { AssignmentNotFound, CommentNotFound } from './errors';
+import { chinaMonth } from '../behaviour';
+import { AssignmentNotFound, CommentNotFound, ServiceError } from './errors';
 import { BLANK_CREDENTIALS_ERROR, data } from './index';
 import { mockData } from './mock';
 import { resetMockStore } from './store';
@@ -188,6 +189,8 @@ describe('mock notifications', () => {
     const unread = await mockData.getNotifications(false, 1);
     expect(unread.hasMore).toBe(false);
     expect(unread.items.map((n) => n.taskId)).toEqual([203, 102, null]);
+    // The one that links nowhere is a behaviour record: the bell opens the Behaviour page for it.
+    expect(unread.items.map((n) => n.target ?? null)).toEqual([null, null, 'behaviour']);
     for (const id of [203, 102]) expect(await mockData.getAssignmentDetail(id)).not.toBeNull();
     const first = await mockData.getNotifications(true, 1);
     const second = await mockData.getNotifications(true, 2);
@@ -206,5 +209,62 @@ describe('mock notifications', () => {
     expect((await mockData.getNotifications(true, 1)).items[0]).toMatchObject({ id: '9100', read: true });
     await mockData.markNotificationRead('nope');
     expect(await mockData.getUnreadCount()).toBe(2);
+  });
+});
+
+describe('mock behaviour', () => {
+  const NOW = Date.UTC(2026, 9, 21, 1, 30); // Wed Oct 21, 09:30 China
+  afterEach(() => vi.restoreAllMocks());
+  const inMonth = (at: number, month: string) => chinaMonth(at) === month;
+
+  it('a past month: a varied list (both signs, a revoked record, a tier row), newest first, inside the month', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(NOW);
+    const b = await mockData.getBehaviour('2026-09');
+    expect(b.month).toBe('2026-09');
+    expect(b.records.length).toBeGreaterThanOrEqual(12);
+    expect(b.records.every((r) => inMonth(r.at, '2026-09'))).toBe(true);
+    expect(new Set(b.records.map((r) => r.id)).size).toBe(b.records.length);
+    const stamps = b.records.map((r) => r.at);
+    expect(stamps).toEqual([...stamps].sort((x, y) => y - x));
+    expect(b.records.some((r) => r.revoked)).toBe(true);
+    expect(b.records.some((r) => r.kind === 'tier' && r.points === null && r.level === 1)).toBe(true);
+    expect(b.records.some((r) => r.kind === 'bonus')).toBe(true);
+    expect(b.records.some((r) => r.kind === 'deduction')).toBe(true);
+    // Totals as Yungu computes them: 100 base, counted records only (no revoked, no tiers).
+    const counted = b.records.filter((r) => !r.revoked && r.kind !== 'tier');
+    const sum = (kind: string) => counted.filter((r) => r.kind === kind).reduce((t, r) => t + (r.points ?? 0), 0);
+    expect(b.bonus).toBe(sum('bonus'));
+    expect(b.deduction).toBe(sum('deduction'));
+    expect(b.deduction).toBeLessThan(0);
+    expect(b.bonusCount).toBe(counted.filter((r) => r.kind === 'bonus').length);
+    expect(b.deductionCount).toBe(counted.filter((r) => r.kind === 'deduction').length);
+    expect(b.score).toBe(100 + b.bonus + b.deduction);
+  });
+
+  it('this month: nothing in the future', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(NOW);
+    const b = await mockData.getBehaviour('2026-10');
+    expect(b.records.length).toBeGreaterThanOrEqual(12);
+    expect(b.records.every((r) => inMonth(r.at, '2026-10') && r.at <= NOW)).toBe(true);
+  });
+
+  it('the summer has no records and the base score', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(NOW);
+    expect(await mockData.getBehaviour('2026-07')).toEqual({
+      month: '2026-07',
+      score: 100,
+      bonus: 0,
+      deduction: 0,
+      bonusCount: 0,
+      deductionCount: 0,
+      records: [],
+    });
+  });
+
+  it('refuses a future or malformed month as the service does (400)', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(NOW);
+    for (const month of ['2026-11', '2026-13', 'October']) {
+      await expect(mockData.getBehaviour(month)).rejects.toEqual(new ServiceError(400, 'Bad request.'));
+    }
   });
 });

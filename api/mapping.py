@@ -187,9 +187,15 @@ def _truthy(value) -> bool:
     return value is True or value == 1 or (isinstance(value, str) and value.strip().lower() in ("1", "true"))
 
 
+# Behaviour records (messageType 11): a new record, or a tier penalty from one. Yungu links them to
+# #/studentTemplate or nowhere; messageType 11 also carries 校内安排, so the template code decides.
+_BEHAVIOUR_TEMPLATES = ("BEHAVIOR_RECORD", "BEHAVIOR_TIER")
+
+
 def notification(raw: dict) -> dict:
     """A messageCenter v2/page item -> Notification. English text first (title -> titleEn -> senderName in
-    Yungu's own fallback order, English moved to the front); `taskId` only from a link to an assignment."""
+    Yungu's own fallback order, English moved to the front); `taskId` only from a link to an assignment;
+    `target` "behaviour" for a behaviour record (the Behaviour page), else None."""
     link = _TASK_LINK.search(raw.get("messageUrl") or "") if isinstance(raw.get("messageUrl"), str) else None
     return {
         "id": str(raw["messageId"]),
@@ -198,6 +204,7 @@ def notification(raw: dict) -> dict:
         "createdAt": china_ms(raw.get("messageSendTime")) or 0,
         "read": _truthy(raw.get("ifRead")) or _truthy(raw.get("read")),
         "taskId": int(link.group(1)) if link else None,
+        "target": "behaviour" if raw.get("templateCode") in _BEHAVIOUR_TEMPLATES else None,
     }
 
 

@@ -648,6 +648,9 @@ class Student:
                 total = content.get("total") if isinstance(content.get("total"), int) else 0
                 if not data or page * BEHAVIOUR_PAGE_SIZE >= total:
                     break
+            else:
+                # Never seen for a real month; the list is cut short, so say so (no month, ids or counts).
+                log.warning("Behaviour: stopped at the %d-page ceiling; later records left out", BEHAVIOUR_MAX_PAGES)
             return rows
 
         def compute():

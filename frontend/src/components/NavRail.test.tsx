@@ -6,12 +6,22 @@ const pathname = vi.hoisted(() => ({ current: '/calendar' }));
 vi.mock('next/navigation', () => ({ usePathname: () => pathname.current }));
 
 describe('NavRail', () => {
-  it('lists Assignments then Calendar with correct hrefs', () => {
+  it('lists Assignments, Calendar then Behaviour with correct hrefs', () => {
     render(<NavRail />);
     const links = screen.getAllByRole('link');
-    expect(links.map((l) => l.textContent)).toEqual(['Assignments', 'Calendar']);
+    expect(links.map((l) => l.textContent)).toEqual(['Assignments', 'Calendar', 'Behaviour']);
     expect(screen.getByRole('link', { name: 'Assignments' })).toHaveAttribute('href', '/assignments');
     expect(screen.getByRole('link', { name: 'Calendar' })).toHaveAttribute('href', '/calendar');
+    expect(screen.getByRole('link', { name: 'Behaviour' })).toHaveAttribute('href', '/behaviour');
+  });
+
+  it('marks Behaviour active on its page, with the filled icon', () => {
+    pathname.current = '/behaviour';
+    render(<NavRail />);
+    const link = screen.getByRole('link', { name: 'Behaviour' });
+    expect(link).toHaveAttribute('aria-current', 'page');
+    expect(link.querySelector('[data-testid="StarIcon"]')).not.toBeNull();
+    pathname.current = '/calendar';
   });
 
   it('marks only the active route with aria-current="page"', () => {

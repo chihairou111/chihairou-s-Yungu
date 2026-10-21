@@ -14,6 +14,7 @@ import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import NotificationsOutlined from '@mui/icons-material/NotificationsOutlined';
+import { chinaMonth } from '@/lib/behaviour';
 import { chinaRelativeTime } from '@/lib/time';
 import type { Notification } from '@/lib/types';
 import { ApiError, isSessionEnded } from './detail/api';
@@ -32,6 +33,10 @@ const MENU_OUT_MS = 150;
 const FOLD_MS = 200;
 /** The page that mounts the assignment pop-up. */
 const ASSIGNMENTS = '/assignments';
+const BEHAVIOUR = '/behaviour';
+
+/** Where an item leads: an assignment, the Behaviour page, or nowhere. */
+const opens = (n: Notification) => n.taskId !== null || n.target === 'behaviour';
 
 type Kind = 'unread' | 'read';
 
@@ -58,7 +63,7 @@ function append(items: Notification[], more: Notification[]): Notification[] {
  * in the button's name and in the tab title ("(N) chihairou's Yungu"), checked on load, on Refresh, and every 5 minutes while the tab is visible. It opens a
  * popover: Unread, then Read (20 at a time). Mark as read moves an item down at once (put back, with
  * the reason, if Yungu refuses). An item about an assignment opens it in the pop-up and, like Yungu's
- * own bell, marks it read.
+ * own bell, marks it read; a behaviour record opens the Behaviour page at its month.
  */
 export default function NotificationsMenu() {
   const pathname = usePathname();
@@ -191,10 +196,14 @@ export default function NotificationsMenu() {
   }
 
   function openItem(n: Notification) {
-    if (n.taskId === null) return;
+    if (!opens(n)) return;
     close();
     if (!n.read) void markRead(n, { refocus: false });
-    if (pathname === ASSIGNMENTS) openTaskHere(n.taskId);
+    if (n.taskId === null) {
+      // A behaviour record: the month it was sent in (China time), which is this month's page for a new one.
+      const month = chinaMonth(n.createdAt);
+      router.push(month === chinaMonth(Date.now()) ? BEHAVIOUR : `${BEHAVIOUR}?month=${month}`);
+    } else if (pathname === ASSIGNMENTS) openTaskHere(n.taskId);
     else router.push(`${ASSIGNMENTS}?task=${n.taskId}`);
   }
 
@@ -417,7 +426,7 @@ function SectionView(props: SectionViewProps) {
 
 function Item({ n, now, onOpen, onMarkRead }: { n: Notification; now: number; onOpen(n: Notification): void; onMarkRead?(n: Notification): void }) {
   const titleId = useId();
-  const clickable = n.taskId !== null;
+  const clickable = opens(n);
   const title = (
     <Typography
       id={titleId}

@@ -2550,7 +2550,7 @@ def test_notifications_pages_map_items_and_say_whether_more_remain(api, world, a
     first = api.get("/notifications?read=true&page=1&size=20", headers=auth).json()
     assert len(first["items"]) == 20 and first["hasMore"] is True
     assert first["items"][0] == {"id": "7789999", "title": "Title 7789999", "body": "Body",
-                                 "createdAt": 1792483680000, "read": True, "taskId": 7789999}
+                                 "createdAt": 1792483680000, "read": True, "taskId": 7789999, "target": None}
     third = api.get("/notifications?read=true&page=3&size=20", headers=auth).json()
     assert len(third["items"]) == 4 and third["hasMore"] is False
     unread = api.get("/notifications?read=false", headers=auth).json()
@@ -2661,6 +2661,23 @@ def test_behaviour_paging_has_a_ceiling(api, world, auth, monkeypatch):
     monkeypatch.setattr(FakeClient, "behaviour_records", endless)
     assert api.get("/behaviour?month=2026-10", headers=auth).status_code == 200
     assert world.count("behaviour_records") == service_app.BEHAVIOUR_MAX_PAGES
+
+
+def test_hitting_the_behaviour_page_ceiling_is_logged_without_values(api, world, auth, monkeypatch, caplog):
+    def endless(self, start, end, page, size=50):
+        self._hit("behaviour_records", start, end, page, size)
+        return {"total": 10**9, "data": [{**records_for(world)[0], "id": page * 1000 + i} for i in range(size)]}
+    caplog.set_level("INFO")
+    api.get("/behaviour?month=2026-10", headers=auth)
+    assert not [r for r in caplog.records if "ceiling" in r.getMessage()]           # a normal month: nothing
+    monkeypatch.setattr(FakeClient, "behaviour_records", endless)
+    caplog.clear()
+    assert api.get("/behaviour?month=2026-09", headers=auth).status_code == 200
+    hits = [r for r in caplog.records if "ceiling" in r.getMessage()]
+    assert len(hits) == 1 and hits[0].levelname == "WARNING"
+    text = hits[0].getMessage()
+    assert str(service_app.BEHAVIOUR_MAX_PAGES) in text
+    assert "2026" not in text and "106" not in text and "10**9" not in text and "1000000000" not in text
 
 
 def test_behaviour_of_a_month_without_records(api, world, auth):

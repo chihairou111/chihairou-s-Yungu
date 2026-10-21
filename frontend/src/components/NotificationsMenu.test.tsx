@@ -39,7 +39,7 @@ const note = (id: string, read: boolean, taskId: number | null, hoursAgo = 1, ti
   taskId,
 });
 
-const UNREAD = [note('9', false, 203, 2, 'Feedback updated'), note('8', false, null, 5, 'Behaviour record')];
+const UNREAD = [note('9', false, 203, 2, 'Feedback updated'), note('8', false, null, 5, 'School notice')];
 const READ = Array.from({ length: 20 }, (_, i) => note(String(100 - i), true, i % 2 ? 207 : null, 30 + i));
 
 function serve({ unread = UNREAD, read = READ, more = true } = {}) {
@@ -202,8 +202,32 @@ describe('NotificationsMenu', () => {
   it('items that link nowhere are not buttons', async () => {
     render(<NotificationsMenu />);
     const menu = await openMenu();
-    expect(within(menu).queryByRole('button', { name: 'Behaviour record' })).toBeNull();
-    expect(within(menu).getByText('Behaviour record')).toBeInTheDocument();
+    expect(within(menu).queryByRole('button', { name: 'School notice' })).toBeNull();
+    expect(within(menu).getByText('School notice')).toBeInTheDocument();
+  });
+
+  it('a behaviour record opens the Behaviour page and marks it read', async () => {
+    const behaviour = { ...note('7', false, null, 3, 'Behaviour record'), target: 'behaviour' as const };
+    serve({ unread: [behaviour] });
+    nav.pathname = '/calendar';
+    render(<NotificationsMenu />);
+    const menu = await openMenu();
+    await userEvent.click(within(menu).getByRole('button', { name: 'Behaviour record' }));
+    expect(nav.push).toHaveBeenCalledWith('/behaviour');
+    expect(api.markNotificationRead).toHaveBeenCalledWith('7');
+    expect(task.openTaskHere).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Notifications' })).toBeNull());
+  });
+
+  it("an older behaviour record opens the month it was sent in (China time)", async () => {
+    // Sep 30 23:30 China is still September, though UTC (and the test's host clock) say otherwise.
+    const late = { ...note('6', true, null, 0, 'Behaviour record'), createdAt: Date.UTC(2026, 8, 30, 15, 30), target: 'behaviour' as const };
+    serve({ unread: [], read: [late], more: false });
+    render(<NotificationsMenu />);
+    const menu = await openMenu();
+    await userEvent.click(within(menu).getByRole('button', { name: 'Behaviour record' }));
+    expect(nav.push).toHaveBeenCalledWith('/behaviour?month=2026-09');
+    expect(api.markNotificationRead).not.toHaveBeenCalled();
   });
 
   it('loads 20 more read items at a time', async () => {

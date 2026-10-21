@@ -23,7 +23,7 @@ test('the bell lists unread then read, marks one read, and opens an assignment w
   await menu.getByRole('button', { name: 'Load more' }).click();
   await expect(read.getByRole('listitem')).toHaveCount(26);
 
-  // A notice that links nowhere: Mark as read moves it down and lowers the count.
+  // Mark as read moves an item down and lowers the count (it stays there, opening the Behaviour page).
   const unread = menu.getByRole('list', { name: 'Unread' });
   await unread.getByRole('listitem').filter({ hasText: 'Behaviour record' }).getByRole('button', { name: 'Mark as read' }).click();
   await expect(menu.getByRole('heading', { name: 'Unread (2)' })).toBeVisible();
