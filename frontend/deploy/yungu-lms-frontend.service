@@ -10,7 +10,7 @@ Environment=NODE_ENV=production
 Environment=PATH=/opt/node-v24.21.0-linux-x64/bin:/usr/bin:/bin
 Environment=DATA_SOURCE=service
 Environment=YUNGU_API_URL=http://127.0.0.1:8100
-ExecStart=/opt/node-v24.21.0-linux-x64/bin/npx next start -H 0.0.0.0 -p 3000
+ExecStart=/opt/node-v24.21.0-linux-x64/bin/npx next start -H 127.0.0.1 -p 3000
 Restart=on-failure
 RestartSec=5
 
