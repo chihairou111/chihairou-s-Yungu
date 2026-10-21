@@ -76,6 +76,9 @@ MAX_TRACKED = 10000                          # login ids, and addresses, with re
 MAX_CONCURRENT_SIGN_INS = 3                  # for every other login id; the owner's id has one more
 TOO_MANY_ATTEMPTS = "Too many attempts. Try again in a few minutes."
 SIGN_INS_BUSY = "Too many sign-ins right now. Try again in a moment."
+BEHAVIOUR_PAGE_SIZE = 50             # allStu/behavior honours 50 (research behaviour-points.md)
+BEHAVIOUR_MAX_PAGES = 40             # 2000 records in one month is far past any real one: stop there
+EARLIEST_MONTH = "2000-01"
 NOTIFICATION_PAGE_MAX = 100          # Yungu's v2/page honours 100 (research notifications-and-feedback.md)
 
 
@@ -632,6 +635,31 @@ class Student:
                     "hasMore": bool(rows) and (page - 1) * size + len(rows) < total}
         return self.cache.get(("notifications", read, page, size), compute, refresh)
 
+    def behaviour(self, month: str, refresh=False) -> dict:
+        """The month's 凌云积分 and every record of it (all pages), for this account's own userId only."""
+        start, end = mapping.month_window(month)
+
+        def records(client) -> List[dict]:
+            rows: List[dict] = []
+            for page in range(1, BEHAVIOUR_MAX_PAGES + 1):
+                content = client.behaviour_records(start, end, page, BEHAVIOUR_PAGE_SIZE) or {}
+                data = [r for r in content.get("data") or [] if isinstance(r, dict)]
+                rows.extend(data)
+                total = content.get("total") if isinstance(content.get("total"), int) else 0
+                if not data or page * BEHAVIOUR_PAGE_SIZE >= total:
+                    break
+            return rows
+
+        def compute():
+            total = self._call(lambda c: c.behaviour_total(start, end))
+            rows = self._call(records)
+            try:
+                return mapping.behaviour(month, total, rows)
+            except ValueError:
+                log.warning("Behaviour: stu/detail answered without a score (%s)", _shape_text(total))
+                raise Unavailable() from None
+        return self.cache.get(("behaviour", month), compute, refresh)
+
     def mark_notification_read(self, message_id: int) -> None:
         """Yungu's answer was never observed before this shipped: anything but a success envelope is a 502,
         and its shape (types only) is logged so the first real press shows what it was."""
@@ -913,6 +941,17 @@ def create_app(state_dir: Optional[str] = None, client_factory=yungu_client,
         if int(page) < 1 or not 1 <= int(size) <= NOTIFICATION_PAGE_MAX:
             raise BadRequest()
         return me.notifications(read == "true", int(page), int(size), refresh(request))
+
+    @app.get("/behaviour")
+    def behaviour(request: Request, month: str = "", me: Student = Me):
+        try:
+            mapping.month_window(month)
+        except ValueError:
+            raise BadRequest() from None
+        this_month = datetime.fromtimestamp(me.now_ms() / 1000, CST).strftime("%Y-%m")
+        if not EARLIEST_MONTH <= month <= this_month:
+            raise BadRequest()
+        return me.behaviour(month, refresh(request))
 
     @app.post("/notifications/{message_id}/read", status_code=204)
     def mark_notification_read(message_id: str, me: Student = Me):

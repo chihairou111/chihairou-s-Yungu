@@ -314,3 +314,54 @@ def test_mark_notification_read_non_200_raises():
     responses.post(BASE + "/api/messageCenter/read", status=500, body="x")
     with pytest.raises(YunguError):
         client().mark_notification_read(1)
+
+
+# ------------------------------------------------------ behaviour points (NOTES.md section 11)
+BEHAVIOUR_REFERER = BASE + "/"
+
+
+@responses.activate
+def test_behaviour_total_gets_stu_detail_for_the_own_id_and_returns_the_first_row():
+    row = {"id": ME, "score": 91.0, "baseScore": 100.0, "positiveScore": 8.0, "negativeScore": -17.0}
+    responses.get(BASE + "/calendar/api/statistics/stu/detail", json=ok([row]))
+    assert client().behaviour_total("2026-10-01", "2026-10-31") == row
+    call = responses.calls[0]
+    assert call.request.method == "GET"
+    assert qs(call) == {"queryType": "2", "startTime": "2026-10-01", "endTime": "2026-10-31", "stuId": str(ME)}
+    assert call.request.headers["Referer"] == BEHAVIOUR_REFERER
+
+
+@responses.activate
+@pytest.mark.parametrize("content", [None, [], [None], {"score": 1}])
+def test_behaviour_total_without_a_row_raises(content):
+    responses.get(BASE + "/calendar/api/statistics/stu/detail", json=ok(content))
+    with pytest.raises(YunguError):
+        client().behaviour_total("2026-10-01", "2026-10-31")
+
+
+@responses.activate
+def test_behaviour_records_posts_the_record_details_query_for_the_own_id():
+    page = {"pageNum": 2, "pageSize": 50, "total": 61, "data": [{"id": 1}]}
+    responses.post(BASE + "/calendar/api/statistics/allStu/behavior", json=ok(page))
+    assert client().behaviour_records("2026-10-01", "2026-10-31", 2) == page
+    call = responses.calls[0]
+    # No scopeType/semesterId: the date range alone decides (checked live 2026-10-21, NOTES.md section 11).
+    assert body_of(call) == {"pageNum": 2, "pageSize": 50, "startDay": "2026-10-01", "endDay": "2026-10-31",
+                             "stage": 4, "stuId": ME, "calculationBehaviorId": "", "onlyViewUserRecords": False,
+                             "onlyRevoke": False, "behaviorTypeIds": [], "punishmentIdList": [],
+                             "earlyWarningIdList": [], "tierList": []}
+    assert call.request.headers["Referer"] == BEHAVIOUR_REFERER
+
+
+@responses.activate
+def test_behaviour_records_page_size_and_null_content():
+    responses.post(BASE + "/calendar/api/statistics/allStu/behavior", json=ok(None))
+    assert client().behaviour_records("2026-09-01", "2026-09-30", 1, size=10) == {"total": 0, "data": []}
+    assert body_of(responses.calls[0])["pageSize"] == 10
+
+
+@responses.activate
+def test_behaviour_records_error_envelope_raises():
+    responses.post(BASE + "/calendar/api/statistics/allStu/behavior", json={"code": 500, "message": "x"})
+    with pytest.raises(YunguError):
+        client().behaviour_records("2026-10-01", "2026-10-31", 1)

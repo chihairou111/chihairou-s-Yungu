@@ -363,6 +363,30 @@ class YunguTask:
         observed, so any non-error envelope counts; returns it whole."""
         return self._api("POST", "/api/messageCenter/read", json_body={"ids": [message_id]}, ok=_message_ok)
 
+    # ----------------------------------------------------- behaviour points
+    # 综合评价 → 学生行为 (凌云积分); requests in api/NOTES.md section 11. Dates are China dates, inclusive.
+    BEHAVIOUR_STAGE = 4             # 高中 (high school), from /calendar/api/newBehaviorRecord/behavior/grade
+
+    def behaviour_total(self, start: str, end: str) -> dict:
+        """The 凌云积分 card for the window: stu/detail's row for the own id (score = baseScore +
+        positiveScore + negativeScore, Yungu's own computation). Raises YunguError when there is no row."""
+        content = self._api("GET", "/calendar/api/statistics/stu/detail", params={
+            "queryType": 2, "startTime": start, "endTime": end, "stuId": self.user_id},
+            referer=BASE + "/")["content"]
+        if not isinstance(content, list) or not content or not isinstance(content[0], dict):
+            raise YunguError("GET /calendar/api/statistics/stu/detail -> no row")
+        return content[0]
+
+    def behaviour_records(self, start: str, end: str, page: int, size: int = 50) -> dict:
+        """One page of 记录明细 (record details) for the own id, newest first: {total, data:[row]}. No
+        scopeType/semesterId: the date range alone decides (checked live, NOTES.md section 11)."""
+        content = self._api("POST", "/calendar/api/statistics/allStu/behavior", json_body={
+            "pageNum": page, "pageSize": size, "startDay": start, "endDay": end, "stage": self.BEHAVIOUR_STAGE,
+            "stuId": self.user_id, "calculationBehaviorId": "", "onlyViewUserRecords": False, "onlyRevoke": False,
+            "behaviorTypeIds": [], "punishmentIdList": [], "earlyWarningIdList": [], "tierList": []},
+            referer=BASE + "/")["content"]
+        return content if isinstance(content, dict) else {"total": 0, "data": []}
+
     # -------------------------------------------------------------- calendar
     @staticmethod
     def week_bounds(day: date):

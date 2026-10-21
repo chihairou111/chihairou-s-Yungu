@@ -25,10 +25,11 @@ Field decisions (chosen from recorded fixtures, tests/fixtures/):
     `type` is only a fallback because it calls .numbers files "pdf". Apple iWork files count as
     office, so they get the PDF rendition Yungu's preview endpoint serves for them.
 """
+import calendar
 import mimetypes
 import re
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 CST = timezone(timedelta(hours=8))
 SCHOOL_GROUPS = ("Due today", "Due recently", "Delayed")
@@ -329,3 +330,142 @@ def detail(mixed: dict, achievement: dict, comments: List[dict], me: int,
     if listed and listed.get("submittedAt") is not None and submitted:
         out["submittedAt"] = listed["submittedAt"]
     return out
+
+
+# ------------------------------------------------------------------ behaviour
+# 凌云积分 (Lingyun points) for one China calendar month; Yungu's requests and fields in NOTES.md section 11.
+_MONTH = re.compile(r"([0-9]{4})-(0[1-9]|1[0-2])")
+TIER_ID_PREFIX = "tier-"        # tier rows number apart from records: their ids may coincide
+
+
+def month_window(month) -> Tuple[str, str]:
+    """'2026-10' -> ('2026-10-01', '2026-10-31'): the month's first and last China dates, as Yungu takes them.
+    ValueError for anything but YYYY-MM."""
+    m = _MONTH.fullmatch(month) if isinstance(month, str) else None
+    if not m:
+        raise ValueError("month must be YYYY-MM")
+    year, mon = int(m.group(1)), int(m.group(2))
+    return f"{year:04d}-{mon:02d}-01", f"{year:04d}-{mon:02d}-{calendar.monthrange(year, mon)[1]:02d}"
+
+
+def _points(value):
+    """Yungu's signed score ('+2', '-5', '-2.0', 8.0) -> 2 / -5 / -2 / 8 (int when whole); None if absent."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        try:
+            value = float(value.strip())
+        except ValueError:
+            return None
+    if not isinstance(value, (int, float)) or value != value or value in (float("inf"), float("-inf")):
+        return None
+    return int(value) if float(value).is_integer() else value
+
+
+def _total(total, key: str, required: bool = False):
+    value = total.get(key) if isinstance(total, dict) else None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        if required:
+            raise ValueError(f"stu/detail has no number for {key}")
+        return 0
+    return _points(value)
+
+
+def _utc_ms(value) -> Optional[int]:
+    """'2026-10-20T06:58:22.000+00:00' (an instant; no offset = UTC) -> epoch ms."""
+    if not isinstance(value, str):
+        return None
+    try:
+        when = datetime.fromisoformat(value.strip())
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return int(when.timestamp() * 1000)
+
+
+def _is_tier(raw: dict) -> bool:
+    """A T1–T3 disciplinary tier row: a level and no points."""
+    return raw.get("level") is not None and _points(raw.get("score")) is None
+
+
+def _record(raw: dict, at: int, revoked: bool, points) -> dict:
+    tier = _is_tier(raw)
+    if tier:
+        kind = "tier"
+    elif raw.get("type") == 0:
+        kind = "bonus"
+    elif raw.get("type") == 2:
+        kind = "deduction"
+    else:
+        kind = "bonus" if (points or 0) >= 0 else "deduction"
+    subject = None
+    if raw.get("subjectId") not in (-1, "-1"):                       # -1 = 其他 (other): no subject
+        subject = _text(raw.get("subjectEnName")) or _text(raw.get("subjectName"))
+    level = raw.get("level")
+    return {
+        "id": (TIER_ID_PREFIX if tier else "") + str(raw["id"]),
+        "name": _text(raw.get("behaviorTypeName")) or _text(raw.get("behaviorTypeEnName")) or "",
+        "points": None if tier else points,
+        "level": level if tier and isinstance(level, int) else None,
+        "kind": kind,
+        "at": at,
+        "subject": subject,
+        "recorder": (_text(raw.get("creatorEnName")) or _text(raw.get("creatorName"))
+                     or _text(raw.get("recordActorEnName")) or _text(raw.get("recordActorName"))),
+        "remark": _text(raw.get("desc")),
+        "revoked": revoked,
+    }
+
+
+def behaviour(month: str, total: dict, rows: List[dict]) -> dict:
+    """stu/detail's row + every allStu/behavior row of the month -> Behaviour.
+
+    The number and the chip totals are Yungu's (`score`, `positiveScore`, `negativeScore`), never a sum
+    of rows. Rows: each id once (pages can repeat rows); a revoked record is one row, `revoked`, at the
+    original's time with the original's points (Yungu lists the original plus a revocation row with the
+    same id, `revoke: true`, the opposite sign and the revocation's time; either half may fall in another
+    month, and an original whose revocation is elsewhere still carries `revokeIcon: true`). Times come
+    from `recordTime` (UTC); a row whose China date is outside the month is dropped. Counts: records
+    per side that count (not revoked, not tiers). Newest first; ties keep Yungu's order."""
+    first, last = month_window(month)
+    score = _total(total, "score", required=True)
+    originals, revocations, order = {}, {}, {}           # order: first sighting of each key
+    for raw in rows or []:
+        if not isinstance(raw, dict) or raw.get("id") is None:
+            continue
+        at = _utc_ms(raw.get("recordTime")) or _utc_ms(raw.get("sortTime")) or _utc_ms(raw.get("createDate"))
+        if at is None:
+            continue
+        day = datetime.fromtimestamp(at / 1000, CST).strftime("%Y-%m-%d")
+        if not first <= day <= last:
+            continue
+        key = ("tier" if _is_tier(raw) else "record", str(raw["id"]))
+        bucket = revocations if raw.get("revoke") is True and key[0] == "record" else originals
+        if key in bucket:
+            continue
+        bucket[key] = (raw, at)
+        order.setdefault(key, None)
+    records = []
+    for key in order:
+        if key in originals:
+            raw, at = originals[key]
+            revoked = key in revocations or raw.get("revokeIcon") is True or raw.get("revoke") is True
+            points = _points(raw.get("score"))
+        else:
+            raw, at = revocations[key]
+            revoked = True
+            points = _points(raw.get("score"))
+            points = -points if points is not None else None
+        records.append(_record(raw, at, revoked, points))
+    records.sort(key=lambda r: -r["at"])
+    counted = [r for r in records if not r["revoked"]]
+    return {
+        "month": month,
+        "score": score,
+        "bonus": _total(total, "positiveScore"),
+        "deduction": _total(total, "negativeScore"),
+        "bonusCount": sum(r["kind"] == "bonus" for r in counted),
+        "deductionCount": sum(r["kind"] == "deduction" for r in counted),
+        "records": records,
+    }

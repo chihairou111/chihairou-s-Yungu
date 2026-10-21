@@ -109,6 +109,10 @@ class World:
         self.unread = 1                 # unreadTotal
         self.messages = [notice(7790000 - i, read=i > 0) for i in range(45)]   # newest first; one unread
         self.read_answer = {"code": 0, "status": True, "content": None}        # mark_notification_read's answer
+        detail, records = load("behaviour_detail.json"), load("behaviour_records.json")
+        self.behaviour_totals = {mapping.month_window(m): detail[m] for m in detail}       # by (start, end)
+        self.behaviour_rows = {mapping.month_window(m): records[m]["data"] for m in records}
+        self.behaviour_total_override = None          # what every stu/detail answers instead
 
     def expire_all(self):
         self.valid_from = self.sessions + 1
@@ -137,6 +141,9 @@ def peer_world(load, accounts):
     w.messages = [notice(8890000 - i, read=i > 1) for i in range(7)]
     w.next_feedback = 500000
     w.next_doc = 22230500
+    w.behaviour_totals = {k: {**v, "id": OTHER, "score": 120.0, "positiveScore": 20.0, "negativeScore": 0.0}
+                          for k, v in w.behaviour_totals.items()}
+    w.behaviour_rows = {k: [{**r, "stuId": OTHER} for r in rows if r["type"] == 0] for k, rows in w.behaviour_rows.items()}
     return w
 
 
@@ -260,6 +267,19 @@ class FakeClient:
         self._hit("mark_notification_read", message_id)
         return self.w.read_answer
 
+    def behaviour_total(self, start, end):
+        self._hit("behaviour_total", start, end)
+        if self.w.behaviour_total_override is not None:
+            return self.w.behaviour_total_override
+        return dict(self.w.behaviour_totals.get((start, end))
+                    or {"score": 100.0, "baseScore": 100.0, "positiveScore": 0.0, "negativeScore": 0.0})
+
+    def behaviour_records(self, start, end, page, size=50):
+        self._hit("behaviour_records", start, end, page, size)
+        rows = self.w.behaviour_rows.get((start, end), [])
+        return {"pageNum": page, "pageSize": size, "total": len(rows),
+                "data": [dict(r) for r in rows[(page - 1) * size:page * size]]}
+
     def mark_submitted(self, task_id):
         self._hit("mark_submitted", task_id)
         if self.w.after_mark is not None:          # before the status changes: a racing read sees status 1
@@ -377,7 +397,7 @@ ENDPOINTS = [
     ("POST", "/assignments/94929/online-docs", {"title": "t", "content": "{}"}),
     ("PUT", "/assignments/94929/online-docs/11130500", {"title": "t", "content": "{}"}),
     ("GET", "/notifications/count", None), ("GET", "/notifications?read=false", None),
-    ("POST", "/notifications/7790000/read", None),
+    ("POST", "/notifications/7790000/read", None), ("GET", "/behaviour?month=2026-10", None),
 ]
 
 
@@ -507,7 +527,7 @@ def test_a_non_owners_password_is_not_kept_in_memory_after_sign_in(api, world, a
 
 
 READS = ["/todo", "/submitted", "/week?start=1792339200000", "/courses", "/assignments/93251", "/assignments/94929",
-         "/notifications/count", "/notifications?read=true", "/notifications?read=false"]
+         "/notifications/count", "/notifications?read=true", "/notifications?read=false", "/behaviour?month=2026-10"]
 
 
 def test_two_accounts_read_their_own_data_on_every_endpoint(api, world, auth, b_auth):
@@ -1460,7 +1480,7 @@ def test_signing_in_after_a_rejection_works_again(api, world, auth):
 def test_yungu_failures_are_a_502(api, world, auth, exc):
     own(api, 1)
     world.fail = exc
-    for path in ("/courses", "/todo", "/submitted", "/assignments/93251", "/files/1"):
+    for path in ("/courses", "/todo", "/submitted", "/assignments/93251", "/files/1", "/behaviour?month=2026-10"):
         r = api.get(path, headers=auth)
         assert r.status_code == 502 and r.json() == {"error": UNREACHABLE}, path
     r = api.post("/assignments/93251/submit", json={"fileIds": []}, headers=auth)
@@ -2591,3 +2611,120 @@ def test_mark_read_is_retried_once_after_a_relogin(api, world, auth):
     world.expire_all()
     assert api.post("/notifications/7790000/read", headers=auth).status_code == 204
     assert world.count("mark_notification_read") == 2
+
+
+# -------------------------------------------------------- behaviour points
+def records_for(world, month="2026-10"):
+    start, end = mapping.month_window(month)
+    return world.behaviour_rows[(start, end)]
+
+
+def test_behaviour_is_this_months_mapped_points(api, world, auth, load):
+    r = api.get("/behaviour?month=2026-10", headers=auth)
+    assert r.status_code == 200
+    got = r.json()
+    assert got == mapping.behaviour("2026-10", load("behaviour_detail.json")["2026-10"], records_for(world))
+    assert (got["score"], got["bonus"], got["deduction"], got["bonusCount"], got["deductionCount"]) == (91, 8, -17, 5, 7)
+    assert ("behaviour_total", ("2026-10-01", "2026-10-31")) in world.calls
+    assert ("behaviour_records", ("2026-10-01", "2026-10-31", 1, 50)) in world.calls
+
+
+def test_behaviour_fetches_every_page(api, world, auth):                 # Review Focus 2
+    base = records_for(world)[0]
+    rows = [{**base, "id": 3000000 + i, "recordTime": f"2026-10-{1 + i % 28:02d}T02:{i % 60:02d}:00.000+00:00"}
+            for i in range(123)]
+    world.behaviour_rows[("2026-10-01", "2026-10-31")] = rows
+    got = api.get("/behaviour?month=2026-10", headers=auth).json()
+    pages = [c[1][2] for c in world.calls if c[0] == "behaviour_records"]
+    assert pages == [1, 2, 3]
+    assert len(got["records"]) == 123 and len({r["id"] for r in got["records"]}) == 123
+    stamps = [r["at"] for r in got["records"]]
+    assert stamps == sorted(stamps, reverse=True)
+
+
+def test_behaviour_stops_paging_on_an_empty_page(api, world, auth, monkeypatch):
+    real = FakeClient.behaviour_records
+
+    def short(self, start, end, page, size=50):
+        content = real(self, start, end, page, size)
+        return {**content, "total": 500, "data": content["data"] if page == 1 else []}
+    monkeypatch.setattr(FakeClient, "behaviour_records", short)
+    got = api.get("/behaviour?month=2026-10", headers=auth).json()
+    assert [c[1][2] for c in world.calls if c[0] == "behaviour_records"] == [1, 2]
+    assert len(got["records"]) == 15
+
+
+def test_behaviour_paging_has_a_ceiling(api, world, auth, monkeypatch):
+    def endless(self, start, end, page, size=50):
+        self._hit("behaviour_records", start, end, page, size)
+        return {"total": 10**9, "data": [{**records_for(world)[0], "id": page * 1000 + i} for i in range(size)]}
+    monkeypatch.setattr(FakeClient, "behaviour_records", endless)
+    assert api.get("/behaviour?month=2026-10", headers=auth).status_code == 200
+    assert world.count("behaviour_records") == service_app.BEHAVIOUR_MAX_PAGES
+
+
+def test_behaviour_of_a_month_without_records(api, world, auth):
+    got = api.get("/behaviour?month=2026-07", headers=auth).json()
+    assert got == {"month": "2026-07", "score": 100, "bonus": 0, "deduction": 0, "bonusCount": 0,
+                   "deductionCount": 0, "records": []}
+    assert ("behaviour_total", ("2026-07-01", "2026-07-31")) in world.calls
+
+
+@pytest.mark.parametrize("query", ["", "?month=", "?month=2026-13", "?month=2026-1", "?month=2026-10-01",
+                                   "?month=October", "?month=2026-11", "?month=2027-01", "?month=1999-12",
+                                   "?month=%EF%BC%92026-10"])
+def test_behaviour_of_a_bad_or_future_month_is_a_400(api, world, auth, query):
+    r = api.get("/behaviour" + query, headers=auth)
+    assert r.status_code == 400 and r.json() == {"error": "Bad request."}
+    assert world.count("behaviour_total") == world.count("behaviour_records") == 0
+
+
+def test_the_current_month_is_the_china_month(make, world, clock):
+    clock.t = 1793462400.0 - 1800               # 2026-11-01 00:00 China minus 30 min = 2026-10-31 23:30 China
+    api = make()
+    auth = sign_in(api)
+    assert api.get("/behaviour?month=2026-11", headers=auth).status_code == 400
+    clock.t = 1793462400.0 + 1800               # 2026-11-01 00:30 China (still 10-31 in UTC)
+    assert api.get("/behaviour?month=2026-11", headers=auth).status_code == 200
+
+
+def test_behaviour_is_cached_per_month_and_refresh_bypasses(api, world, auth, clock):
+    api.get("/behaviour?month=2026-10", headers=auth)
+    api.get("/behaviour?month=2026-10", headers=auth)
+    assert world.count("behaviour_total") == 1
+    api.get("/behaviour?month=2026-09", headers=auth)
+    assert world.count("behaviour_total") == 2
+    api.get("/behaviour?month=2026-10", headers={**auth, "X-Refresh": "1"})
+    assert world.count("behaviour_total") == 3
+    clock.t += 61
+    api.get("/behaviour?month=2026-10", headers=auth)
+    assert world.count("behaviour_total") == 4
+
+
+def test_each_account_gets_its_own_behaviour(api, world, auth, b_auth):
+    a = api.get("/behaviour?month=2026-10", headers=auth).json()
+    b = api.get("/behaviour?month=2026-10", headers=b_auth).json()
+    assert a["score"] == 91 and b["score"] == 120
+    assert b["deductionCount"] == 0 and all(r["kind"] == "bonus" for r in b["records"])
+    assert api.get("/behaviour?month=2026-10", headers=auth).json() == a          # the owner's cache is its own
+    assert world.peer.count("behaviour_total") == 1 and world.count("behaviour_total") == 1
+
+
+def test_behaviour_never_takes_a_student_id_from_the_request(api, world, auth):
+    r = api.get("/behaviour?month=2026-10&stuId=207&studentId=207", headers=auth)
+    assert r.status_code == 200 and r.json()["score"] == 91
+    assert world.peer.count("behaviour_total") == 0
+
+
+@pytest.mark.parametrize("total", [{}, {"score": None}, {"score": "91"}, {"score": True}, []])
+def test_a_total_without_a_number_is_a_502(api, world, auth, total):
+    world.behaviour_total_override = total
+    r = api.get("/behaviour?month=2026-10", headers=auth)
+    assert r.status_code == 502 and r.json() == {"error": UNREACHABLE}
+
+
+def test_behaviour_after_an_expired_session_signs_in_again(api, world, auth):
+    world.expire_all()
+    r = api.get("/behaviour?month=2026-10", headers=auth)
+    assert r.status_code == 200 and r.json()["score"] == 91
+    assert world.logins == ["S106", "S106"]

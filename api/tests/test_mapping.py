@@ -531,3 +531,188 @@ def test_notification_falls_back_to_chinese_then_sender():
     assert n["title"] == "您有新反馈" and n["body"] == "老师给了反馈" and n["taskId"] is None
     bare = mapping.notification({"messageId": 6, "senderName": "Teacher 2", "messageSendTime": None})
     assert bare["title"] == "Teacher 2" and bare["body"] == "" and bare["createdAt"] == 0
+
+
+# ----------------------------------------------------------- behaviour points
+import json as _json
+
+BEHAVIOUR_KEYS = {"month", "score", "bonus", "deduction", "bonusCount", "deductionCount", "records"}
+RECORD_KEYS = {"id", "name", "points", "level", "kind", "at", "subject", "recorder", "remark", "revoked"}
+
+
+def behaviour_fixture(name):
+    return _json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
+def utc(text):
+    return int(datetime.fromisoformat(text).timestamp() * 1000)
+
+
+def rec(rid, score, at, type_=None, revoke=None, level=None, **kw):
+    """A record-details row as Yungu sends it (only the fields the mapper reads)."""
+    if type_ is None:
+        type_ = 0 if (score or "").startswith("+") else 2
+    return {"id": rid, "type": type_, "score": score, "level": level, "revoke": revoke,
+            "revokeIcon": bool(revoke), "recordTime": at, "sortTime": at, "createDate": at,
+            "behaviorTypeName": kw.get("name", f"行为{rid}"), "behaviorTypeEnName": "Behaviour",
+            "subjectId": kw.get("subject_id", -1), "subjectName": "其他", "subjectEnName": "Others",
+            "creatorName": kw.get("creator", "Teacher 1"), "creatorEnName": kw.get("creator", "Teacher 1"),
+            "recordActorName": "Teacher 1", "recordActorEnName": "Teacher 1", "desc": kw.get("desc")}
+
+
+TOTAL = {"score": 91.0, "baseScore": 100.0, "positiveScore": 8.0, "negativeScore": -17.0}
+
+
+def test_month_window_is_the_china_calendar_month():
+    assert mapping.month_window("2026-10") == ("2026-10-01", "2026-10-31")
+    assert mapping.month_window("2026-09") == ("2026-09-01", "2026-09-30")
+    assert mapping.month_window("2028-02") == ("2028-02-01", "2028-02-29")
+    assert mapping.month_window("2026-12") == ("2026-12-01", "2026-12-31")
+
+
+@pytest.mark.parametrize("bad", ["2026-13", "2026-00", "2026-1", "26-10", "2026-10-01", "", None, "２０２６-10"])
+def test_month_window_rejects_anything_but_yyyy_mm(bad):
+    with pytest.raises(ValueError):
+        mapping.month_window(bad)
+
+
+def test_behaviour_from_the_live_october_capture():
+    detail = behaviour_fixture("behaviour_detail.json")["2026-10"]
+    rows = behaviour_fixture("behaviour_records.json")["2026-10"]["data"]
+    b = mapping.behaviour("2026-10", detail, rows)
+    assert set(b) == BEHAVIOUR_KEYS and all(set(r) == RECORD_KEYS for r in b["records"])
+    assert (b["month"], b["score"], b["bonus"], b["deduction"]) == ("2026-10", 91, 8, -17)
+    assert all(isinstance(b[k], int) for k in ("score", "bonus", "deduction"))
+    # 17 rows: 2 revocation pairs fold into 2 rows, so 15; 5 bonus, 7 deductions counted, 1 tier, 2 revoked
+    assert len(b["records"]) == 15
+    assert (b["bonusCount"], b["deductionCount"]) == (5, 7)
+    revoked = [r for r in b["records"] if r["revoked"]]
+    assert sorted(r["id"] for r in revoked) == ["2716570", "2756001"]
+    late = next(r for r in revoked if r["id"] == "2756001")
+    assert late["points"] == -2 and late["kind"] == "deduction" and late["subject"] == "Math"
+    assert late["at"] == utc("2026-10-19T04:10:54+00:00")             # the original's time, not the revocation's
+    tier = next(r for r in b["records"] if r["kind"] == "tier")
+    assert tier == {"id": "tier-78926", "name": "校服未穿", "points": None, "level": 1, "kind": "tier",
+                    "at": utc("2026-10-19T00:06:31+00:00"), "subject": None, "recorder": "System", "remark": None,
+                    "revoked": False}
+    first = b["records"][0]
+    assert first == {"id": "2767446", "name": "作业反馈（突出）", "points": 2, "level": None, "kind": "bonus",
+                     "at": utc("2026-10-20T06:58:22+00:00"), "subject": None, "recorder": "Teacher 1",
+                     "remark": "作业有进步", "revoked": False}
+    stamps = [r["at"] for r in b["records"]]
+    assert stamps == sorted(stamps, reverse=True)
+    assert len({r["id"] for r in b["records"]}) == len(b["records"])
+
+
+def test_a_revocation_pair_is_one_struck_row_not_counted():           # Review Focus 1
+    rows = [rec(2, "+5", "2026-10-12T02:00:00.000+00:00", type_=2, revoke=True),
+            rec(2, "-5", "2026-10-10T02:00:00.000+00:00"),
+            rec(1, "-2", "2026-10-09T02:00:00.000+00:00")]
+    b = mapping.behaviour("2026-10", {**TOTAL, "negativeScore": -2.0}, rows)
+    assert [(r["id"], r["points"], r["kind"], r["revoked"]) for r in b["records"]] == [
+        ("2", -5, "deduction", True), ("1", -2, "deduction", False)]
+    assert b["records"][0]["at"] == utc("2026-10-10T02:00:00+00:00")
+    assert (b["bonusCount"], b["deductionCount"]) == (0, 1)
+    assert b["deduction"] == -2                                         # Yungu's number, untouched
+
+
+def test_the_revocation_row_first_or_last_folds_the_same():
+    a = rec(2, "-5", "2026-10-10T02:00:00.000+00:00")
+    r = rec(2, "+5", "2026-10-12T02:00:00.000+00:00", type_=2, revoke=True)
+    assert mapping.behaviour("2026-10", TOTAL, [a, r]) == mapping.behaviour("2026-10", TOTAL, [r, a])
+
+
+def test_an_original_revoked_in_a_later_month_shows_revoked():
+    row = {**rec(3, "-2", "2026-09-28T02:00:00.000+00:00"), "revokeIcon": True}   # its revocation is in October
+    b = mapping.behaviour("2026-09", TOTAL, [row])
+    assert b["records"][0]["revoked"] is True and b["records"][0]["points"] == -2
+    assert b["deductionCount"] == 0
+
+
+def test_a_lone_revocation_shows_the_original_points_at_the_revocation_time():
+    row = rec(4, "+2", "2026-10-02T02:00:00.000+00:00", type_=2, revoke=True)      # the original is in September
+    b = mapping.behaviour("2026-10", TOTAL, [row])
+    assert [(r["points"], r["kind"], r["revoked"], r["at"]) for r in b["records"]] == [
+        (-2, "deduction", True, utc("2026-10-02T02:00:00+00:00"))]
+    assert b["deductionCount"] == 0
+
+
+def test_rows_repeated_across_pages_are_kept_once_newest_first():  # Review Focus 2
+    rows = [rec(i, "-1" if i % 3 else "+1", f"2026-10-{1 + i % 28:02d}T0{i % 10}:00:00.000+00:00")
+            for i in range(1, 121)]
+    paged = rows[:50] + rows[45:100] + rows[95:]                         # pages that shifted by a few rows
+    b = mapping.behaviour("2026-10", TOTAL, paged)
+    assert len(b["records"]) == 120
+    assert len({r["id"] for r in b["records"]}) == 120
+    stamps = [r["at"] for r in b["records"]]
+    assert stamps == sorted(stamps, reverse=True)
+    assert b["bonusCount"] + b["deductionCount"] == 120
+
+
+def test_record_times_are_utc_instants_and_the_month_is_china_time():  # Review Focus 3
+    late_sept = rec(5, "-2", "2026-09-30T15:30:00.000+00:00")            # 2026-09-30 23:30 China
+    early_oct = rec(6, "-2", "2026-09-30T16:30:00.000+00:00")            # 2026-10-01 00:30 China
+    sept = mapping.behaviour("2026-09", TOTAL, [late_sept, early_oct])
+    octo = mapping.behaviour("2026-10", TOTAL, [late_sept, early_oct])
+    assert [r["id"] for r in sept["records"]] == ["5"]
+    assert [r["id"] for r in octo["records"]] == ["6"]
+    assert sept["records"][0]["at"] == ms(2026, 9, 30, 23, 30)
+    assert octo["records"][0]["at"] == ms(2026, 10, 1, 0, 30)
+
+
+def test_the_number_is_yungus_score_whatever_the_rows_sum_to():   # Review Focus 4
+    rows = [rec(1, "+2", "2026-10-03T02:00:00.000+00:00"),
+            rec(2, "-5", "2026-10-04T02:00:00.000+00:00"),
+            rec(2, "+5", "2026-10-05T02:00:00.000+00:00", type_=2, revoke=True),
+            rec(9, None, "2026-10-04T02:00:00.000+00:00", type_=2, revoke=False, level=2)]
+    b = mapping.behaviour("2026-10", {"score": 77.0, "positiveScore": 3.0, "negativeScore": -26.0}, rows)
+    assert (b["score"], b["bonus"], b["deduction"]) == (77, 3, -26)
+    assert (b["bonusCount"], b["deductionCount"]) == (1, 0)
+
+
+def test_an_empty_month_still_has_yungus_number():
+    b = mapping.behaviour("2026-07", {"score": 100.0, "positiveScore": 0.0, "negativeScore": 0.0}, [])
+    assert b == {"month": "2026-07", "score": 100, "bonus": 0, "deduction": 0, "bonusCount": 0,
+                 "deductionCount": 0, "records": []}
+
+
+def test_fractional_points_stay_fractional():
+    b = mapping.behaviour("2026-10", {"score": 90.5, "positiveScore": 0.5, "negativeScore": -10.0},
+                          [rec(1, "+0.5", "2026-10-03T02:00:00.000+00:00")])
+    assert (b["score"], b["bonus"], b["records"][0]["points"]) == (90.5, 0.5, 0.5)
+
+
+def test_record_text_fields():
+    row = rec(7, "-2", "2026-10-03T02:00:00.000+00:00", subject_id=14, desc="  上课睡觉 ", creator="Teacher 9")
+    row.update(subjectName="数学", subjectEnName="Math", creatorEnName=None)
+    r = mapping.behaviour("2026-10", TOTAL, [row])["records"][0]
+    assert (r["subject"], r["remark"], r["recorder"]) == ("Math", "上课睡觉", "Teacher 9")
+    blank = rec(8, "+1", "2026-10-03T02:00:00.000+00:00", desc="")
+    blank.update(behaviorTypeName=None, creatorName=None, creatorEnName=None, recordActorName=None,
+                 recordActorEnName=None, subjectId=3, subjectName="化学", subjectEnName="")
+    r = mapping.behaviour("2026-10", TOTAL, [blank])["records"][0]
+    assert (r["name"], r["subject"], r["remark"], r["recorder"]) == ("Behaviour", "化学", None, None)
+
+
+def test_rows_without_an_id_or_a_time_are_dropped():
+    rows = [{"score": "+1", "recordTime": "2026-10-03T02:00:00.000+00:00"}, "x", None,
+            {**rec(1, "+1", None), "sortTime": None, "createDate": None},
+            rec(2, "+1", "2026-10-03T02:00:00.000+00:00")]
+    assert [r["id"] for r in mapping.behaviour("2026-10", TOTAL, rows)["records"]] == ["2"]
+
+
+def test_a_tier_and_a_record_with_the_same_number_stay_apart():
+    rows = [rec(5, None, "2026-10-04T02:00:00.000+00:00", type_=2, revoke=False, level=3),
+            rec(5, "-5", "2026-10-04T02:00:00.000+00:00")]
+    b = mapping.behaviour("2026-10", TOTAL, rows)
+    assert sorted((r["id"], r["kind"], r["level"]) for r in b["records"]) == [
+        ("5", "deduction", None), ("tier-5", "tier", 3)]
+
+
+def test_the_september_capture_maps_too():
+    detail = behaviour_fixture("behaviour_detail.json")["2026-09"]
+    rows = behaviour_fixture("behaviour_records.json")["2026-09"]["data"]
+    b = mapping.behaviour("2026-09", detail, rows)
+    assert (b["score"], b["bonus"], b["deduction"]) == (74, 5, -31)
+    assert len(b["records"]) == 19 and sum(r["kind"] == "tier" for r in b["records"]) == 2
+    assert (b["bonusCount"], b["deductionCount"]) == (3, 14)
