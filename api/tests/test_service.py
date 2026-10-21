@@ -1091,12 +1091,35 @@ def test_without_a_forwarded_address_the_socket_peer_counts(api, world):
     assert sign_in_from(api, "198.51.100.3").json()["ok"] is True
 
 
-def test_a_success_clears_the_addresss_count(api, world):
+def test_a_success_never_clears_the_addresss_count(api, world, auth):      # S106 owns; S207 is anyone
+    ip = "203.0.113.9"
     for i in range(MAX_FAILED_SIGN_INS_PER_ADDRESS - 1):
-        bad_sign_in(api, f"S3{i:02d}", ip="203.0.113.9")
-    assert sign_in_from(api, "203.0.113.9").json()["ok"] is True
-    for i in range(MAX_FAILED_SIGN_INS_PER_ADDRESS - 1):
-        assert bad_sign_in(api, f"S4{i:02d}", ip="203.0.113.9").status_code == 200
+        bad_sign_in(api, f"S3{i:02d}", ip=ip)
+    assert sign_in_from(api, ip).json()["ok"] is True                    # its own good sign-in ...
+    assert bad_sign_in(api, "S400", ip=ip).status_code == 200            # ... and the address's 10th refusal
+    assert sign_in_from(api, ip).status_code == 429                      # still held: only the window frees it
+    assert len(world.logins) == 1 + MAX_FAILED_SIGN_INS_PER_ADDRESS              # the owner's, then the refusals
+
+
+def test_others_refusals_from_a_shared_address_never_block_the_owners_id(api, world, auth):
+    ip = "198.51.100.50"                                                  # a school behind one NAT
+    for i in range(MAX_FAILED_SIGN_INS_PER_ADDRESS):
+        bad_sign_in(api, f"S3{i:02d}", ip=ip)
+    assert sign_in_from(api, ip).status_code == 429
+    assert sign_in_from(api, ip, "S106", "hunter2-xyz").json()["ok"] is True
+
+
+def test_refusals_on_the_owners_id_count_toward_their_address(api, world, auth):
+    ip = "198.51.100.51"
+    for _ in range(MAX_FAILED_SIGN_INS_PER_ADDRESS):
+        assert bad_sign_in(api, "S106", ip=ip).status_code == 200
+    assert sign_in_from(api, ip).status_code == 429 and world.peer.logins == []
+
+
+def test_the_service_sign_in_needs_an_address():
+    import inspect
+    from service.app import Service
+    assert inspect.signature(Service.sign_in).parameters["address"].default is inspect.Parameter.empty
 
 
 def test_the_failure_trackers_are_bounded(api, world, monkeypatch):

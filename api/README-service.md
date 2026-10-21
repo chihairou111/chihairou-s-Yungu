@@ -35,9 +35,11 @@ service (with `submitted-files.json` at the top) is moved into `users/<owner>/` 
   Before any Yungu call: a login id with 5 refused sign-ins in 15 min, or a client address with 10 refused
   sign-ins across all ids in 15 min, gets 429 "Too many attempts. Try again in a few minutes."; past 3
   sign-ins at once, 429 "Too many sign-ins right now. Try again in a moment.". Every Yungu refusal counts
-  for its id and its address; Yungu being down does not; a success clears both. The answer never depends
+  for its id and its address; Yungu being down does not; a success clears its id's count only (an address's
+  refusals just age out). The answer never depends
   on the password typed (nothing is compared against the saved one). The owner's login id (owner.json, or
-  the saved login's) has a threshold of 20 and a sign-in slot of its own. The address is `X-Real-IP`, set
+  the saved login's) has a threshold of 20 across all addresses, is not held by its address's count, and has
+  a sign-in slot of its own. The address is `X-Real-IP`, set
   by nginx and passed on by the dashboard's sign-in (trusted because the service listens on 127.0.0.1);
   without it, the socket peer.
 

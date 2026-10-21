@@ -388,11 +388,13 @@ class SignInGate:
     MAX_FAILED_SIGN_INS refusals in the window, or a client address with MAX_FAILED_SIGN_INS_PER_ADDRESS
     refusals across all ids, gets TooManyAttempts; past MAX_CONCURRENT_SIGN_INS at once,
     TooManyAttempts(SIGN_INS_BUSY), no waiting. Every Yungu refusal counts for its id and its address;
-    Yungu being down does not; a success clears both. The answer never depends on the password typed:
-    nothing is ever compared against a saved one.
+    Yungu being down does not. A success clears its id's count only: an address's refusals just age out
+    (so no account holder can reset its address's budget). The answer never depends on the password
+    typed: nothing is ever compared against a saved one.
 
-    The owner's login id has a higher threshold (MAX_FAILED_OWNER_SIGN_INS) and a sign-in slot of its
-    own, so strangers' failures on other ids, or three slow sign-ins, cannot keep it out."""
+    The owner's login id has a higher threshold (MAX_FAILED_OWNER_SIGN_INS, across all addresses), is not
+    held by its address's count (others behind the same NAT cannot block it; its own refusals still count
+    toward the address) and has a sign-in slot of its own."""
 
     def __init__(self, clock: Callable[[], float]):
         self._clock = clock
@@ -413,7 +415,7 @@ class SignInGate:
         with self._lock:
             now = self._clock()
             if (self._ids.count(key, now) >= limit
-                    or self._addresses.count(address, now) >= MAX_FAILED_SIGN_INS_PER_ADDRESS):
+                    or (not owners and self._addresses.count(address, now) >= MAX_FAILED_SIGN_INS_PER_ADDRESS)):
                 raise TooManyAttempts()
         if not slot.acquire(blocking=False):
             raise TooManyAttempts(SIGN_INS_BUSY)
@@ -428,8 +430,7 @@ class SignInGate:
         finally:
             slot.release()
         with self._lock:
-            self._ids.clear(key)
-            self._addresses.clear(address)
+            self._ids.clear(key)                 # never the address: its refusals only age out of the window
         return result
 
 
@@ -507,7 +508,7 @@ class Service:
             raise SignInAgain()
         return Student(self, user_id)
 
-    def sign_in(self, login_id: str, password: str, address: str = "") -> dict:
+    def sign_in(self, login_id: str, password: str, address: str) -> dict:
         self.yungu.sweep()
         user_id, user = self._gate.run(login_id, address, lambda: self.yungu.sign_in(login_id, password),
                                        owner_login=self.auth.owner_login())
