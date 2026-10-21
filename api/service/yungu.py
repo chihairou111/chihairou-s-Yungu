@@ -1,21 +1,25 @@
-"""The one Yungu session the service shares, with single-flight automatic re-login.
+"""One Yungu session per signed-in account (keyed by Yungu userId), each with its own locks.
 
-Every Yungu call goes through `Yungu.call(fn)`: fn gets the current client. If Yungu says the session
-is gone (`ifLogin: false`, `code: 1000`, or a redirect to the login page), the service signs in again
-with the saved password, once, under one lock (concurrent callers that saw the same expiry wait and
-reuse the new session), and retries fn once. If Yungu rejects the saved password, the password and
-every dashboard token are dropped and the caller gets PasswordChanged; nothing is retried.
+Every Yungu call goes through `Yungu.call(user_id, fn)`: fn gets that account's current client, never
+another's. If Yungu says the session is gone (`ifLogin: false`, `code: 1000`, or a redirect to the login
+page):
+* the owner's session signs in again with the saved password, once, under the owner's login lock
+  (concurrent callers that saw the same expiry wait and reuse the new session), and retries fn once. If
+  Yungu rejects the saved password, the password and the owner's tokens are dropped and the caller gets
+  PasswordChanged; nothing is retried.
+* any other account's session ends (its password was never kept): the caller gets SignInAgain, the
+  account's tokens stop working, and no login is attempted.
 Any other failure (network, 5xx, non-JSON, an unexpected payload) becomes Unavailable (HTTP 502).
 """
 import logging
 import threading
 import time
-from typing import Callable, TypeVar
+from typing import Callable, Dict, Optional, Tuple, TypeVar
 from urllib.parse import urlparse
 
 from yungu_task import YunguError, session_expired
 
-from .auth import Auth
+from .auth import Auth, Credentials
 
 log = logging.getLogger("yungu_lms.yungu")
 T = TypeVar("T")
@@ -23,7 +27,6 @@ T = TypeVar("T")
 SIGN_IN_AGAIN = "Sign in again."
 PASSWORD_CHANGED = "Sign in again — your Yungu password may have changed."
 UNREACHABLE = "Can't reach Yungu right now. Try again."
-ANOTHER_ACCOUNT = "This dashboard belongs to another account."
 WRONG_LOGIN = "Wrong student ID or password."
 LOGIN_RETRY_SECONDS = 30.0
 
@@ -145,22 +148,56 @@ def _unavailable(e: Exception, what: str) -> Unavailable:
 
 
 # ------------------------------------------------------------------ session
-class Yungu:
-    """`_lock` guards the fields and is never held across network I/O; `_login_lock` makes logins
-    single-flight. Every caller snapshots `_attempts` before it may need a login; when it gets the login
-    lock and an attempt has happened since, it shares that attempt's result (new client, or the same
-    failure) instead of trying again. After a failed attempt no new one is made for
+def _forget_password(client) -> None:
+    """A client keeps the password it was built with only to log in once; after that it goes."""
+    if hasattr(client, "password"):
+        client.password = None
+
+
+def _logged_in(client) -> Tuple[dict, int]:
+    """Log `client` in: (Yungu's user, userId). A wrong ID or password is SignInRefused, anything else
+    Unavailable. The client's copy of the password is dropped either way."""
+    try:
+        user = client.login()
+        user_id = client.user_id
+    except Exception as e:
+        if _rejected(e):
+            raise SignInRefused(str(_body(e).get("msg") or WRONG_LOGIN)) from None
+        raise _unavailable(e, "sign-in") from None
+    finally:
+        _forget_password(client)
+    return user or {}, user_id
+
+
+def _run(client, fn: Callable[[object], T], what: str) -> Tuple[bool, Optional[T]]:
+    """(True, fn(client)), or (False, None) when Yungu says the session is gone."""
+    try:
+        return True, fn(client)
+    except ServiceError:
+        raise
+    except Exception as e:
+        if not is_expired(e):
+            raise _unavailable(e, what) from None
+    return False, None
+
+
+class OwnerSession:
+    """The owner's session. `_lock` guards the fields and is never held across network I/O; `_login_lock`
+    makes logins single-flight. Every caller snapshots `_attempts` before it may need a login; when it
+    gets the login lock and an attempt has happened since, it shares that attempt's result (new client, or
+    the same failure) instead of trying again. After a failed attempt no new one is made for
     LOGIN_RETRY_SECONDS: requests in that window get 502 straight away, so an outage (or an answer we
     misread) can never turn into a login per request."""
 
-    def __init__(self, auth: Auth, client_factory: Callable[[str, str], object],
-                 clock: Callable[[], float] = time.monotonic):
+    def __init__(self, user_id: int, auth: Auth, client_factory: Callable[[str, str], object],
+                 clock: Callable[[], float]):
+        self.user_id = user_id
         self._auth = auth
         self._factory = client_factory
         self._clock = clock
         self._lock = threading.Lock()
         self._login_lock = threading.Lock()
-        self._client = None             # the shared YunguTask; replaced (not mutated) on every login
+        self._client = None             # the owner's YunguTask; replaced (not mutated) on every login
         self._attempts = 0              # logins tried (and sign-ins), for sharing results
         self._failure = None            # ServiceError class of the latest attempt, if it failed
         self._failed_at = 0.0
@@ -169,13 +206,9 @@ class Yungu:
 
     def call(self, fn: Callable[[object], T]) -> T:
         client, seen = self._session()
-        try:
-            return fn(client)
-        except ServiceError:
-            raise
-        except Exception as e:
-            if not is_expired(e):
-                raise _unavailable(e, "Yungu call") from None
+        done, value = _run(client, fn, "Yungu call")
+        if done:
+            return value
         log.info("Yungu session expired; signing in again")
         client, _ = self._login(seen)
         try:
@@ -185,25 +218,12 @@ class Yungu:
         except Exception as e:
             raise _unavailable(e, "Yungu call after re-login") from None
 
-    def sign_in(self, login_id: str, password: str) -> dict:
-        """Log in with a fresh client; on success it becomes the shared session. Returns Yungu's user."""
-        client = self._factory(login_id, password)
-        try:
-            user = client.login()
-            user_id = client.user_id
-        except Exception as e:
-            if _rejected(e):
-                raise SignInRefused(str(_body(e).get("msg") or WRONG_LOGIN)) from None
-            raise _unavailable(e, "sign-in") from None
-        owner = self._auth.owner()
-        if owner is not None and owner != user_id:
-            raise SignInRefused(ANOTHER_ACCOUNT)
+    def signed_in(self, client, creds: Credentials) -> None:
         with self._lock:
-            self._auth.remember(login_id, password, user_id)
+            self._auth.remember(creds.login_id, creds.password)
             self._install(client)
             self._epoch += 1
             self._rejected = False
-        return user or {}
 
     def sign_out(self) -> None:
         with self._lock:
@@ -212,6 +232,9 @@ class Yungu:
             self._failure = None
             self._epoch += 1
             self._rejected = False
+
+    def live(self) -> bool:
+        return True                     # the saved password (if any) is what decides; see _login
 
     # ------------------------------------------------------------- internals
     def _install(self, client) -> None:
@@ -242,11 +265,17 @@ class Yungu:
                     raise PasswordChanged() if self._rejected else SignInAgain()
                 epoch = self._epoch
             client, rejected, failure = self._factory(creds.login_id, creds.password), False, None
+            del creds
             try:
                 client.login()
+                if client.user_id != self.user_id:          # the saved login is someone else's: never use it
+                    log.warning("the saved login belongs to another account; not using it")
+                    failure = Unavailable
             except Exception as e:
                 rejected = _rejected(e)
                 failure = PasswordChanged if rejected else type(_unavailable(e, "re-login"))
+            finally:
+                _forget_password(client)
             with self._lock:
                 if epoch != self._epoch:                    # signed in or out meanwhile: drop this result
                     if self._client is None:
@@ -263,3 +292,99 @@ class Yungu:
                     self._client = None
                     self._rejected = True
                 raise failure()
+
+
+class MemorySession:
+    """Any other account's session: the client from its sign-in, kept in memory only. No password, so
+    no re-login: when Yungu says the session is gone it ends (`on_end`), and so does every request until
+    the account signs in again. `_lock` guards `_client` only; calls run outside it."""
+
+    def __init__(self, user_id: int, on_end: Callable[[int], None]):
+        self.user_id = user_id
+        self._on_end = on_end
+        self._lock = threading.Lock()
+        self._client = None
+
+    def call(self, fn: Callable[[object], T]) -> T:
+        with self._lock:
+            client = self._client
+        if client is None:
+            raise SignInAgain()
+        done, value = _run(client, fn, "Yungu call")
+        if done:
+            return value
+        log.info("Yungu session of an account without a saved password expired; it must sign in again")
+        self.end(client)
+        raise SignInAgain()
+
+    def signed_in(self, client) -> None:
+        with self._lock:
+            self._client = client
+
+    def end(self, client=None) -> None:
+        """Sign-out (any client), or expiry of `client` (only while it is still the current one: a newer
+        sign-in is left alone). Under the lock, so a sign-in cannot slip between the end and `on_end`."""
+        with self._lock:
+            if client is not None and client is not self._client:
+                return
+            self._client = None
+            self._on_end(self.user_id)
+
+    def sign_out(self) -> None:
+        self.end()
+
+    def live(self) -> bool:
+        with self._lock:
+            return self._client is not None
+
+
+class Yungu:
+    """Every account's session, by Yungu userId. `_lock` guards `_sessions` only (never network I/O), so
+    one account's slow login or call never holds up another's."""
+
+    def __init__(self, auth: Auth, client_factory: Callable[[str, str], object],
+                 clock: Callable[[], float] = time.monotonic, on_end: Callable[[int], None] = lambda uid: None):
+        self._auth = auth
+        self._factory = client_factory
+        self._clock = clock
+        self._on_end = on_end           # an account other than the owner ended (expiry or sign-out)
+        self._lock = threading.Lock()
+        self._sessions: Dict[int, object] = {}
+
+    def _get(self, user_id: int):
+        """The account's session; the owner's is made on first use (after a restart it logs in lazily
+        with the saved password), another account's only exists from its sign-in on."""
+        owner = self._auth.owner()
+        with self._lock:
+            session = self._sessions.get(user_id)
+            if session is None or isinstance(session, OwnerSession) != (user_id == owner):
+                if user_id == owner:
+                    session = OwnerSession(user_id, self._auth, self._factory, self._clock)
+                else:
+                    session = MemorySession(user_id, self._ended)
+                self._sessions[user_id] = session
+            return session
+
+    def _ended(self, user_id: int) -> None:
+        self._auth.drop_tokens(user_id)
+        self._on_end(user_id)
+
+    def call(self, user_id: int, fn: Callable[[object], T]) -> T:
+        return self._get(user_id).call(fn)
+
+    def live(self, user_id: int) -> bool:
+        return self._get(user_id).live()
+
+    def sign_in(self, login_id: str, password: str) -> Tuple[int, dict]:
+        """Log in with a fresh client (outside every lock); on success it becomes that account's session.
+        The password is saved only when the account is the owner. Returns (userId, Yungu's user)."""
+        client = self._factory(login_id, password)
+        user, user_id = _logged_in(client)
+        if self._auth.claim_owner(login_id, user_id):
+            self._get(user_id).signed_in(client, Credentials(login_id, password))
+        else:
+            self._get(user_id).signed_in(client)
+        return user_id, user
+
+    def sign_out(self, user_id: int) -> None:
+        self._get(user_id).sign_out()

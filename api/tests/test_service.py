@@ -2,6 +2,7 @@
 import asyncio
 import base64
 import functools
+import hashlib
 import json
 import math
 import os
@@ -23,10 +24,10 @@ from service.yungu import LOGIN_RETRY_SECONDS
 from yungu_task import BASE, SUBMITTED, TODO, UploadedFile, YunguError, YunguTask
 
 ME, OTHER = 106, 207
+B_PW = "b-Secret-207!"          # the second account's password: distinctive, so a scan can find any copy
 PW_CHANGED = "Sign in again — your Yungu password may have changed."
 SIGN_IN_AGAIN = "Sign in again."
 UNREACHABLE = "Can't reach Yungu right now. Try again."
-ANOTHER = "This dashboard belongs to another account."
 TOO_LARGE = "Files up to 50 MB."
 NOW = 1792800000.0          # Sat 2026-10-24 (China), in seconds
 
@@ -61,13 +62,17 @@ class Clock:
 
 
 class World:
-    """Yungu as the fakes see it: accounts, sessions, data and a call log."""
+    """Yungu as one account's fakes see it: accounts, sessions, data and a call log. The owner's
+    (S106) world is the `world` fixture; S207 has its own, `world.peer`, with different data, so every
+    call and every answer shows whose session it went through."""
 
     def __init__(self, load):
         self.accounts = {
             "S106": {"password": "hunter2-xyz", "user": {"userId": ME, "userName": "郑博纬", "eName": "Bruce Zheng"}},
-            "S207": {"password": "other", "user": {"userId": OTHER, "userName": "别人", "eName": "Someone"}},
+            "S207": {"password": B_PW, "user": {"userId": OTHER, "userName": "别人", "eName": "Someone"}},
         }
+        self.peer = None                # S207's world
+        self.login_hang = None          # an Event logins wait on (a hung Yungu login)
         self.logins = []                # loginIds of every login attempt
         self.sessions = 0               # serial of the latest successful login
         self.valid_from = 0             # sessions with a serial below this are expired
@@ -100,8 +105,31 @@ class World:
     def expire_all(self):
         self.valid_from = self.sessions + 1
 
+    def for_login(self, login_id):
+        return self.peer if login_id == "S207" and self.peer is not None else self
+
     def count(self, name):
         return sum(1 for c in self.calls if c[0] == name)
+
+
+def peer_world(load, accounts):
+    """S207's Yungu: the same assignment ids (ids are not secret and can be guessed), other data."""
+    w = World(load)
+    w.accounts = accounts
+    w.courses = [{**c, "courseName": "B " + c["courseName"]} for c in w.courses[:4]]
+    w.lists = {status: [{**t, "title": "B " + t["title"]} for t in rows[:3]] for status, rows in w.lists.items()}
+    w.week = [day[:1] for day in w.week]
+    for aid in w.mixed:
+        w.mixed[aid]["taskTitle"] = "B " + w.mixed[aid]["taskTitle"]
+    w.ach[93251]["fileModelList"] = [{**w.ach[93251]["fileModelList"][0], "fileId": 22220001, "fileName": "b.txt"}]
+    w.comments = {aid: [{**c, "userId": OTHER if c["userId"] == ME else c["userId"]} for c in rows]
+                  for aid, rows in w.comments.items()}
+    w.redirect = "https://yungu-common.oss-cn-hangzhou.aliyuncs.com/taskFile/b.pdf?Signature=y"
+    w.unread = 5
+    w.messages = [notice(8890000 - i, read=i > 1) for i in range(7)]
+    w.next_feedback = 500000
+    w.next_doc = 22230500
+    return w
 
 
 def notice(message_id, read=True, url=None):
@@ -112,12 +140,14 @@ def notice(message_id, read=True, url=None):
 
 class FakeClient:
     def __init__(self, world, login_id, password):
-        self.w, self.login_id, self.password = world, login_id, password
+        self.w, self.login_id, self.password = world.for_login(login_id), login_id, password
         self.serial = -1
         self.user = None
 
     def login(self):
         self.w.logins.append(self.login_id)
+        if self.w.login_hang is not None:
+            self.w.login_hang.wait(10)
         acct = self.w.accounts.get(self.login_id)
         if not acct or acct["password"] != self.password:
             raise YunguError("login failed: 账号或密码错误",
@@ -235,7 +265,9 @@ class FakeClient:
 
 @pytest.fixture
 def world(load):
-    return World(load)
+    w = World(load)
+    w.peer = peer_world(load, w.accounts)
+    return w
 
 
 @pytest.fixture
@@ -288,7 +320,7 @@ def test_sign_in_stores_0600_credentials_and_returns_a_token(api, state_dir, wor
     assert isinstance(body["token"], str) and len(body["token"]) >= 32
     assert mode(state_dir) == 0o700
     files = sorted(p.name for p in state_dir.iterdir())
-    assert files and all(mode(state_dir / f) == 0o600 for f in files)
+    assert files and all(mode(p) == (0o700 if p.is_dir() else 0o600) for p in state_dir.rglob("*"))
     creds = json.loads((state_dir / "credentials.json").read_text())
     assert creds == {"loginId": "S106", "password": "hunter2-xyz"}
     on_disk = "".join((state_dir / f).read_text() for f in files)
@@ -306,13 +338,6 @@ def test_blank_credentials_are_refused_without_calling_yungu(api, world):
     r = api.post("/session", json={"loginId": " ", "password": ""})
     assert r.json() == {"ok": False, "error": "Enter your student ID and password."}
     assert world.logins == []
-
-
-def test_second_account_is_refused_and_does_not_replace_the_owner(api, state_dir, world, auth):
-    r = api.post("/session", json={"loginId": "S207", "password": "other"})
-    assert r.json() == {"ok": False, "error": ANOTHER}
-    assert json.loads((state_dir / "credentials.json").read_text())["loginId"] == "S106"
-    assert api.get("/courses", headers=auth).status_code == 200        # owner's session still works
 
 
 def test_signing_in_again_with_a_new_password_replaces_the_stored_one(api, state_dir, world, auth):
@@ -378,7 +403,335 @@ def test_sign_out_deletes_credentials_and_tokens(make, api, world, state_dir, au
     assert api.get("/courses", headers=auth).json() == {"error": SIGN_IN_AGAIN}
     assert api.get("/courses", headers=second).status_code == 401
     assert make().get("/courses", headers=second).status_code == 401     # also after a restart
-    assert api.post("/session", json={"loginId": "S207", "password": "other"}).json()["error"] == ANOTHER
+    sign_in(api, "S207", B_PW)                     # another account signing in now does not become the owner
+    assert not (state_dir / "credentials.json").exists()
+    assert json.loads((state_dir / "owner.json").read_text())["userId"] == ME
+
+
+# --------------------------------------------------------- other accounts
+def b_sign_in(api):
+    return sign_in(api, "S207", B_PW)
+
+
+@pytest.fixture
+def b_auth(api, auth):                 # the owner (S106) signs in first, so S207 is not the owner
+    return b_sign_in(api)
+
+
+def state_text(state_dir):
+    return "".join(p.read_text(errors="replace") for p in state_dir.rglob("*") if p.is_file())
+
+
+def within(seconds, fn):
+    """fn() run on another thread; fails the test if it takes longer than `seconds`."""
+    out = []
+    t = threading.Thread(target=lambda: out.append(fn()))
+    t.start()
+    t.join(seconds)
+    assert out, f"still waiting after {seconds} s"
+    return out[0]
+
+
+def wait_until(condition):
+    for _ in range(1000):
+        if condition():
+            return
+        threading.Event().wait(0.01)
+    raise AssertionError("condition never held")
+
+
+def test_any_account_can_sign_in_and_its_password_is_never_written(api, state_dir, world, auth):
+    tokens_before = json.loads((state_dir / "tokens.json").read_text())
+    r = api.post("/session", json={"loginId": "S207", "password": B_PW})
+    body = r.json()
+    assert r.status_code == 200 and body["ok"] is True and body["displayName"] == "Someone"
+    assert B_PW not in state_text(state_dir) and body["token"] not in state_text(state_dir)
+    assert json.loads((state_dir / "credentials.json").read_text()) == {"loginId": "S106", "password": "hunter2-xyz"}
+    assert json.loads((state_dir / "owner.json").read_text())["userId"] == ME
+    assert json.loads((state_dir / "tokens.json").read_text()) == tokens_before      # S207's token: memory only
+    assert world.peer.logins == ["S207"] and world.logins == ["S106"]
+    assert api.get("/courses", headers=auth).status_code == 200                   # the owner still works
+    assert api.post("/session", json={"loginId": "S207", "password": "nope"}).json() == {
+        "ok": False, "error": "账号或密码错误"}
+
+
+def test_a_non_owners_writes_leave_its_password_off_disk(api, world, state_dir, auth, b_auth):
+    assert api.post("/assignments/93251/submit", json={"fileIds": ["22220001"]}, headers=b_auth).status_code == 200
+    assert api.post("/assignments/94929/submit", json={"fileIds": []}, headers=b_auth).status_code == 200
+    assert B_PW not in state_text(state_dir) and b_auth["Authorization"].split()[1] not in state_text(state_dir)
+    assert all(mode(p) == (0o700 if p.is_dir() else 0o600) for p in state_dir.rglob("*"))
+
+
+def reachable(root):
+    """Every object reachable from `root` through attributes, closures and containers, short of the fake
+    Yungu (World) itself, which of course knows every password."""
+    seen, stack, out = set(), [root], []
+    while stack:
+        o = stack.pop()
+        if id(o) in seen or isinstance(o, (World, type, type(os))):
+            continue
+        seen.add(id(o))
+        out.append(o)
+        if isinstance(o, dict):
+            stack.extend(o.keys())
+            stack.extend(o.values())
+        elif isinstance(o, (list, tuple, set, frozenset)):
+            stack.extend(o)
+        elif isinstance(o, (str, bytes, int, float)):
+            continue
+        else:
+            stack.extend(c.cell_contents for c in getattr(o, "__closure__", None) or () if c.cell_contents is not o)
+            if getattr(o, "__self__", None) is not None:
+                stack.append(o.__self__)
+            if hasattr(o, "__dict__"):
+                stack.extend(vars(o).values())
+    return out
+
+
+def test_a_non_owners_password_is_not_kept_in_memory_after_sign_in(api, world, auth, b_auth):
+    assert api.get("/courses", headers=b_auth).status_code == 200
+    seen = reachable(api.app.state.service)
+    assert any(isinstance(o, FakeClient) and o.login_id == "S207" for o in seen)     # the walk got there
+    assert [o for o in seen if isinstance(o, (str, bytes)) and B_PW in str(o)] == []
+
+
+READS = ["/todo", "/submitted", "/week?start=1792339200000", "/courses", "/assignments/93251", "/assignments/94929",
+         "/files/11128687?preview=1", "/notifications/count", "/notifications?read=true", "/notifications?read=false"]
+
+
+def test_two_accounts_read_their_own_data_on_every_endpoint(api, world, auth, b_auth):
+    for path in READS:
+        a = api.get(path, headers=auth)                      # the owner's answer is cached first
+        b = api.get(path, headers=b_auth)
+        assert a.status_code == b.status_code == 200, path
+        assert a.json() != b.json(), path
+        assert api.get(path, headers=auth).json() == a.json(), path
+    assert api.get("/courses", headers=b_auth).json() == mapping.courses(world.peer.courses)
+    assert api.get("/notifications/count", headers=b_auth).json() == {"unread": 5}
+    assert api.get("/files/11128687?preview=1", headers=b_auth).json() == {"redirect": world.peer.redirect}
+    d = api.get("/assignments/93251", headers=b_auth).json()
+    assert d["title"].startswith("B ") and [f["id"] for f in d["myFiles"]] == ["22220001"]
+    assert [c["mine"] for c in d["comments"]] == [False, True, False]
+    assert world.peer.logins == ["S207"] and world.logins == ["S106"]
+
+
+def test_concurrent_reads_from_two_accounts_get_their_own_data(api, world, auth, b_auth):
+    want = {"a": mapping.courses(world.courses), "b": mapping.courses(world.peer.courses)}
+    headers = {"a": {**auth, "X-Refresh": "1"}, "b": {**b_auth, "X-Refresh": "1"}}
+    pairs = []
+    threads = [threading.Thread(target=lambda w=w: pairs.append((w, api.get("/courses", headers=headers[w]).json())))
+               for w in ["a", "b"] * 6]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(20)
+    assert len(pairs) == 12 and all(body == want[w] for w, body in pairs)
+
+
+WRITES_BY_B = [
+    ("PUT", "/assignments/94929/draft", {"fileIds": ["11128687"]}, "save_draft"),
+    ("POST", "/assignments/93251/submit", {"fileIds": ["22220001"]}, "submit"),
+    ("POST", "/assignments/94929/submit", {"fileIds": []}, "mark_submitted"),
+    ("POST", "/assignments/94929/online-docs", {"title": "t", "content": '{"ops":[{"insert":"x\\n"}]}'},
+     "create_online_doc"),
+    ("PUT", "/assignments/94929/online-docs/11130500", {"title": "t", "content": '{"ops":[{"insert":"x\\n"}]}'},
+     "update_online_doc"),
+    ("POST", "/assignments/93251/comments", {"text": "B says hi"}, "add_comment"),
+    ("DELETE", "/assignments/93251/comments/327994", None, "delete_comment"),
+    ("POST", "/notifications/8890000/read", None, "mark_notification_read"),
+]
+
+
+@pytest.mark.parametrize("method,path,body,call", WRITES_BY_B)
+def test_a_write_goes_through_the_writers_session_and_clears_only_its_cache(api, world, auth, b_auth,
+                                                                             method, path, body, call):
+    api.get("/courses", headers=auth)
+    api.get("/courses", headers=b_auth)
+    r = api.request(method, path, json=body, headers=b_auth)
+    assert r.status_code < 300, r.text
+    assert world.peer.count(call) == 1 and world.count(call) == 0
+    api.get("/courses", headers=auth)
+    api.get("/courses", headers=b_auth)
+    assert world.count("courses") == 1 and world.peer.count("courses") == 2
+
+
+def test_an_upload_goes_through_the_uploaders_session(api, world, auth, b_auth):
+    r = api.post("/files", files={"file": ("b.txt", b"1", "text/plain")}, headers=b_auth)
+    assert r.status_code == 200 and world.peer.count("upload_bytes") == 1 and world.count("upload_bytes") == 0
+
+
+def test_refresh_clears_only_the_callers_cache(api, world, auth, b_auth):
+    api.get("/courses", headers=auth)
+    api.get("/courses", headers=b_auth)
+    assert api.post("/refresh", headers=b_auth).status_code == 204
+    api.get("/courses", headers=auth)
+    api.get("/courses", headers=b_auth)
+    assert world.count("courses") == 1 and world.peer.count("courses") == 2
+
+
+def test_ids_in_urls_never_reach_another_accounts_data(api, world, auth, b_auth):
+    made = api.post("/assignments/93251/comments", json={"text": "B's own"}, headers=b_auth).json()
+    r = api.delete(f"/assignments/93251/comments/{made['id']}", headers=auth)
+    assert r.status_code == 404 and r.json() == {"error": "Comment not found."}
+    assert world.count("delete_comment") == 0 and world.peer.count("delete_comment") == 0
+    assert made["id"] in [c["id"] for c in api.get("/assignments/93251", headers=b_auth).json()["comments"]]
+
+
+def test_hand_in_records_are_kept_per_account(api, world, state_dir, auth, b_auth):
+    assert api.post("/assignments/93251/submit", json={"fileIds": ["11128687"]}, headers=auth).status_code == 200
+    # S207's 93251: handed in on Yungu, then a draft opened holding document 22230777; S207 has no kept list.
+    world.peer.ach[93251].update(fileModelList=[online_doc(22230777)], ifEditStatus=True)
+    d = api.get("/assignments/93251", headers=b_auth).json()
+    assert d["submittedFileIds"] == ["22230777"]                      # every current file, not the owner's list
+    r = api.put("/assignments/93251/online-docs/22230777", json={"title": "t", "content": DELTA}, headers=b_auth)
+    assert r.status_code == 409 and world.peer.count("update_online_doc") == 0
+    assert api.post("/assignments/93251/submit", json={"fileIds": ["22230777"]}, headers=b_auth).status_code == 200
+    users = state_dir / "users"
+    assert json.loads((users / str(ME) / "submitted-files.json").read_text()) == {"93251": ["11128687"]}
+    assert json.loads((users / str(OTHER) / "submitted-files.json").read_text()) == {"93251": ["22230777"]}
+    world.ach[93251]["ifEditStatus"] = True
+    assert api.get("/assignments/93251", headers={**auth, "X-Refresh": "1"}).json()["submittedFileIds"] == ["11128687"]
+
+
+def test_one_accounts_mark_as_submitted_does_not_wait_for_anothers(api, world, auth, b_auth):
+    entered, release = threading.Event(), threading.Event()
+
+    def hold():
+        entered.set()
+        release.wait(10)
+    world.after_mark = hold
+    first = threading.Thread(target=lambda: api.post("/assignments/94929/submit", json={"fileIds": []}, headers=auth))
+    first.start()
+    try:
+        assert entered.wait(10)
+        r = within(3, lambda: api.post("/assignments/94929/submit", json={"fileIds": []}, headers=b_auth))
+        assert r.status_code == 200 and world.peer.count("mark_submitted") == 1
+    finally:
+        release.set()
+        first.join(10)
+
+
+def test_a_hung_sign_in_for_one_account_does_not_delay_another(api, world, auth):
+    world.peer.login_hang = threading.Event()
+    hung = threading.Thread(target=lambda: api.post("/session", json={"loginId": "S207", "password": B_PW}))
+    hung.start()
+    try:
+        wait_until(lambda: world.peer.logins == ["S207"])
+        world.expire_all()                                           # the owner needs a re-login, too
+        assert within(3, lambda: api.get("/courses", headers=auth)).status_code == 200
+        assert within(3, lambda: api.get("/todo", headers=auth)).status_code == 200
+        assert api.get("/courses", headers=within(3, lambda: sign_in(api))).status_code == 200
+    finally:
+        world.peer.login_hang.set()
+        hung.join(10)
+
+
+def test_a_hung_owner_relogin_does_not_delay_another_account(api, world, auth, b_auth):
+    world.login_hang = threading.Event()
+    world.expire_all()
+    hung = threading.Thread(target=lambda: api.get("/courses", headers=auth))
+    hung.start()
+    try:
+        wait_until(lambda: len(world.logins) == 2)
+        assert within(3, lambda: api.get("/courses", headers=b_auth)).status_code == 200
+        assert within(3, lambda: b_sign_in(api))
+    finally:
+        world.login_hang.set()
+        hung.join(10)
+
+
+def test_a_non_owner_whose_yungu_session_expires_must_sign_in_again(api, world, auth, b_auth):
+    world.peer.expire_all()
+    r = api.get("/courses", headers=b_auth)
+    assert r.status_code == 401 and r.json() == {"error": SIGN_IN_AGAIN}
+    assert world.peer.logins == ["S207"]                                   # no re-login attempt
+    calls = len(world.peer.calls)
+    for method, path, body in ENDPOINTS:
+        r = api.request(method, path, json=body, headers=b_auth)
+        assert r.status_code == 401 and r.json() == {"error": SIGN_IN_AGAIN}, path
+    assert len(world.peer.calls) == calls and world.peer.logins == ["S207"]
+    assert api.get("/courses", headers=auth).status_code == 200 and world.logins == ["S106"]
+    fresh = b_sign_in(api)
+    assert api.get("/courses", headers=fresh).status_code == 200
+    assert api.get("/courses", headers=b_auth).status_code == 401           # the ended token stays ended
+
+
+def test_a_non_owner_session_expiring_on_a_write_is_not_retried(api, world, auth, b_auth):
+    world.peer.expire_all()
+    r = api.post("/assignments/93251/submit", json={"fileIds": ["22220001"]}, headers=b_auth)
+    assert r.status_code == 401 and r.json() == {"error": SIGN_IN_AGAIN}
+    assert world.peer.count("submit") == 0 and world.peer.logins == ["S207"]
+
+
+def test_after_a_restart_a_non_owner_must_sign_in_again(make, world, auth, b_auth):
+    restarted = make()
+    r = restarted.get("/courses", headers=b_auth)
+    assert r.status_code == 401 and r.json() == {"error": SIGN_IN_AGAIN}
+    assert world.peer.logins == ["S207"] and world.peer.calls == []
+    assert restarted.get("/courses", headers=auth).status_code == 200      # the owner's token survives
+
+
+def test_signing_out_one_account_leaves_the_other_signed_in(api, world, state_dir, auth, b_auth):
+    assert api.delete("/session", headers=b_auth).status_code == 204
+    assert api.get("/courses", headers=b_auth).json() == {"error": SIGN_IN_AGAIN}
+    assert api.get("/courses", headers=auth).status_code == 200 and (state_dir / "credentials.json").exists()
+    b2 = b_sign_in(api)
+    assert api.delete("/session", headers=auth).status_code == 204          # now the owner signs out
+    assert not (state_dir / "credentials.json").exists()
+    assert api.get("/courses", headers=b2).status_code == 200
+    assert api.get("/courses", headers=auth).status_code == 401
+    assert world.logins == ["S106"] and world.peer.logins == ["S207", "S207"]
+
+
+def test_two_first_sign_ins_on_a_fresh_state_dir_make_exactly_one_owner(api, world, state_dir, monkeypatch):
+    both = threading.Barrier(2)
+    orig = FakeClient.login
+
+    def together(self):
+        user = orig(self)
+        both.wait(10)
+        return user
+    monkeypatch.setattr(FakeClient, "login", together)
+    answers = []
+    threads = [threading.Thread(target=lambda l=l, p=p: answers.append(
+        api.post("/session", json={"loginId": l, "password": p}).json()))
+        for l, p in (("S106", "hunter2-xyz"), ("S207", B_PW))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(20)
+    assert [a["ok"] for a in answers] == [True, True]
+    owner = json.loads((state_dir / "owner.json").read_text())
+    creds = json.loads((state_dir / "credentials.json").read_text())
+    assert creds["loginId"] == owner["loginId"]
+    assert creds["password"] == world.accounts[owner["loginId"]]["password"]
+    other = "S207" if owner["loginId"] == "S106" else "S106"
+    assert world.accounts[other]["password"] not in state_text(state_dir)
+
+
+def test_a_state_dir_from_before_multi_account_still_works(make, world, state_dir):
+    token = "token-from-the-single-owner-days-" + "x" * 16
+    state_dir.mkdir(mode=0o700)
+    old = {"credentials.json": {"loginId": "S106", "password": "hunter2-xyz"},
+           "owner.json": {"userId": ME, "loginId": "S106"},
+           "tokens.json": {"hashes": [hashlib.sha256(token.encode()).hexdigest()]},
+           "submitted-files.json": {"93251": ["11128687"]}}
+    for name, value in old.items():
+        (state_dir / name).write_text(json.dumps(value))
+        os.chmod(state_dir / name, 0o600)
+    world.ach[93251]["fileModelList"].append({**world.ach[93251]["fileModelList"][0], "fileId": 11128999})
+    world.ach[93251]["ifEditStatus"] = True                         # a draft open: only the kept list knows
+    auth = {"Authorization": f"Bearer {token}"}
+    api = make()
+    assert (state_dir / "submitted-files.json").exists() and not (state_dir / "users").exists()   # nothing yet
+    d = api.get("/assignments/93251", headers=auth)
+    assert d.status_code == 200 and d.json()["submittedFileIds"] == ["11128687"]
+    assert world.logins == ["S106"]                                  # the saved password, no new sign-in
+    moved = state_dir / "users" / str(ME) / "submitted-files.json"
+    assert not (state_dir / "submitted-files.json").exists() and json.loads(moved.read_text()) == old[
+        "submitted-files.json"]
+    assert all(mode(p) == (0o700 if p.is_dir() else 0o600) for p in state_dir.rglob("*"))
+    assert make().get("/assignments/93251", headers=auth).json()["submittedFileIds"] == ["11128687"]
 
 
 # ------------------------------------------------------------------ reads
@@ -1129,8 +1482,27 @@ def test_submitted_file_ids_are_kept_per_assignment_across_restarts(make, api, w
     world.ach[93251]["ifEditStatus"] = True
     d = api.get("/assignments/93251", headers=auth).json()
     assert d["submittedFileIds"] == ["11128687"] and [f["id"] for f in d["myFiles"]] == ["11128687", "11128999"]
-    assert mode(state_dir / "submitted-files.json") == 0o600
+    assert mode(state_dir / "users" / str(ME) / "submitted-files.json") == 0o600
     assert make().get("/assignments/93251", headers=auth).json()["submittedFileIds"] == ["11128687"]
+
+
+def test_an_old_record_written_after_the_move_is_merged_in(make, world, state_dir, auth):
+    # The single-account service ran again after the move (a rollback): its top-level record is newer.
+    api = make()
+    api.post("/assignments/93251/submit", json={"fileIds": ["11128687"]}, headers=auth)
+    api.post("/assignments/94929/submit", json={"fileIds": ["11128608"]}, headers=auth)
+    (state_dir / "submitted-files.json").write_text(json.dumps({"94929": ["11130300"], "95000": ["1"]}))
+    os.chmod(state_dir / "submitted-files.json", 0o600)
+    world.ach[94929].update(achievementStatus=4, ifEditStatus=True)
+    assert make().get("/assignments/94929", headers=auth).json()["submittedFileIds"] == ["11130300"]
+    assert not (state_dir / "submitted-files.json").exists()
+    kept = json.loads((state_dir / "users" / str(ME) / "submitted-files.json").read_text())
+    assert kept == {"93251": ["11128687"], "94929": ["11130300"], "95000": ["1"]}
+
+
+def test_importing_the_service_never_points_at_the_live_state_dir():
+    import service.app
+    assert str(service.app.app.state.service.auth._state.path) != "/var/lib/yungu-lms"
 
 
 def test_without_a_kept_list_submitted_file_ids_fall_back_to_the_current_files(api, world, auth):
@@ -1638,8 +2010,14 @@ def test_secrets_never_reach_the_logs_or_responses(api, world, auth, caplog):
     world.accounts["S106"]["password"] = "pw2"
     world.expire_all()
     api.get("/submitted", headers=auth)
-    for secret in ("hunter2-xyz", "pw2", "ST-secret-ticket", token):
+    b_auth = b_sign_in(api)
+    api.get("/courses", headers=b_auth)
+    world.peer.expire_all()
+    api.get("/todo", headers=b_auth)
+    api.delete("/session", headers=b_sign_in(api))
+    for secret in ("hunter2-xyz", "pw2", "ST-secret-ticket", token, B_PW, b_auth["Authorization"].split()[1], "S207"):
         assert secret not in caplog.text
+    assert not re.search(r"\b207\b", caplog.text)                # no student id in the log
     assert "ticket" not in body
 
 

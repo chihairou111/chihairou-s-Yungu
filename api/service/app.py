@@ -1,8 +1,11 @@
 """HTTP routes mirroring the dashboard's data seam (frontend/src/lib/data/index.ts, YunguData).
 
 JSON everywhere; `Authorization: Bearer <token>` on everything except POST /session; errors are
-`{"error": str}`. Reads are cached 60 s per endpoint + params (`X-Refresh: 1` bypasses); any write
-(draft, submit, comment, online document, notification read) or POST /refresh clears the cache; an upload changes no read and leaves it. Run: `uvicorn service.app:app --host 127.0.0.1 --port 8100`
+`{"error": str}`. Any Yungu student account can sign in; a token belongs to one account, and everything a
+request does (Yungu calls, the read cache, the hand-in record, locks) is that account's alone.
+Reads are cached 60 s per account + endpoint + params (`X-Refresh: 1` bypasses); any write (draft,
+submit, comment, online document, notification read) or POST /refresh clears that account's cache; an
+upload changes no read and leaves it. Run: `uvicorn service.app:app --host 127.0.0.1 --port 8100`
 from api/, with YUNGU_STATE_DIR (default /var/lib/yungu-lms).
 """
 import json
@@ -13,7 +16,7 @@ import re
 import threading
 import time
 from datetime import datetime
-from typing import Callable, List, Optional, TypeVar
+from typing import Callable, Dict, List, Optional, TypeVar
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
@@ -284,34 +287,81 @@ def _limited(receive, limit: int):
 
 
 # ----------------------------------------------------------------- service
+class Account:
+    """One account's own state: its read cache, its hand-in record and its Mark-as-submitted lock."""
+
+    def __init__(self, user_id: int, state: StateDir, monotonic: Callable[[], float], owner: bool):
+        self.user_id = user_id
+        self.cache = ReadCache(clock=monotonic)
+        self.submitted = SubmittedFiles(state, user_id, migrate=owner)
+        self.marking = threading.Lock()        # one Mark as submitted at a time (see mark_submitted)
+
+
 class Service:
-    """What the routes do: Yungu calls through the shared session, mapping and the read cache."""
+    """Sign-in and the accounts: which account a token belongs to, and that account's state."""
 
     def __init__(self, state_dir: str, client_factory, now: Callable[[], float], monotonic: Callable[[], float]):
-        state = StateDir(state_dir)
-        self.auth = Auth(state)
-        self.yungu = Yungu(self.auth, client_factory, clock=monotonic)
-        self.cache = ReadCache(clock=monotonic)
-        self.submitted = SubmittedFiles(state)
-        self._now = now
-        self._marking = threading.Lock()       # one Mark as submitted at a time (see mark_submitted)
+        self._state = StateDir(state_dir)
+        self.auth = Auth(self._state)
+        self.yungu = Yungu(self.auth, client_factory, clock=monotonic, on_end=self._ended)
+        self._now, self._monotonic = now, monotonic
+        self._lock = threading.Lock()          # guards _accounts only
+        self._accounts: Dict[int, Account] = {}     # made on first use: importing the app touches nothing
+
+    def account(self, user_id: int) -> Account:
+        owner = self.auth.owner()
+        with self._lock:
+            found = self._accounts.get(user_id)
+            if found is None:
+                found = self._accounts[user_id] = Account(user_id, self._state, self._monotonic,
+                                                          owner=user_id == owner)
+            return found
+
+    def _ended(self, user_id: int) -> None:
+        """An account other than the owner signed out or lost its Yungu session: drop its cached reads.
+        The Account itself stays (a few bytes), so its hand-in record keeps one lock."""
+        with self._lock:
+            found = self._accounts.get(user_id)
+        if found is not None:
+            found.cache.clear()
+
+    def student(self, token: Optional[str]) -> "Student":
+        """The account a token belongs to; SignInAgain when none does, or its Yungu session is gone."""
+        user_id = self.auth.user_for(token)
+        if user_id is None or not self.yungu.live(user_id):
+            raise SignInAgain()
+        return Student(self, user_id)
+
+    def sign_in(self, login_id: str, password: str) -> dict:
+        user_id, user = self.yungu.sign_in(login_id, password)
+        self.account(user_id).cache.clear()
+        return {"ok": True, "displayName": _display_name(user, login_id), "token": self.auth.issue_token(user_id)}
+
+
+class Student:
+    """What the routes do for one account: Yungu calls through its session, mapping, its read cache."""
+
+    def __init__(self, service: Service, user_id: int):
+        account = service.account(user_id)
+        self.user_id = user_id
+        self.cache, self.submitted, self._marking = account.cache, account.submitted, account.marking
+        self._yungu = service.yungu
+        self._now = service._now
+
+    def _call(self, fn: Callable[[object], T]) -> T:
+        return self._yungu.call(self.user_id, fn)
 
     def now_ms(self) -> int:
         return int(self._now() * 1000)
 
     # ------------------------------------------------------------ session
-    def sign_in(self, login_id: str, password: str) -> dict:
-        user = self.yungu.sign_in(login_id, password)
-        self.cache.clear()
-        return {"ok": True, "displayName": _display_name(user, login_id), "token": self.auth.issue_token()}
-
     def sign_out(self) -> None:
-        self.yungu.sign_out()
+        self._yungu.sign_out(self.user_id)
         self.cache.clear()
 
     # -------------------------------------------------------------- reads
     def _assignments(self, status: int) -> List[dict]:
-        rows = self.yungu.call(lambda c: list(c.iter_tasks(status, page_size=LIST_PAGE_SIZE)))
+        rows = self._call(lambda c: list(c.iter_tasks(status, page_size=LIST_PAGE_SIZE)))
         now, seen, out = self.now_ms(), set(), []
         for raw in rows:                  # items can shift between pages: keep the first of each id
             if raw["taskPublishId"] not in seen:
@@ -334,26 +384,26 @@ class Service:
         monday = _china_monday(start)
 
         def compute():
-            days = self.yungu.call(lambda c: c.calendar_week(start_ms=monday))
+            days = self._call(lambda c: c.calendar_week(start_ms=monday))
             events = [mapping.class_event(e) for day in days or [] for e in day or []]
             return sorted(events, key=lambda e: e["start"])
         return self.cache.get(("week", monday), compute, refresh)
 
     def courses(self, refresh=False) -> List[dict]:
-        return self.cache.get(("courses",), lambda: mapping.courses(self.yungu.call(lambda c: c.courses())), refresh)
+        return self.cache.get(("courses",), lambda: mapping.courses(self._call(lambda c: c.courses())), refresh)
 
     def detail(self, assignment_id: int, refresh=False) -> dict:
         return self.cache.get(("detail", assignment_id), lambda: self._detail(assignment_id), refresh)
 
     def _detail(self, aid: int) -> dict:
-        mixed = self.yungu.call(lambda c: _known(lambda: c.task_detail(aid)))
+        mixed = self._call(lambda c: _known(lambda: c.task_detail(aid)))
         if not isinstance(mixed, dict) or not mixed.get("taskPublishId"):
             raise NotFound()
-        achievement = self.yungu.call(lambda c: _known(lambda: c.achievement(aid)))
+        achievement = self._call(lambda c: _known(lambda: c.achievement(aid)))
         if not isinstance(achievement, dict):
             raise NotFound()
-        comments = self.yungu.call(lambda c: c.comments(aid))
-        me = self.yungu.call(lambda c: c.user_id)
+        comments = self._call(lambda c: c.comments(aid))
+        me = self._call(lambda c: c.user_id)
         listed = self._listed(aid, achievement.get("achievementStatus") == mapping.ACHIEVEMENT_SUBMITTED)
         self._note_hand_in(aid, mixed, achievement)
         return mapping.detail(mixed, achievement, comments, me, self.submitted.get(aid), listed=listed)
@@ -372,13 +422,13 @@ class Service:
 
     def unread_count(self, refresh=False) -> dict:
         return self.cache.get(("notifications", "count"),
-                              lambda: {"unread": self.yungu.call(lambda c: c.unread_count())}, refresh)
+                              lambda: {"unread": self._call(lambda c: c.unread_count())}, refresh)
 
     def notifications(self, read: bool, page: int, size: int, refresh=False) -> dict:
         """One page of notifications, newest first. `hasMore` as Yungu's client decides it (what came so
         far is short of the total), and never after an empty page."""
         def compute():
-            content = self.yungu.call(lambda c: c.notifications(read, page, size)) or {}
+            content = self._call(lambda c: c.notifications(read, page, size)) or {}
             rows = [r for r in content.get("data") or [] if isinstance(r, dict) and r.get("messageId") is not None]
             total = content.get("total") if isinstance(content.get("total"), int) else 0
             return {"items": [mapping.notification(r) for r in rows],
@@ -389,14 +439,14 @@ class Service:
         """Yungu's answer was never observed before this shipped: anything but a success envelope is a 502,
         and its shape (types only) is logged so the first real press shows what it was."""
         try:
-            answer = self.yungu.call(lambda c: c.mark_notification_read(message_id))
+            answer = self._call(lambda c: c.mark_notification_read(message_id))
         finally:
             self.cache.clear()
         log.info("Mark read: Yungu answered %s", _shape_text(answer))
 
     def file_redirect(self, file_id: int, preview: bool, refresh=False) -> dict:
         def compute():
-            return {"redirect": self.yungu.call(lambda c: _redirect(c, file_id, preview))}
+            return {"redirect": self._call(lambda c: _redirect(c, file_id, preview))}
         return self.cache.get(("file", file_id, preview), compute, refresh)
 
     # ------------------------------------------------------------- writes
@@ -408,7 +458,7 @@ class Service:
 
     def upload(self, name: str, mime: str, data: bytes) -> dict:
         # No cache clear: an upload attaches the file to nothing, so no read changes until a draft save.
-        up = self.yungu.call(lambda c: c.upload_bytes(name, mime, data))
+        up = self._call(lambda c: c.upload_bytes(name, mime, data))
         ref = mapping.file_ref({**(up.raw or {}), "fileId": up.file_id, "fileName": name, "fileSizeByte": len(data)})
         if not ref["createdAt"]:
             ref["createdAt"] = self.now_ms()
@@ -416,7 +466,7 @@ class Service:
 
     def save_draft(self, aid: int, ids: List[int]) -> None:
         try:
-            self.yungu.call(lambda c: c.save_draft(self._relation(c, aid), ids))
+            self._call(lambda c: c.save_draft(self._relation(c, aid), ids))
         finally:
             self.cache.clear()
 
@@ -428,7 +478,7 @@ class Service:
             c.save_draft(self._relation(c, aid), ids)        # the web UI saves the list, then submits it
             c.submit(aid, ids)                               # first submit vs update, by achievementId
         try:
-            self.yungu.call(go)
+            self._call(go)
         finally:
             self.cache.clear()
         self.submitted.put(aid, [str(i) for i in ids])
@@ -436,10 +486,10 @@ class Service:
 
     def _fresh(self, aid: int):
         """(mixed, achievement) straight from Yungu, never the cache: they decide a write."""
-        achievement = self.yungu.call(lambda c: _known(lambda: c.achievement(aid)))
+        achievement = self._call(lambda c: _known(lambda: c.achievement(aid)))
         if not isinstance(achievement, dict):
             raise NotFound()
-        mixed = self.yungu.call(lambda c: _known(lambda: c.task_detail(aid)))
+        mixed = self._call(lambda c: _known(lambda: c.task_detail(aid)))
         if not isinstance(mixed, dict) or not mixed.get("taskPublishId"):
             raise NotFound()
         self._note_hand_in(aid, mixed, achievement)
@@ -476,10 +526,10 @@ class Service:
         # Kept before sending: should Yungu apply the mark but its answer be lost, the next
         # press then knows the hand-in is empty (see _already_marked).
         self.submitted.put(aid, [])
-        answer = self.yungu.call(lambda c: c.mark_submitted(task_id))
+        answer = self._call(lambda c: c.mark_submitted(task_id))
         log.info("Mark as submitted: Yungu answered %s", _shape_text(answer))   # types only (NOTES.md 8)
         try:
-            after = self.yungu.call(lambda c: c.achievement(aid))
+            after = self._call(lambda c: c.achievement(aid))
         except ServiceError:
             raise NotConfirmed() from None
         if not isinstance(after, dict) or not mapping.is_submitted(mixed, after):
@@ -517,7 +567,7 @@ class Service:
         """A new online document (new fileId), attached to nothing until a draft save or submit."""
         title = _checked_doc(title, content)
         try:
-            made = self.yungu.call(lambda c: _doc_write(lambda: c.create_online_doc(title, content), content))
+            made = self._call(lambda c: _doc_write(lambda: c.create_online_doc(title, content), content))
         finally:
             self.cache.clear()
         return self._doc_ref(made, title, content)
@@ -530,7 +580,7 @@ class Service:
             if str(file_id) in mapping.handed_in_ids(mixed, achievement, self.submitted.get(aid)):
                 raise Conflict(HANDED_IN_DOC)
             achievement_id = achievement.get("achievementId")
-            made = self.yungu.call(lambda c: _doc_write(
+            made = self._call(lambda c: _doc_write(
                 lambda: c.update_online_doc(file_id, title, content, achievement_id), content))
         finally:
             self.cache.clear()
@@ -538,9 +588,9 @@ class Service:
 
     def add_comment(self, aid: int, text: str) -> dict:
         try:
-            self.yungu.call(lambda c: _known(lambda: c.add_comment(aid, text)))   # looks up the id first
-            rows = self.yungu.call(lambda c: c.comments(aid))
-            me = self.yungu.call(lambda c: c.user_id)
+            self._call(lambda c: _known(lambda: c.add_comment(aid, text)))   # looks up the id first
+            rows = self._call(lambda c: c.comments(aid))
+            me = self._call(lambda c: c.user_id)
         finally:
             self.cache.clear()
         # saveCommentary returns nothing: the new comment is my newest one with this text (or, should
@@ -555,11 +605,11 @@ class Service:
         """Only the student's own comments on this assignment; anything else is left alone and is a 404
         "Comment not found." (an unknown assignment stays the plain 404 "Not found.")."""
         try:
-            rows = self.yungu.call(lambda c: _known(lambda: c.comments(aid)))
-            me = self.yungu.call(lambda c: c.user_id)
+            rows = self._call(lambda c: _known(lambda: c.comments(aid)))
+            me = self._call(lambda c: c.user_id)
             if not any(str(r.get("feedbackId")) == comment_id and r.get("userId") == me for r in rows or []):
                 raise NotFound(COMMENT_NOT_FOUND)
-            self.yungu.call(lambda c: c.delete_comment(int(comment_id)))
+            self._call(lambda c: c.delete_comment(int(comment_id)))
         finally:
             self.cache.clear()
 
@@ -586,15 +636,16 @@ def create_app(state_dir: Optional[str] = None, client_factory=yungu_client,
     async def validation_error(request, exc):
         return JSONResponse({"error": "Bad request."}, status_code=400)
 
-    def require_token(request: Request) -> None:
+    def student(request: Request) -> Student:
         scheme, _, token = request.headers.get("authorization", "").partition(" ")
-        if scheme.lower() != "bearer" or not service.auth.valid(token.strip()):
+        if scheme.lower() != "bearer":
             raise SignInAgain()
+        return service.student(token.strip())
 
     def refresh(request: Request) -> bool:
         return request.headers.get("x-refresh") == "1"
 
-    authed = [Depends(require_token)]
+    Me = Depends(student)
 
     # ------------------------------------------------------------ session
     @app.post("/session")
@@ -608,65 +659,65 @@ def create_app(state_dir: Optional[str] = None, client_factory=yungu_client,
         except Unavailable:
             return JSONResponse({"ok": False, "error": UNREACHABLE}, status_code=502)
 
-    @app.delete("/session", status_code=204, dependencies=authed)
-    def sign_out():
-        service.sign_out()
+    @app.delete("/session", status_code=204)
+    def sign_out(me: Student = Me):
+        me.sign_out()
         return Response(status_code=204)
 
-    @app.post("/refresh", status_code=204, dependencies=authed)
-    def clear_cache():
-        service.cache.clear()
+    @app.post("/refresh", status_code=204)
+    def clear_cache(me: Student = Me):
+        me.cache.clear()
         return Response(status_code=204)
 
     # -------------------------------------------------------------- reads
-    @app.get("/todo", dependencies=authed)
-    def todo(request: Request):
-        return service.todo(refresh(request))
+    @app.get("/todo")
+    def todo(request: Request, me: Student = Me):
+        return me.todo(refresh(request))
 
-    @app.get("/submitted", dependencies=authed)
-    def submitted(request: Request):
-        return service.submitted_list(refresh(request))
+    @app.get("/submitted")
+    def submitted(request: Request, me: Student = Me):
+        return me.submitted_list(refresh(request))
 
-    @app.get("/week", dependencies=authed)
-    def week(request: Request, start: int):
-        return service.week(start, refresh(request))
+    @app.get("/week")
+    def week(request: Request, start: int, me: Student = Me):
+        return me.week(start, refresh(request))
 
-    @app.get("/courses", dependencies=authed)
-    def courses(request: Request):
-        return service.courses(refresh(request))
+    @app.get("/courses")
+    def courses(request: Request, me: Student = Me):
+        return me.courses(refresh(request))
 
-    @app.get("/assignments/{assignment_id}", dependencies=authed)
-    def detail(request: Request, assignment_id: int):
-        return service.detail(assignment_id, refresh(request))
+    @app.get("/assignments/{assignment_id}")
+    def detail(request: Request, assignment_id: int, me: Student = Me):
+        return me.detail(assignment_id, refresh(request))
 
-    @app.get("/notifications/count", dependencies=authed)
-    def unread_count(request: Request):
-        return service.unread_count(refresh(request))
+    @app.get("/notifications/count")
+    def unread_count(request: Request, me: Student = Me):
+        return me.unread_count(refresh(request))
 
-    @app.get("/notifications", dependencies=authed)
-    def notifications(request: Request, read: str = "", page: str = "1", size: str = "20"):
+    @app.get("/notifications")
+    def notifications(request: Request, read: str = "", page: str = "1", size: str = "20", me: Student = Me):
         if read not in ("true", "false") or not ASCII_ID.fullmatch(page) or not ASCII_ID.fullmatch(size):
             raise BadRequest()
         if int(page) < 1 or not 1 <= int(size) <= NOTIFICATION_PAGE_MAX:
             raise BadRequest()
-        return service.notifications(read == "true", int(page), int(size), refresh(request))
+        return me.notifications(read == "true", int(page), int(size), refresh(request))
 
-    @app.post("/notifications/{message_id}/read", status_code=204, dependencies=authed)
-    def mark_notification_read(message_id: str):
+    @app.post("/notifications/{message_id}/read", status_code=204)
+    def mark_notification_read(message_id: str, me: Student = Me):
         if not ASCII_ID.fullmatch(message_id):
             raise NotFound()
-        service.mark_notification_read(int(message_id))
+        me.mark_notification_read(int(message_id))
         return Response(status_code=204)
 
-    @app.get("/files/{file_id}", dependencies=authed)
-    def get_file(request: Request, file_id: str, preview: str = "0"):
+    @app.get("/files/{file_id}")
+    def get_file(request: Request, file_id: str, preview: str = "0", me: Student = Me):
         if not file_id.isdigit():
             raise NotFound()
-        return service.file_redirect(int(file_id), preview == "1", refresh(request))
+        return me.file_redirect(int(file_id), preview == "1", refresh(request))
 
     # ------------------------------------------------------------- writes
-    @app.post("/files", dependencies=authed)
-    async def upload(request: Request):
+    @app.post("/files")
+    async def upload(request: Request, me: Student = Me):
         declared = request.headers.get("content-length")
         if declared is not None:
             if not declared.isdigit():
@@ -689,36 +740,36 @@ def create_app(state_dir: Optional[str] = None, client_factory=yungu_client,
             mime = part.content_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
         finally:
             await form.close()
-        return await run_in_threadpool(service.upload, name, mime, data)
+        return await run_in_threadpool(me.upload, name, mime, data)
 
-    @app.put("/assignments/{assignment_id}/draft", status_code=204, dependencies=authed)
-    def save_draft(assignment_id: int, body: FileIdsBody):
-        service.save_draft(assignment_id, _file_ids(body.fileIds))
+    @app.put("/assignments/{assignment_id}/draft", status_code=204)
+    def save_draft(assignment_id: int, body: FileIdsBody, me: Student = Me):
+        me.save_draft(assignment_id, _file_ids(body.fileIds))
         return Response(status_code=204)
 
-    @app.post("/assignments/{assignment_id}/submit", dependencies=authed)
-    def submit(assignment_id: int, body: FileIdsBody):
-        return service.submit(assignment_id, _file_ids(body.fileIds))
+    @app.post("/assignments/{assignment_id}/submit")
+    def submit(assignment_id: int, body: FileIdsBody, me: Student = Me):
+        return me.submit(assignment_id, _file_ids(body.fileIds))
 
-    @app.post("/assignments/{assignment_id}/online-docs", dependencies=authed)
-    def create_doc(assignment_id: int, body: OnlineDocBody):
-        return service.create_doc(body.title, body.content)
+    @app.post("/assignments/{assignment_id}/online-docs")
+    def create_doc(assignment_id: int, body: OnlineDocBody, me: Student = Me):
+        return me.create_doc(body.title, body.content)
 
-    @app.put("/assignments/{assignment_id}/online-docs/{file_id}", dependencies=authed)
-    def update_doc(assignment_id: int, file_id: str, body: OnlineDocBody):
+    @app.put("/assignments/{assignment_id}/online-docs/{file_id}")
+    def update_doc(assignment_id: int, file_id: str, body: OnlineDocBody, me: Student = Me):
         if not ASCII_ID.fullmatch(file_id):
             raise NotFound()
-        return service.update_doc(assignment_id, int(file_id), body.title, body.content)
+        return me.update_doc(assignment_id, int(file_id), body.title, body.content)
 
-    @app.post("/assignments/{assignment_id}/comments", dependencies=authed)
-    def add_comment(assignment_id: int, body: TextBody):
+    @app.post("/assignments/{assignment_id}/comments")
+    def add_comment(assignment_id: int, body: TextBody, me: Student = Me):
         if not body.text.strip():
             raise BadRequest("Write a comment first.")
-        return service.add_comment(assignment_id, body.text)
+        return me.add_comment(assignment_id, body.text)
 
-    @app.delete("/assignments/{assignment_id}/comments/{comment_id}", status_code=204, dependencies=authed)
-    def delete_comment(assignment_id: int, comment_id: str):
-        service.delete_comment(assignment_id, comment_id)
+    @app.delete("/assignments/{assignment_id}/comments/{comment_id}", status_code=204)
+    def delete_comment(assignment_id: int, comment_id: str, me: Student = Me):
+        me.delete_comment(assignment_id, comment_id)
         return Response(status_code=204)
 
     return app
