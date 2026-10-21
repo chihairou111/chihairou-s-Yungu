@@ -1,4 +1,3 @@
-import type { Metadata } from 'next';
 import { io } from 'next/cache';
 import { cookies } from 'next/headers';
 import Box from '@mui/material/Box';
@@ -6,8 +5,6 @@ import Typography from '@mui/material/Typography';
 import LoginCard from '@/components/LoginCard';
 import LoginForm from '@/components/LoginForm';
 import { SIGN_IN_NOTICE_COOKIE, signInNotice } from '@/lib/session-cookie';
-
-export const metadata: Metadata = { title: 'Sign in' };
 
 // The sign-in notice comes from a request cookie, so the page renders per request (reading a cookie is instant).
 export const instant = false;

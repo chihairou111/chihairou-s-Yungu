@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { AppRouterCacheProvider } from "@mui/material-nextjs/v16-appRouter";
 import ThemeRegistry from "@/components/ThemeRegistry";
 import "./globals.css";
+import { SITE_NAME } from '@/lib/site';
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -15,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: { default: "Yungu", template: "%s · Yungu" },
+  title: SITE_NAME,
   description: "Assignments and timetable from task.yungu.org.",
 };
 

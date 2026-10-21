@@ -1,12 +1,9 @@
-import type { Metadata } from 'next';
 import { io } from 'next/cache';
 import ServiceUnavailable from '@/components/ServiceUnavailable';
 import WeekCalendar from '@/components/WeekCalendar';
 import { YunguUnavailable, data } from '@/lib/data';
 import { loadPageData } from '@/lib/page-data';
 import { parseWeekParam } from '@/lib/time';
-
-export const metadata: Metadata = { title: 'Calendar' };
 
 /** Reads the clock once per request so "today" and the default week agree. */
 async function loadWeek(weekParam: string | undefined) {

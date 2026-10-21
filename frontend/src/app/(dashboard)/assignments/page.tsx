@@ -1,11 +1,8 @@
-import type { Metadata } from 'next';
 import { io } from 'next/cache';
 import AssignmentsView from '@/components/AssignmentsView';
 import ServiceUnavailable from '@/components/ServiceUnavailable';
 import { YunguUnavailable, data } from '@/lib/data';
 import { loadPageData } from '@/lib/page-data';
-
-export const metadata: Metadata = { title: 'Assignments' };
 
 /** Reads the clock once per request (kept out of the static shell) so every card agrees on `now`. */
 async function loadAssignments() {

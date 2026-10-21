@@ -21,6 +21,7 @@ import { EASE_OUT } from './detail/motion';
 import { openTaskHere } from './detail/useTaskParam';
 import { fetchNotifications, fetchUnreadCount, markNotificationRead } from './notifications-api';
 import { useOnRefresh } from './RefreshContext';
+import { useTitleCount } from './useTitleCount';
 
 /** How often the unread count is checked again while the tab is visible. */
 export const POLL_MS = 5 * 60_000;
@@ -53,8 +54,8 @@ function append(items: Notification[], more: Notification[]): Notification[] {
 }
 
 /**
- * The bell in the app bar, left of Refresh. A red dot while anything is unread (the count is in the
- * button's name), checked on load, on Refresh, and every 5 minutes while the tab is visible. It opens a
+ * The bell in the app bar, left of Refresh. While anything is unread: a red numbered badge, the count
+ * in the button's name and in the tab title ("(N) chihairou's Yungu"), checked on load, on Refresh, and every 5 minutes while the tab is visible. It opens a
  * popover: Unread, then Read (20 at a time). Mark as read moves an item down at once (put back, with
  * the reason, if Yungu refuses). An item about an assignment opens it in the pop-up and, like Yungu's
  * own bell, marks it read.
@@ -198,6 +199,7 @@ export default function NotificationsMenu() {
   }
 
   const count = unread ?? 0;
+  useTitleCount(count);
   const unreadSection = sections.unread;
   const unreadShown =
     unreadSection.status === 'ready' && !unreadSection.hasMore ? unreadSection.items.filter((n) => !leaving.has(n.id)).length : count;
@@ -213,13 +215,28 @@ export default function NotificationsMenu() {
           sx={{ color: 'text.secondary' }}
         >
           <Badge
-            variant="dot"
+            badgeContent={count}
+            max={99}
             color="error"
-            overlap="circular"
+            overlap="rectangular"
             invisible={count === 0}
             sx={(theme) => ({
-              // Ringed in the app bar's own surface, so the dot reads as cut out of the bell.
-              '& .MuiBadge-dot': { width: 10, height: 10, borderRadius: '50%', border: '2px solid', borderColor: theme.yungu.header.bg },
+              // Ringed in the app bar's own surface, so the badge reads as cut out of the bell.
+              // Off the bell's top-right corner, so the bell stays readable under it.
+              '& .MuiBadge-badge': {
+                top: 1,
+                right: -3,
+                minWidth: 18,
+                height: 18,
+                px: 0.5,
+                borderRadius: 9,
+                fontSize: '0.6875rem',
+                fontWeight: 600,
+                fontVariantNumeric: 'tabular-nums',
+                border: '2px solid',
+                borderColor: theme.yungu.header.bg,
+                boxSizing: 'content-box',
+              },
               '@media (prefers-reduced-motion: reduce)': { '& .MuiBadge-badge': { transition: 'none' } },
             })}
           >

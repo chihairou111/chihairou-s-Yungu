@@ -76,7 +76,29 @@ describe('NotificationsMenu', () => {
     render(<NotificationsMenu />);
     const button = await screen.findByRole('button', { name: 'Notifications, 2 unread' });
     expect(api.fetchUnreadCount).toHaveBeenCalledOnce();
-    expect(button.querySelector('.MuiBadge-badge')).not.toHaveClass('MuiBadge-invisible');
+    const badge = button.querySelector('.MuiBadge-badge');
+    expect(badge).not.toHaveClass('MuiBadge-invisible');
+    // A numbered badge, not a bare dot.
+    expect(badge).toHaveTextContent('2');
+    expect(badge).not.toHaveClass('MuiBadge-dot');
+  });
+
+  it('caps the badge at 99+', async () => {
+    serve({ unread: Array.from({ length: 120 }, (_, i) => note(`u${i}`, false, null)) });
+    render(<NotificationsMenu />);
+    const button = await screen.findByRole('button', { name: /^Notifications, \d+ unread$/ });
+    expect(button.querySelector('.MuiBadge-badge')).toHaveTextContent('99+');
+  });
+
+  it('puts the unread count in the page title, and drops it when nothing is unread', async () => {
+    document.title = "chihairou's Yungu";
+    const { unmount } = render(<NotificationsMenu />);
+    await waitFor(() => expect(document.title).toBe("(2) chihairou's Yungu"));
+    // Next writes the page title back on navigation; the count is put back in front of it.
+    document.title = "chihairou's Yungu";
+    await waitFor(() => expect(document.title).toBe("(2) chihairou's Yungu"));
+    unmount();
+    expect(document.title).toBe("chihairou's Yungu");
   });
 
   it('shows no dot and a plain name with nothing unread', async () => {
@@ -121,10 +143,10 @@ describe('NotificationsMenu', () => {
     vi.unstubAllGlobals();
   });
 
-  it('rings the dot in the app bar\'s own surface, so it reads as cut out of the bell', async () => {
+  it('rings the badge in the app bar\'s own surface, so it reads as cut out of the bell', async () => {
     render(<NotificationsMenu />);
     const button = await screen.findByRole('button', { name: 'Notifications, 2 unread' });
-    expect(button.querySelector('.MuiBadge-dot')).toHaveStyle({ borderColor: theme.yungu.header.bg });
+    expect(button.querySelector('.MuiBadge-badge')).toHaveStyle({ borderColor: theme.yungu.header.bg });
   });
 
   it('says so when nothing is unread', async () => {

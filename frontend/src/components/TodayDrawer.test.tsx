@@ -7,6 +7,9 @@ import ThemeRegistry from './ThemeRegistry';
 import { DOCK_MIN_PX } from './PageHeader';
 import TodayDrawer, { DOCK_QUERY, shouldRevealEdgeButton } from './TodayDrawer';
 
+// These scenarios pass their moment as `now`; following the device clock is useNow's own test.
+vi.mock('./useNow', () => ({ useNow: (initial: number) => initial }));
+
 const nav = vi.hoisted(() => ({ pathname: '/assignments' }));
 vi.mock('next/navigation', () => ({ usePathname: () => nav.pathname }));
 
