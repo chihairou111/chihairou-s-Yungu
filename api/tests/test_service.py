@@ -19,8 +19,8 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 import mapping
-from service.app import (LIST_PAGE_SIZE, MAX_CONCURRENT_SIGN_INS, MAX_UPLOAD_BYTES, YUNGU_TIMEOUT_SECONDS,
-                         KnownFiles, create_app)
+from service.app import (LIST_PAGE_SIZE, MAX_CONCURRENT_SIGN_INS, MAX_FAILED_OWNER_SIGN_INS, MAX_FAILED_SIGN_INS,
+                         MAX_UPLOAD_BYTES, YUNGU_TIMEOUT_SECONDS, KnownFiles, create_app)
 from service.auth import MAX_TOKENS_PER_ACCOUNT
 from service.cache import ReadCache
 from service.yungu import IDLE_SECONDS, LOGIN_RETRY_SECONDS
@@ -889,6 +889,33 @@ def test_a_cached_detail_still_makes_its_files_known(api, world, auth, monkeypat
     assert api.get("/files/11128687", headers=auth).status_code == 200 and world.count("task_detail") == 1
 
 
+@pytest.mark.parametrize("leftover", ["top", "users"])
+def test_a_leftover_hand_in_record_keeps_a_dir_from_counting_as_fresh(make, world, state_dir, leftover):
+    where = state_dir if leftover == "top" else state_dir / "users" / str(ME)
+    where.mkdir(mode=0o700, parents=True)
+    (where / "submitted-files.json").write_text(json.dumps({"93251": ["11128687"]}))
+    api = make()
+    b = b_sign_in(api)
+    assert not (state_dir / "owner.json").exists() and not (state_dir / "credentials.json").exists()
+    assert (where / "submitted-files.json").exists()                     # not adopted
+    api.get("/assignments/93251", headers=b)
+    assert api.get("/files/11128687", headers=b).json() == {"error": "Not found."}
+    assert world.count("file_redirect") == 0 and world.peer.count("file_redirect") == 0
+    assert make().get("/courses", headers=b).status_code == 401           # S207 did not become the owner
+
+
+def test_the_kept_hand_in_record_never_makes_a_file_id_openable(make, api, world, auth):
+    own(api, 11128687)
+    api.post("/assignments/93251/submit", json={"fileIds": ["11128687"]}, headers=auth)
+    world.ach[93251].update(ifEditStatus=True, fileModelList=[{**world.ach[93251]["fileModelList"][0],
+                                                               "fileId": 11128999, "fileName": "new.txt"}])
+    restarted = make()
+    d = restarted.get("/assignments/93251", headers=auth).json()
+    assert d["submittedFileIds"] == ["11128687"]                          # the record still says so ...
+    assert restarted.get("/files/11128687", headers=auth).json() == {"error": "Not found."}   # ... but opens nothing
+    assert restarted.get("/files/11128999", headers=auth).status_code == 200
+
+
 def test_known_files_are_bounded_oldest_first():
     known = KnownFiles(cap=3)
     known.add(["1", "2", "3"])
@@ -984,6 +1011,51 @@ def test_yungu_being_down_does_not_count_as_a_failed_sign_in(api, world, monkeyp
         for _ in range(6):
             assert api.post("/session", json={"loginId": "S207", "password": B_PW}).status_code == 502
     assert b_sign_in(api)
+
+
+@pytest.mark.parametrize("body", [{"loginId": "1" * 65, "password": "pw"}, {"loginId": "S207", "password": "p" * 257}])
+def test_an_over_long_login_id_or_password_is_a_400_before_any_login(api, world, body):
+    r = api.post("/session", json=body)
+    assert r.status_code == 400 and r.json() == {"error": "Bad request."}
+    assert world.logins == [] and world.peer.logins == []
+
+
+def test_the_longest_allowed_login_id_and_password_still_reach_yungu(api, world):
+    assert api.post("/session", json={"loginId": "S" + "2" * 63, "password": "p" * 256}).status_code == 200
+    assert world.logins == ["S" + "2" * 63]
+
+
+def test_strangers_failing_on_the_owners_id_never_lock_out_its_saved_password(api, world, auth):
+    statuses = [bad_sign_in(api, "S106").status_code for _ in range(MAX_FAILED_OWNER_SIGN_INS + 3)]
+    assert statuses == [200] * MAX_FAILED_OWNER_SIGN_INS + [429] * 3          # a slower back-off of its own
+    assert len(world.logins) == 1 + MAX_FAILED_OWNER_SIGN_INS
+    assert api.get("/courses", headers=sign_in(api)).status_code == 200     # the owner's password still gets in
+
+
+def test_the_owners_id_backs_off_only_after_many_failures(api, world, auth):
+    api.delete("/session", headers=auth)                                  # signed out: no saved password to know it by
+    for _ in range(MAX_FAILED_SIGN_INS + 2):
+        assert bad_sign_in(api, " s106 ").status_code == 200              # its id, however typed
+    assert api.get("/courses", headers=sign_in(api)).status_code == 200
+    assert bad_sign_in(api, "S207").status_code == 200                    # other ids keep their own count
+
+
+def test_slow_strangers_never_block_the_owners_sign_in(api, world, auth):
+    world.peer.login_hang = threading.Event()
+    hung = [threading.Thread(target=lambda: api.post("/session", json={"loginId": "S207", "password": B_PW}))
+            for _ in range(MAX_CONCURRENT_SIGN_INS)]
+    for t in hung:
+        t.start()
+    try:
+        wait_until(lambda: len(world.peer.logins) == MAX_CONCURRENT_SIGN_INS)
+        assert within(3, lambda: bad_sign_in(api, "S208")).json() == {"ok": False, "error": BUSY}
+        assert within(3, lambda: sign_in(api))                            # the owner, by its saved password
+        api.delete("/session", headers=sign_in(api))
+        assert within(3, lambda: sign_in(api))                            # signed out: the slot kept for its id
+    finally:
+        world.peer.login_hang.set()
+        for t in hung:
+            t.join(10)
 
 
 def test_sign_ins_beyond_the_concurrent_cap_are_refused_without_calling_yungu(api, world):
@@ -2178,6 +2250,33 @@ def test_a_failed_mark_as_submitted_is_not_retried(api, world, auth):
     finally:
         FakeClient.mark_submitted = orig
     assert r.status_code == 502 and world.count("mark_submitted") == 1
+
+
+def test_mark_as_submitted_keeps_one_lock_per_account_across_a_dropped_account(api, world, auth, b_auth):
+    entered, release = threading.Event(), threading.Event()
+
+    def hold():
+        entered.set()
+        release.wait(10)
+    world.peer.after_mark = hold
+    results = []
+
+    def press(headers):
+        results.append(api.post("/assignments/94929/submit", json={"fileIds": []}, headers=headers))
+    first = threading.Thread(target=press, args=(b_auth,))
+    first.start()
+    assert entered.wait(10)
+    world.peer.after_mark = None
+    api.app.state.service._ended(OTHER)                                  # its Account is dropped meanwhile ...
+    again = b_sign_in(api)                                                # ... and made anew by a fresh sign-in
+    second = threading.Thread(target=press, args=(again,))
+    second.start()
+    second.join(0.3)
+    assert second.is_alive()                                              # waits behind the first: the same lock
+    release.set()
+    first.join(10)
+    second.join(10)
+    assert world.peer.count("mark_submitted") == 1 and sorted(r.status_code for r in results) == [200, 200]
 
 
 def test_two_concurrent_mark_as_submitted_requests_send_one(api, world, auth):

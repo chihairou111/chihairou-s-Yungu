@@ -344,6 +344,10 @@ class MemorySession:
             self._used = self._clock()
             return self._client is not None
 
+    def on(self) -> bool:
+        with self._lock:
+            return self._client is not None
+
     def ended_if_idle(self, since: float) -> bool:
         """Unused since before `since`: end it (if it is still on) and answer True, so it can go."""
         with self._lock:
@@ -407,6 +411,14 @@ class Yungu:
 
     def live(self, user_id: int) -> bool:
         return self._get(user_id).live()
+
+    def is_on(self, user_id: int) -> bool:
+        """Has a session that is on (the owner's always counts); makes nothing and touches nothing."""
+        with self._lock:
+            session = self._sessions.get(user_id)
+        if session is None or isinstance(session, OwnerSession):
+            return session is not None
+        return session.on()
 
     def sign_in(self, login_id: str, password: str) -> Tuple[int, dict]:
         """Log in with a fresh client (outside every lock); on success it becomes that account's session.

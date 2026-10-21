@@ -8,13 +8,14 @@ Files in the state directory (the owner's only):
                     service's {hashes} list is bound to the owner on first use.
 
 Fails closed: an owner.json that exists but is unreadable or invalid, or saved state (credentials.json,
-tokens.json) with no owner.json, means there is no owner. Then no saved token counts, no password is
+tokens.json, a hand-in record at the top or under users/) with no owner.json, means there is no owner. Then no saved token counts, no password is
 saved and every sign-in is an ordinary account's, until someone sorts the files out by hand.
 
 Every other account's password is never stored, and its tokens live only in memory (hashed too), each
 mapped to the one Yungu userId it was issued for: a restart ends them, as it ends their Yungu session.
 """
 import hashlib
+import hmac
 import logging
 import secrets
 import threading
@@ -25,6 +26,7 @@ from .state import StateDir
 
 log = logging.getLogger("yungu_lms.auth")
 CREDENTIALS, OWNER, TOKENS = "credentials.json", "owner.json", "tokens.json"
+OLD_RECORD, USERS = "submitted-files.json", "users"       # hand-in records (state.py): saved state too
 MAX_TOKENS_PER_ACCOUNT = 10          # an account other than the owner: its newest tokens (devices) only
 BROKEN_OWNER = ("owner.json is missing or unreadable while other saved state exists: no account is the "
                 "owner, no saved token counts and no password is saved. Move the state files away to start over.")
@@ -70,7 +72,8 @@ class Auth:
             if isinstance(user_id, int) and not isinstance(user_id, bool):
                 self._owner = user_id
                 return "owner", user_id
-        elif not self._state.exists(CREDENTIALS) and not self._state.exists(TOKENS):
+        elif not any(self._state.exists(name) for name in (CREDENTIALS, TOKENS, OLD_RECORD)) \
+                and not self._state.has_entries(USERS):
             return "fresh", None
         if not self._warned:
             self._warned = True
@@ -79,6 +82,22 @@ class Auth:
 
     def owner(self) -> Optional[int]:
         return self._record()[1]
+
+    def owner_login(self) -> Optional[str]:
+        """The login id owner.json records for a valid owner, else None."""
+        if self.owner() is None:
+            return None
+        o = self._state.read(OWNER)
+        login_id = o.get("loginId") if isinstance(o, dict) else None
+        return login_id if isinstance(login_id, str) and login_id.strip() else None
+
+    def is_saved_login(self, login_id: str, password: str) -> bool:
+        """The owner's saved login, typed again (compared in constant time). Never for anyone else."""
+        creds = self.credentials() if self.owner() is not None else None
+        if creds is None:
+            return False
+        same_id = creds.login_id.strip().casefold() == login_id.strip().casefold()
+        return hmac.compare_digest(creds.password.encode(), password.encode()) and same_id
 
     def claim_owner(self, login_id: str, user_id: int) -> bool:
         """After a successful sign-in: is `user_id` the owner? Only on a fresh state dir does it become the

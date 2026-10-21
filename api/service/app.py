@@ -15,6 +15,7 @@ import os
 import re
 import threading
 import time
+import weakref
 from collections import OrderedDict, deque
 from datetime import datetime
 from typing import Callable, Deque, Dict, Iterable, List, Optional, TypeVar
@@ -23,7 +24,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException
 from starlette.requests import ClientDisconnect
@@ -66,10 +67,13 @@ FILE_URL = re.compile(r"/api/files/([0-9]+)")
 # Every POST /session is a real CAS login. A login id with this many refused sign-ins within the window
 # waits the window out (429, no Yungu call); and only so many sign-ins run at once. Both keep bursts of
 # bad passwords from getting the server's address throttled by Yungu, which the owner's re-login needs.
+# The owner's login id (owner.json) is never held to that: its saved password, typed again, always goes
+# through; anything else typed for its id gets a slower back-off of its own and a sign-in slot of its own.
 MAX_FAILED_SIGN_INS = 5
+MAX_FAILED_OWNER_SIGN_INS = 20
 FAILED_SIGN_IN_WINDOW_SECONDS = 15 * 60
 MAX_TRACKED_LOGIN_IDS = 10000
-MAX_CONCURRENT_SIGN_INS = 3
+MAX_CONCURRENT_SIGN_INS = 3                  # for every other login id; the owner's id has one more
 TOO_MANY_ATTEMPTS = "Too many attempts. Try again in a few minutes."
 SIGN_INS_BUSY = "Too many sign-ins right now. Try again in a moment."
 NOTIFICATION_PAGE_MAX = 100          # Yungu's v2/page honours 100 (research notifications-and-feedback.md)
@@ -180,8 +184,8 @@ class CatchAll:
 
 # ------------------------------------------------------------------ bodies
 class SignInBody(BaseModel):
-    loginId: str = ""
-    password: str = ""
+    loginId: str = Field("", max_length=64)          # longer: a 400 before any throttling or login
+    password: str = Field("", max_length=256)
 
 
 class FileIdsBody(BaseModel):
@@ -335,15 +339,15 @@ class KnownFiles:
 
 
 def _shown_files(value) -> Iterable[str]:
-    """The ids of every FileRef (url /api/files/<id>) in a mapped answer, and its submittedFileIds."""
+    """The ids of every FileRef (url /api/files/<id>) in a mapped answer: those come from Yungu's answers
+    to this account's own session only. Never the kept hand-in record's ids (submittedFileIds), which a
+    state file could hold for anyone."""
     if isinstance(value, dict):
         match = FILE_URL.fullmatch(value["url"]) if isinstance(value.get("url"), str) else None
         if match and str(value.get("id")) == match.group(1):
             yield match.group(1)
         for key, item in value.items():
-            if key == "submittedFileIds" and isinstance(item, list):
-                yield from (str(i) for i in item)
-            else:
+            if key != "submittedFileIds":
                 yield from _shown_files(item)
     elif isinstance(value, list):
         for item in value:
@@ -354,13 +358,18 @@ class SignInGate:
     """Sign-in throttling, by login id (as typed, trimmed, case-folded): MAX_FAILED_SIGN_INS refusals
     within the window → TooManyAttempts until the oldest falls out; and MAX_CONCURRENT_SIGN_INS at once
     (beyond: TooManyAttempts(SIGN_INS_BUSY) at once, no waiting). Only Yungu's refusals count: Yungu
-    being down does not. A success clears its id."""
+    being down does not. A success clears its id.
+
+    The owner's id: its saved password typed again (`saved`) passes untouched; anything else typed for it
+    counts against MAX_FAILED_OWNER_SIGN_INS and runs in a slot of its own, so strangers' failures on
+    other ids, or three slow sign-ins, can never keep the owner out."""
 
     def __init__(self, clock: Callable[[], float]):
         self._clock = clock
         self._lock = threading.Lock()
         self._failures: "OrderedDict[str, Deque[float]]" = OrderedDict()
         self._running = threading.BoundedSemaphore(MAX_CONCURRENT_SIGN_INS)
+        self._owner_slot = threading.BoundedSemaphore(1)
 
     @staticmethod
     def _key(login_id: str) -> str:
@@ -372,12 +381,17 @@ class SignInGate:
             times.popleft()
         return times
 
-    def run(self, login_id: str, sign_in: Callable[[], T]) -> T:
+    def run(self, login_id: str, sign_in: Callable[[], T], owner_login: Optional[str] = None,
+            saved: bool = False) -> T:
+        if saved:
+            return sign_in()
         key = self._key(login_id)
+        owners = owner_login is not None and key == self._key(owner_login)
+        limit, slot = (MAX_FAILED_OWNER_SIGN_INS, self._owner_slot) if owners else (MAX_FAILED_SIGN_INS, self._running)
         with self._lock:
-            if len(self._recent(key, self._clock())) >= MAX_FAILED_SIGN_INS:
+            if len(self._recent(key, self._clock())) >= limit:
                 raise TooManyAttempts()
-        if not self._running.acquire(blocking=False):
+        if not slot.acquire(blocking=False):
             raise TooManyAttempts(SIGN_INS_BUSY)
         try:
             result = sign_in()
@@ -385,7 +399,7 @@ class SignInGate:
             self._failed(key)
             raise
         finally:
-            self._running.release()
+            slot.release()
         with self._lock:
             self._failures.pop(key, None)
         return result
@@ -403,17 +417,31 @@ class SignInGate:
                 self._failures.popitem(last=False)
 
 
+class AccountLock:
+    """A lock that can be weakly referenced (a bare threading.Lock cannot)."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+
+    def __enter__(self):
+        self._lock.acquire()
+        return self
+
+    def __exit__(self, *exc):
+        self._lock.release()
+
+
 class Account:
     """One account's own state: its read cache, its hand-in record, the file ids it may use and its
-    Mark-as-submitted lock."""
+    Mark-as-submitted lock (the same lock for every Account of one userId while any is in use)."""
 
     def __init__(self, user_id: int, state: StateDir, monotonic: Callable[[], float], owner: bool,
-                 records_lock: threading.Lock):
+                 records_lock: threading.Lock, marking: AccountLock):
         self.user_id = user_id
         self.cache = ReadCache(clock=monotonic)
         self.submitted = SubmittedFiles(state, user_id, migrate=owner, lock=records_lock)
         self.files = KnownFiles()
-        self.marking = threading.Lock()        # one Mark as submitted at a time (see mark_submitted)
+        self.marking = marking                 # one Mark as submitted at a time (see mark_submitted)
 
 
 class Service:
@@ -427,15 +455,24 @@ class Service:
         self._lock = threading.Lock()          # guards _accounts only
         self._accounts: Dict[int, Account] = {}     # made on first use: importing the app touches nothing
         self._records_lock = threading.Lock()  # hand-in record files: an Account may be dropped and remade
+        self._marking: "weakref.WeakValueDictionary[int, AccountLock]" = weakref.WeakValueDictionary()
         self._gate = SignInGate(monotonic)
 
     def account(self, user_id: int) -> Account:
+        """The account's state. An account other than the owner is kept only while its session is on: a
+        request still running after its end gets a throwaway one (its Yungu calls answer 401 anyway)."""
         owner = self.auth.owner()
+        keep = user_id == owner or self.yungu.is_on(user_id)       # outside _lock: see the lock order in yungu.py
         with self._lock:
             found = self._accounts.get(user_id)
             if found is None:
-                found = self._accounts[user_id] = Account(user_id, self._state, self._monotonic,
-                                                          owner=user_id == owner, records_lock=self._records_lock)
+                marking = self._marking.get(user_id)
+                if marking is None:
+                    marking = self._marking[user_id] = AccountLock()
+                found = Account(user_id, self._state, self._monotonic, owner=user_id == owner,
+                                records_lock=self._records_lock, marking=marking)
+                if keep:
+                    self._accounts[user_id] = found
             return found
 
     def _ended(self, user_id: int) -> None:
@@ -456,7 +493,9 @@ class Service:
 
     def sign_in(self, login_id: str, password: str) -> dict:
         self.yungu.sweep()
-        user_id, user = self._gate.run(login_id, lambda: self.yungu.sign_in(login_id, password))
+        user_id, user = self._gate.run(login_id, lambda: self.yungu.sign_in(login_id, password),
+                                       owner_login=self.auth.owner_login(),
+                                       saved=self.auth.is_saved_login(login_id, password))
         self.account(user_id).cache.clear()
         return {"ok": True, "displayName": _display_name(user, login_id), "token": self.auth.issue_token(user_id)}
 
@@ -465,12 +504,28 @@ class Student:
     """What the routes do for one account: Yungu calls through its session, mapping, its read cache."""
 
     def __init__(self, service: Service, user_id: int):
-        account = service.account(user_id)
         self.user_id = user_id
-        self.cache, self.submitted, self._marking = account.cache, account.submitted, account.marking
-        self.files = account.files
+        self._service = service
         self._yungu = service.yungu
         self._now = service._now
+
+    # The account's state is looked up on every use, never kept: an Account dropped (and remade) while a
+    # request runs is not used past that point.
+    @property
+    def cache(self) -> ReadCache:
+        return self._service.account(self.user_id).cache
+
+    @property
+    def submitted(self) -> SubmittedFiles:
+        return self._service.account(self.user_id).submitted
+
+    @property
+    def files(self) -> KnownFiles:
+        return self._service.account(self.user_id).files
+
+    @property
+    def _marking(self) -> AccountLock:
+        return self._service.account(self.user_id).marking
 
     def _call(self, fn: Callable[[object], T]) -> T:
         return self._yungu.call(self.user_id, fn)

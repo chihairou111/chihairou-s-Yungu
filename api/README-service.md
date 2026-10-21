@@ -19,19 +19,24 @@ login is attempted. Each token maps to one userId; Yungu calls, the read cache, 
 Mark-as-submitted lock and every lock around a login are per account. A state dir from the single-owner
 service (with `submitted-files.json` at the top) is moved into `users/<owner>/` on the owner's first request.
 
-- **Fails closed:** an owner.json that exists but is unreadable/invalid, or credentials.json/tokens.json with
-  no owner.json, means *no owner*: no saved token counts, no password is saved, every sign-in is an ordinary
+- **Fails closed:** an owner.json that exists but is unreadable/invalid, or any other saved state
+  (credentials.json, tokens.json, a top-level submitted-files.json, anything under users/) with no owner.json,
+  means *no owner*: no saved token counts, no password is saved, every sign-in is an ordinary
   (memory-only) account. A warning is logged. Fix the files by hand (or move them away) to recover.
 - **File ids:** an account may open (`/files/<id>`), update (online docs), save to a draft or hand in only
-  file ids it was shown by its own reads (assignment detail: attachments, its files, its hand-in) or made
-  (uploads, new documents); any other id is a 404 with no Yungu call. Memory only, at most 5000 per account:
+  file ids Yungu showed it through its own session (assignment detail: attachments, its files, comment files)
+  or that it made (uploads, documents); never ids from the kept hand-in record. Any other id is a 404 with no
+  Yungu call. Memory only, at most 5000 per account:
   after a restart, opening the assignment again makes its files usable.
 - **Bounds:** each account's read cache drops expired entries and holds at most 300; an account other than
   the owner unused for 12 h is signed out and forgotten (the owner never); such an account keeps its 10
   newest tokens.
-- **Sign-in throttling:** 5 refused sign-ins for one login id within 15 min → 429 "Too many attempts. Try
-  again in a few minutes." with no Yungu call until the oldest is 15 min old; at most 3 sign-ins at once
-  (beyond: 429 "Too many sign-ins right now. Try again in a moment."). Yungu being down does not count.
+- **Sign-in throttling:** login id over 64 or password over 256 characters → 400 before anything else.
+  5 refused sign-ins for one login id within 15 min → 429 "Too many attempts. Try again in a few minutes."
+  with no Yungu call until the oldest is 15 min old; at most 3 sign-ins at once (beyond: 429 "Too many
+  sign-ins right now. Try again in a moment."). Yungu being down does not count. The owner's login id
+  (owner.json) is exempt: its saved password typed again always goes through; anything else typed for it
+  backs off only after 20 refusals and runs in a sign-in slot of its own.
 
 ## Run by hand
     cd /root/yungu-lms/api

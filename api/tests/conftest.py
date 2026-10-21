@@ -1,3 +1,4 @@
+import atexit
 import json
 import os
 import shutil
@@ -11,6 +12,7 @@ sys.path.insert(0, str(API_DIR))   # mapping / yungu_task are top-level modules 
 # is imported: point it at a throwaway directory so no test can ever read or move live state.
 _THROWAWAY_STATE = tempfile.mkdtemp(prefix="yungu-lms-test-state-")
 os.environ["YUNGU_STATE_DIR"] = _THROWAWAY_STATE
+atexit.register(shutil.rmtree, _THROWAWAY_STATE, True)        # also when a run ends abnormally
 
 
 def pytest_unconfigure(config):

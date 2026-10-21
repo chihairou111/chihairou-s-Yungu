@@ -43,6 +43,13 @@ class StateDir:
     def exists(self, name: str) -> bool:
         return (self.path / name).exists()
 
+    def has_entries(self, name: str) -> bool:
+        """`name` is a directory with anything in it."""
+        try:
+            return any((self.path / name).iterdir())
+        except (FileNotFoundError, NotADirectoryError):
+            return False
+
     def write(self, name: str, value: Any) -> None:
         self._make_dirs()
         fd, tmp = tempfile.mkstemp(dir=self.path, prefix=f".{name}.")       # mkstemp creates it 0600
