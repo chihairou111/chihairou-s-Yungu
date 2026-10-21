@@ -15,8 +15,9 @@ import os
 import re
 import threading
 import time
+from collections import OrderedDict, deque
 from datetime import datetime
-from typing import Callable, Dict, List, Optional, TypeVar
+from typing import Callable, Deque, Dict, Iterable, List, Optional, TypeVar
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
@@ -61,6 +62,16 @@ ADD_A_FILE = "Add at least one file."
 NOT_CONFIRMED = "Yungu didn't confirm the hand-in. Check on Yungu."
 DOC_NOT_SAVED = "Yungu couldn't save the document. Try again."
 ASCII_ID = re.compile(r"[0-9]+")
+FILE_URL = re.compile(r"/api/files/([0-9]+)")
+# Every POST /session is a real CAS login. A login id with this many refused sign-ins within the window
+# waits the window out (429, no Yungu call); and only so many sign-ins run at once. Both keep bursts of
+# bad passwords from getting the server's address throttled by Yungu, which the owner's re-login needs.
+MAX_FAILED_SIGN_INS = 5
+FAILED_SIGN_IN_WINDOW_SECONDS = 15 * 60
+MAX_TRACKED_LOGIN_IDS = 10000
+MAX_CONCURRENT_SIGN_INS = 3
+TOO_MANY_ATTEMPTS = "Too many attempts. Try again in a few minutes."
+SIGN_INS_BUSY = "Too many sign-ins right now. Try again in a moment."
 NOTIFICATION_PAGE_MAX = 100          # Yungu's v2/page honours 100 (research notifications-and-feedback.md)
 
 
@@ -85,6 +96,13 @@ class NoStoredFile(ServiceError):
 
     def __init__(self):
         super().__init__(ONLINE_DOCUMENT)
+
+
+class TooManyAttempts(ServiceError):
+    status = 429
+
+    def __init__(self, message: str = TOO_MANY_ATTEMPTS):
+        super().__init__(message)
 
 
 class TooLarge(ServiceError):
@@ -287,13 +305,114 @@ def _limited(receive, limit: int):
 
 
 # ----------------------------------------------------------------- service
-class Account:
-    """One account's own state: its read cache, its hand-in record and its Mark-as-submitted lock."""
+class KnownFiles:
+    """The file ids one account has been shown (by its own reads) or made (its uploads and documents):
+    the only ids it may open, edit or hand in. Yungu itself resolves any id for any session, and ids are
+    sequential. Bounded: past CAP the longest unseen go first; a detail read shows its files again."""
+    CAP = 5000
 
-    def __init__(self, user_id: int, state: StateDir, monotonic: Callable[[], float], owner: bool):
+    def __init__(self, cap: Optional[int] = None):
+        self._cap = cap
+        self._ids: "OrderedDict[str, None]" = OrderedDict()
+        self._lock = threading.Lock()
+
+    def add(self, file_ids: Iterable) -> None:
+        with self._lock:
+            for fid in file_ids:
+                self._ids[str(fid)] = None
+                self._ids.move_to_end(str(fid))
+            while len(self._ids) > (self._cap or self.CAP):
+                self._ids.popitem(last=False)
+
+    def has(self, file_id) -> bool:
+        with self._lock:
+            return str(file_id) in self._ids
+
+    def require(self, file_ids: Iterable) -> None:
+        """NotFound unless every id is known."""
+        if not all(self.has(f) for f in file_ids):
+            raise NotFound()
+
+
+def _shown_files(value) -> Iterable[str]:
+    """The ids of every FileRef (url /api/files/<id>) in a mapped answer, and its submittedFileIds."""
+    if isinstance(value, dict):
+        match = FILE_URL.fullmatch(value["url"]) if isinstance(value.get("url"), str) else None
+        if match and str(value.get("id")) == match.group(1):
+            yield match.group(1)
+        for key, item in value.items():
+            if key == "submittedFileIds" and isinstance(item, list):
+                yield from (str(i) for i in item)
+            else:
+                yield from _shown_files(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _shown_files(item)
+
+
+class SignInGate:
+    """Sign-in throttling, by login id (as typed, trimmed, case-folded): MAX_FAILED_SIGN_INS refusals
+    within the window → TooManyAttempts until the oldest falls out; and MAX_CONCURRENT_SIGN_INS at once
+    (beyond: TooManyAttempts(SIGN_INS_BUSY) at once, no waiting). Only Yungu's refusals count: Yungu
+    being down does not. A success clears its id."""
+
+    def __init__(self, clock: Callable[[], float]):
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._failures: "OrderedDict[str, Deque[float]]" = OrderedDict()
+        self._running = threading.BoundedSemaphore(MAX_CONCURRENT_SIGN_INS)
+
+    @staticmethod
+    def _key(login_id: str) -> str:
+        return login_id.strip().casefold()
+
+    def _recent(self, key: str, now: float) -> Deque[float]:
+        times = self._failures.get(key) or deque()
+        while times and now - times[0] >= FAILED_SIGN_IN_WINDOW_SECONDS:
+            times.popleft()
+        return times
+
+    def run(self, login_id: str, sign_in: Callable[[], T]) -> T:
+        key = self._key(login_id)
+        with self._lock:
+            if len(self._recent(key, self._clock())) >= MAX_FAILED_SIGN_INS:
+                raise TooManyAttempts()
+        if not self._running.acquire(blocking=False):
+            raise TooManyAttempts(SIGN_INS_BUSY)
+        try:
+            result = sign_in()
+        except SignInRefused:
+            self._failed(key)
+            raise
+        finally:
+            self._running.release()
+        with self._lock:
+            self._failures.pop(key, None)
+        return result
+
+    def _failed(self, key: str) -> None:
+        with self._lock:
+            now = self._clock()
+            times = self._recent(key, now)
+            times.append(now)
+            self._failures[key] = times
+            self._failures.move_to_end(key)
+            for stale in [k for k, t in self._failures.items() if not self._recent(k, now)]:
+                del self._failures[stale]
+            while len(self._failures) > MAX_TRACKED_LOGIN_IDS:
+                self._failures.popitem(last=False)
+
+
+class Account:
+    """One account's own state: its read cache, its hand-in record, the file ids it may use and its
+    Mark-as-submitted lock."""
+
+    def __init__(self, user_id: int, state: StateDir, monotonic: Callable[[], float], owner: bool,
+                 records_lock: threading.Lock):
         self.user_id = user_id
         self.cache = ReadCache(clock=monotonic)
-        self.submitted = SubmittedFiles(state, user_id, migrate=owner)
+        self.submitted = SubmittedFiles(state, user_id, migrate=owner, lock=records_lock)
+        self.files = KnownFiles()
         self.marking = threading.Lock()        # one Mark as submitted at a time (see mark_submitted)
 
 
@@ -307,6 +426,8 @@ class Service:
         self._now, self._monotonic = now, monotonic
         self._lock = threading.Lock()          # guards _accounts only
         self._accounts: Dict[int, Account] = {}     # made on first use: importing the app touches nothing
+        self._records_lock = threading.Lock()  # hand-in record files: an Account may be dropped and remade
+        self._gate = SignInGate(monotonic)
 
     def account(self, user_id: int) -> Account:
         owner = self.auth.owner()
@@ -314,26 +435,28 @@ class Service:
             found = self._accounts.get(user_id)
             if found is None:
                 found = self._accounts[user_id] = Account(user_id, self._state, self._monotonic,
-                                                          owner=user_id == owner)
+                                                          owner=user_id == owner, records_lock=self._records_lock)
             return found
 
     def _ended(self, user_id: int) -> None:
-        """An account other than the owner signed out or lost its Yungu session: drop its cached reads.
-        The Account itself stays (a few bytes), so its hand-in record keeps one lock."""
+        """An account other than the owner signed out, lost its Yungu session or sat idle: forget its
+        state in memory (its hand-in record stays on disk)."""
         with self._lock:
-            found = self._accounts.get(user_id)
+            found = self._accounts.pop(user_id, None)
         if found is not None:
             found.cache.clear()
 
     def student(self, token: Optional[str]) -> "Student":
         """The account a token belongs to; SignInAgain when none does, or its Yungu session is gone."""
+        self.yungu.sweep()
         user_id = self.auth.user_for(token)
         if user_id is None or not self.yungu.live(user_id):
             raise SignInAgain()
         return Student(self, user_id)
 
     def sign_in(self, login_id: str, password: str) -> dict:
-        user_id, user = self.yungu.sign_in(login_id, password)
+        self.yungu.sweep()
+        user_id, user = self._gate.run(login_id, lambda: self.yungu.sign_in(login_id, password))
         self.account(user_id).cache.clear()
         return {"ok": True, "displayName": _display_name(user, login_id), "token": self.auth.issue_token(user_id)}
 
@@ -345,6 +468,7 @@ class Student:
         account = service.account(user_id)
         self.user_id = user_id
         self.cache, self.submitted, self._marking = account.cache, account.submitted, account.marking
+        self.files = account.files
         self._yungu = service.yungu
         self._now = service._now
 
@@ -393,7 +517,9 @@ class Student:
         return self.cache.get(("courses",), lambda: mapping.courses(self._call(lambda c: c.courses())), refresh)
 
     def detail(self, assignment_id: int, refresh=False) -> dict:
-        return self.cache.get(("detail", assignment_id), lambda: self._detail(assignment_id), refresh)
+        shown = self.cache.get(("detail", assignment_id), lambda: self._detail(assignment_id), refresh)
+        self.files.add(_shown_files(shown))              # also from the cache: the files are on screen again
+        return shown
 
     def _detail(self, aid: int) -> dict:
         mixed = self._call(lambda c: _known(lambda: c.task_detail(aid)))
@@ -445,6 +571,8 @@ class Student:
         log.info("Mark read: Yungu answered %s", _shape_text(answer))
 
     def file_redirect(self, file_id: int, preview: bool, refresh=False) -> dict:
+        self.files.require([file_id])
+
         def compute():
             return {"redirect": self._call(lambda c: _redirect(c, file_id, preview))}
         return self.cache.get(("file", file_id, preview), compute, refresh)
@@ -462,9 +590,11 @@ class Student:
         ref = mapping.file_ref({**(up.raw or {}), "fileId": up.file_id, "fileName": name, "fileSizeByte": len(data)})
         if not ref["createdAt"]:
             ref["createdAt"] = self.now_ms()
+        self.files.add([ref["id"]])
         return ref
 
     def save_draft(self, aid: int, ids: List[int]) -> None:
+        self.files.require(ids)
         try:
             self._call(lambda c: c.save_draft(self._relation(c, aid), ids))
         finally:
@@ -473,6 +603,7 @@ class Student:
     def submit(self, aid: int, ids: List[int]) -> dict:
         if not ids:
             return self.mark_submitted(aid)
+        self.files.require(ids)
 
         def go(c):
             c.save_draft(self._relation(c, aid), ids)        # the web UI saves the list, then submits it
@@ -561,6 +692,7 @@ class Student:
         ref["content"] = delta                   # what we sent is what Yungu stores (storeMeta echoes it)
         if not ref["createdAt"]:
             ref["createdAt"] = self.now_ms()
+        self.files.add([ref["id"]])
         return ref
 
     def create_doc(self, title: str, content: str) -> dict:
@@ -575,6 +707,7 @@ class Student:
     def update_doc(self, aid: int, file_id: int, title: str, content: str) -> dict:
         """Rewrite a document in place, unless it is with the teacher (then the dashboard saves a new one)."""
         title = _checked_doc(title, content)
+        self.files.require([file_id])                    # only a document this account was shown or made
         try:
             mixed, achievement = self._fresh(aid)
             if str(file_id) in mapping.handed_in_ids(mixed, achievement, self.submitted.get(aid)):
@@ -656,6 +789,8 @@ def create_app(state_dir: Optional[str] = None, client_factory=yungu_client,
             return service.sign_in(body.loginId.strip(), body.password)
         except SignInRefused as e:
             return {"ok": False, "error": e.message}
+        except TooManyAttempts as e:
+            return JSONResponse({"ok": False, "error": e.message}, status_code=429)
         except Unavailable:
             return JSONResponse({"ok": False, "error": UNREACHABLE}, status_code=502)
 

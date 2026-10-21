@@ -440,6 +440,12 @@ describe('serviceData sessions', () => {
     expect(await data.signIn('170104022', 'pw')).toEqual({ ok: false, error: UNAVAILABLE });
   });
 
+  it("signIn shows the service's sign-in back-off (429) as a sign-in error", async () => {
+    const tooMany = 'Too many attempts. Try again in a few minutes.';
+    reply(json(429, { ok: false, error: tooMany }));
+    expect(await data.signIn('170104022', 'pw')).toEqual({ ok: false, error: tooMany });
+  });
+
   it('signOut DELETEs /session with the given token', async () => {
     reply(empty());
     await data.signOut('old-tok');

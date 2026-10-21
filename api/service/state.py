@@ -74,13 +74,14 @@ class SubmittedFiles:
     which files were handed in once the draft is edited after a submit; this list can."""
     FILE = "submitted-files.json"
 
-    def __init__(self, state: StateDir, user_id: int, migrate: bool = False):
+    def __init__(self, state: StateDir, user_id: int, migrate: bool = False,
+                 lock: Optional[threading.Lock] = None):
         """`state` is the top state dir. `migrate` (the owner only, when its account is first used): a
         record at the top, from the single-account service that kept only the owner's, moves into the
         owner's directory. Should both exist (that service ran again after the move), the top one is the
         newer: its assignments are taken over the moved one's, and it goes."""
         self._state = state.child("users", str(int(user_id)))
-        self._lock = threading.Lock()
+        self._lock = lock or threading.Lock()          # shared by every record object of the service
         if migrate and state.exists(self.FILE):
             with self._lock:
                 if self._state.exists(self.FILE):

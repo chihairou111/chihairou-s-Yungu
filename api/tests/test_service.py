@@ -19,8 +19,11 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 import mapping
-from service.app import LIST_PAGE_SIZE, MAX_UPLOAD_BYTES, YUNGU_TIMEOUT_SECONDS, create_app
-from service.yungu import LOGIN_RETRY_SECONDS
+from service.app import (LIST_PAGE_SIZE, MAX_CONCURRENT_SIGN_INS, MAX_UPLOAD_BYTES, YUNGU_TIMEOUT_SECONDS,
+                         KnownFiles, create_app)
+from service.auth import MAX_TOKENS_PER_ACCOUNT
+from service.cache import ReadCache
+from service.yungu import IDLE_SECONDS, LOGIN_RETRY_SECONDS
 from yungu_task import BASE, SUBMITTED, TODO, UploadedFile, YunguError, YunguTask
 
 ME, OTHER = 106, 207
@@ -29,6 +32,9 @@ PW_CHANGED = "Sign in again — your Yungu password may have changed."
 SIGN_IN_AGAIN = "Sign in again."
 UNREACHABLE = "Can't reach Yungu right now. Try again."
 TOO_LARGE = "Files up to 50 MB."
+TOO_MANY = "Too many attempts. Try again in a few minutes."
+BUSY = "Too many sign-ins right now. Try again in a moment."
+DELTA = '{"ops":[{"insert":"研究计划\\n"},{"insert":"第一步","attributes":{"bold":true}},{"insert":"\\n"}]}'
 NOW = 1792800000.0          # Sat 2026-10-24 (China), in seconds
 
 
@@ -325,6 +331,8 @@ def test_sign_in_stores_0600_credentials_and_returns_a_token(api, state_dir, wor
     assert creds == {"loginId": "S106", "password": "hunter2-xyz"}
     on_disk = "".join((state_dir / f).read_text() for f in files)
     assert body["token"] not in on_disk                     # only a hash of each token is stored
+    saved = json.loads((state_dir / "tokens.json").read_text())
+    assert saved == {"userId": ME, "hashes": [hashlib.sha256(body["token"].encode()).hexdigest()]}
     assert world.logins == ["S106"]
 
 
@@ -456,6 +464,7 @@ def test_any_account_can_sign_in_and_its_password_is_never_written(api, state_di
 
 
 def test_a_non_owners_writes_leave_its_password_off_disk(api, world, state_dir, auth, b_auth):
+    own(api, 22220001, user=OTHER)
     assert api.post("/assignments/93251/submit", json={"fileIds": ["22220001"]}, headers=b_auth).status_code == 200
     assert api.post("/assignments/94929/submit", json={"fileIds": []}, headers=b_auth).status_code == 200
     assert B_PW not in state_text(state_dir) and b_auth["Authorization"].split()[1] not in state_text(state_dir)
@@ -496,7 +505,7 @@ def test_a_non_owners_password_is_not_kept_in_memory_after_sign_in(api, world, a
 
 
 READS = ["/todo", "/submitted", "/week?start=1792339200000", "/courses", "/assignments/93251", "/assignments/94929",
-         "/files/11128687?preview=1", "/notifications/count", "/notifications?read=true", "/notifications?read=false"]
+         "/notifications/count", "/notifications?read=true", "/notifications?read=false"]
 
 
 def test_two_accounts_read_their_own_data_on_every_endpoint(api, world, auth, b_auth):
@@ -508,7 +517,9 @@ def test_two_accounts_read_their_own_data_on_every_endpoint(api, world, auth, b_
         assert api.get(path, headers=auth).json() == a.json(), path
     assert api.get("/courses", headers=b_auth).json() == mapping.courses(world.peer.courses)
     assert api.get("/notifications/count", headers=b_auth).json() == {"unread": 5}
-    assert api.get("/files/11128687?preview=1", headers=b_auth).json() == {"redirect": world.peer.redirect}
+    assert api.get("/files/11128687?preview=1", headers=auth).json() == {"redirect": world.redirect}
+    assert api.get("/files/22220001?preview=1", headers=b_auth).json() == {"redirect": world.peer.redirect}
+    assert api.get("/files/11128687?preview=1", headers=b_auth).json() == {"error": "Not found."}
     d = api.get("/assignments/93251", headers=b_auth).json()
     assert d["title"].startswith("B ") and [f["id"] for f in d["myFiles"]] == ["22220001"]
     assert [c["mine"] for c in d["comments"]] == [False, True, False]
@@ -529,7 +540,7 @@ def test_concurrent_reads_from_two_accounts_get_their_own_data(api, world, auth,
 
 
 WRITES_BY_B = [
-    ("PUT", "/assignments/94929/draft", {"fileIds": ["11128687"]}, "save_draft"),
+    ("PUT", "/assignments/94929/draft", {"fileIds": ["22220001"]}, "save_draft"),
     ("POST", "/assignments/93251/submit", {"fileIds": ["22220001"]}, "submit"),
     ("POST", "/assignments/94929/submit", {"fileIds": []}, "mark_submitted"),
     ("POST", "/assignments/94929/online-docs", {"title": "t", "content": '{"ops":[{"insert":"x\\n"}]}'},
@@ -545,6 +556,7 @@ WRITES_BY_B = [
 @pytest.mark.parametrize("method,path,body,call", WRITES_BY_B)
 def test_a_write_goes_through_the_writers_session_and_clears_only_its_cache(api, world, auth, b_auth,
                                                                              method, path, body, call):
+    own(api, 22220001, 11130500, user=OTHER)
     api.get("/courses", headers=auth)
     api.get("/courses", headers=b_auth)
     r = api.request(method, path, json=body, headers=b_auth)
@@ -578,6 +590,7 @@ def test_ids_in_urls_never_reach_another_accounts_data(api, world, auth, b_auth)
 
 
 def test_hand_in_records_are_kept_per_account(api, world, state_dir, auth, b_auth):
+    own(api, 11128687)
     assert api.post("/assignments/93251/submit", json={"fileIds": ["11128687"]}, headers=auth).status_code == 200
     # S207's 93251: handed in on Yungu, then a draft opened holding document 22230777; S207 has no kept list.
     world.peer.ach[93251].update(fileModelList=[online_doc(22230777)], ifEditStatus=True)
@@ -657,6 +670,7 @@ def test_a_non_owner_whose_yungu_session_expires_must_sign_in_again(api, world, 
 
 
 def test_a_non_owner_session_expiring_on_a_write_is_not_retried(api, world, auth, b_auth):
+    own(api, 22220001, user=OTHER)
     world.peer.expire_all()
     r = api.post("/assignments/93251/submit", json={"fileIds": ["22220001"]}, headers=b_auth)
     assert r.status_code == 401 and r.json() == {"error": SIGN_IN_AGAIN}
@@ -731,7 +745,262 @@ def test_a_state_dir_from_before_multi_account_still_works(make, world, state_di
     assert not (state_dir / "submitted-files.json").exists() and json.loads(moved.read_text()) == old[
         "submitted-files.json"]
     assert all(mode(p) == (0o700 if p.is_dir() else 0o600) for p in state_dir.rglob("*"))
+    assert json.loads((state_dir / "tokens.json").read_text())["userId"] == ME     # bound to the owner
     assert make().get("/assignments/93251", headers=auth).json()["submittedFileIds"] == ["11128687"]
+
+
+def own(api, *file_ids, user=ME):
+    """Make file ids known to an account, as if it had been shown them (for tests about something else)."""
+    api.app.state.service.account(user).files.add(str(i) for i in file_ids)
+
+
+# ------------------------------------------- owner record fails closed (fix round 1)
+OLD_TOKEN = "token-from-the-single-owner-days-" + "y" * 16
+
+
+def old_state(state_dir, owner_text, tokens=None):
+    """S106's saved login and a token, with owner.json as given (None: no owner.json at all)."""
+    state_dir.mkdir(mode=0o700, exist_ok=True)
+    files = {"credentials.json": json.dumps({"loginId": "S106", "password": "hunter2-xyz"}),
+             "tokens.json": json.dumps(tokens or {"hashes": [hashlib.sha256(OLD_TOKEN.encode()).hexdigest()]})}
+    if owner_text is not None:
+        files["owner.json"] = owner_text
+    for name, text in files.items():
+        (state_dir / name).write_text(text)
+        os.chmod(state_dir / name, 0o600)
+    return {"Authorization": f"Bearer {OLD_TOKEN}"}
+
+
+@pytest.mark.parametrize("owner_text", ["{corrupt", None, '{"userId": "106"}', '{"userId": true}', "[]", ""])
+def test_an_unreadable_or_missing_owner_record_fails_closed(make, world, state_dir, owner_text, caplog):
+    old = old_state(state_dir, owner_text)
+    before = {p.name: p.read_bytes() for p in state_dir.iterdir()}
+    caplog.set_level("INFO")
+    api = make()
+    assert api.get("/courses", headers=old).json() == {"error": SIGN_IN_AGAIN}       # the saved token: not trusted
+    b = b_sign_in(api)
+    assert api.get("/courses", headers=b).json() == mapping.courses(world.peer.courses)
+    a = sign_in(api)                                     # even S106: signed in, but nothing saved for it
+    assert api.get("/courses", headers=a).json() == mapping.courses(world.courses)
+    assert api.get("/courses", headers=old).status_code == 401
+    assert {p.name: p.read_bytes() for p in state_dir.iterdir()} == before         # nothing written or replaced
+    assert world.logins == ["S106"] and world.peer.logins == ["S207"]               # no re-login with the saved one
+    assert make().get("/courses", headers=a).status_code == 401                     # S106 was not made the owner
+    assert "owner.json" in caplog.text and "S207" not in caplog.text and "106" not in caplog.text
+
+
+def test_an_old_token_list_is_bound_to_the_owner_on_first_use(make, world, state_dir):
+    old = old_state(state_dir, json.dumps({"userId": ME, "loginId": "S106"}))
+    api = make()
+    assert api.get("/courses", headers=old).status_code == 200 and world.logins == ["S106"]
+    assert json.loads((state_dir / "tokens.json").read_text()) == {
+        "userId": ME, "hashes": [hashlib.sha256(OLD_TOKEN.encode()).hexdigest()]}
+    assert mode(state_dir / "tokens.json") == 0o600
+    assert make().get("/courses", headers=old).status_code == 200
+
+
+def test_tokens_saved_for_another_user_id_are_refused(make, world, state_dir):
+    old = old_state(state_dir, json.dumps({"userId": ME, "loginId": "S106"}),
+                    tokens={"userId": OTHER, "hashes": [hashlib.sha256(OLD_TOKEN.encode()).hexdigest()]})
+    assert make().get("/courses", headers=old).status_code == 401 and world.logins == []
+
+
+def test_the_owner_keeps_its_tokens_when_the_saved_list_is_bound_to_it(make, world, state_dir):
+    old = old_state(state_dir, json.dumps({"userId": ME, "loginId": "S106"}),
+                    tokens={"userId": ME, "hashes": [hashlib.sha256(OLD_TOKEN.encode()).hexdigest()]})
+    api = make()
+    fresh = sign_in(api)
+    assert api.get("/courses", headers=old).status_code == 200 and api.get("/courses", headers=fresh).status_code == 200
+    assert len(json.loads((state_dir / "tokens.json").read_text())["hashes"]) == 2
+
+
+# ------------------------------------------------ file ids (fix round 1)
+def test_a_file_id_the_account_was_not_shown_is_a_404_without_calling_yungu(api, world, auth):
+    for path in ("/files/11128687", "/files/11128687?preview=1"):
+        r = api.get(path, headers=auth)
+        assert r.status_code == 404 and r.json() == {"error": "Not found."}
+    assert world.count("file_redirect") == 0
+    world.mixed[93251]["fileList"] = [{"fileId": 11120001, "fileName": "brief.pdf", "type": "file"}]
+    d = api.get("/assignments/93251", headers=auth).json()
+    shown = [f["id"] for f in d["myFiles"] + d["attachments"]]
+    assert "11128687" in shown and len(shown) > 1
+    for fid in shown:
+        assert api.get(f"/files/{fid}", headers=auth).status_code == 200, fid
+    assert world.count("file_redirect") == len(shown)
+
+
+def test_an_accounts_own_uploads_and_documents_are_its_to_use(api, world, auth):
+    up = api.post("/files", files={"file": ("a.txt", b"1", "text/plain")}, headers=auth).json()["id"]
+    doc = api.post("/assignments/94929/online-docs", json={"title": "t", "content": DELTA}, headers=auth).json()["id"]
+    assert api.get(f"/files/{up}", headers=auth).status_code == 200
+    assert api.put(f"/assignments/94929/online-docs/{doc}", json={"title": "t2", "content": DELTA},
+                   headers=auth).status_code == 200
+    assert api.put("/assignments/94929/draft", json={"fileIds": [up, doc]}, headers=auth).status_code == 204
+
+
+@pytest.mark.parametrize("method,path,body", [
+    ("PUT", "/assignments/94929/draft", {"fileIds": ["11128687"]}),
+    ("POST", "/assignments/94929/submit", {"fileIds": ["11128687"]}),
+    ("PUT", "/assignments/94929/online-docs/11128687", {"title": "t", "content": DELTA}),
+])
+def test_writes_with_a_file_id_the_account_was_not_shown_are_a_404_without_a_write(api, world, auth,
+                                                                                    method, path, body):
+    r = api.request(method, path, json=body, headers=auth)
+    assert r.status_code == 404 and r.json() == {"error": "Not found."}
+    assert writes(world) == []
+
+
+def test_one_account_cannot_open_update_or_hand_in_anothers_files(api, world, auth, b_auth):
+    api.get("/assignments/93251", headers=auth)                           # the owner is shown 11128687
+    doc = api.post("/assignments/94929/online-docs", json={"title": "t", "content": DELTA}, headers=auth).json()["id"]
+    api.get("/assignments/93251", headers=b_auth)                         # S207 is shown its own files only
+    for path in ("/files/11128687", "/files/11128687?preview=1", f"/files/{doc}"):
+        assert api.get(path, headers=b_auth).json() == {"error": "Not found."}, path
+    assert api.put(f"/assignments/94929/online-docs/{doc}", json={"title": "t", "content": DELTA},
+                   headers=b_auth).status_code == 404
+    assert api.put("/assignments/94929/draft", json={"fileIds": ["11128687"]}, headers=b_auth).status_code == 404
+    assert api.post("/assignments/93251/submit", json={"fileIds": [doc]}, headers=b_auth).status_code == 404
+    assert api.post("/assignments/93251/submit", json={"fileIds": ["22220001", "11128687"]},
+                    headers=b_auth).status_code == 404                    # one foreign id spoils the list
+    assert writes(world.peer) == [] and world.peer.count("file_redirect") == 0
+    assert api.get("/files/22220001", headers=b_auth).status_code == 200  # its own file opens
+    assert api.get("/files/11128687", headers=auth).status_code == 200    # and the owner's still does
+
+
+def test_after_a_restart_opening_an_assignment_makes_its_files_usable_again(make, api, world, auth):
+    world.ach[94929]["fileModelList"] = [online_doc(11130500)]
+    restarted = make()
+    assert restarted.get("/files/11128687", headers=auth).status_code == 404
+    restarted.get("/assignments/93251", headers=auth)
+    assert restarted.get("/files/11128687?preview=1", headers=auth).status_code == 200
+    assert restarted.get("/files/11128687", headers=auth).status_code == 200
+    restarted.get("/assignments/94929", headers=auth)
+    r = restarted.put("/assignments/94929/online-docs/11130500", json={"title": "t", "content": DELTA}, headers=auth)
+    assert r.status_code == 200
+    assert world.logins == ["S106", "S106"]                              # the saved password, no new sign-in
+
+
+def test_a_cached_detail_still_makes_its_files_known(api, world, auth, monkeypatch):
+    monkeypatch.setattr(KnownFiles, "CAP", 2)
+    api.get("/assignments/93251", headers=auth)
+    own(api, 1, 2)                                                        # pushes 93251's files out
+    assert api.get("/files/11128687", headers=auth).status_code == 404
+    api.get("/assignments/93251", headers=auth)                           # from the cache: known again
+    assert api.get("/files/11128687", headers=auth).status_code == 200 and world.count("task_detail") == 1
+
+
+def test_known_files_are_bounded_oldest_first():
+    known = KnownFiles(cap=3)
+    known.add(["1", "2", "3"])
+    known.add(["1", "4"])                                                 # 1 seen again: 2 is the oldest
+    assert [known.has(i) for i in (1, 2, 3, 4)] == [True, False, True, True]
+
+
+# ------------------------------------------------ memory bounds (fix round 1)
+def test_the_read_cache_drops_expired_entries_and_holds_at_most_its_cap():
+    clock = Clock(0.0)
+    cache = ReadCache(ttl=60, clock=clock, max_entries=3)
+    for k in range(3):
+        cache.get(k, lambda: k)
+    clock.t = 61
+    cache.get("new", lambda: 1)
+    assert len(cache) == 1
+    for k in range(10):
+        cache.get(("x", k), lambda: k)
+    assert len(cache) == 3 and cache.get(("x", 9), lambda: "recomputed") == 9
+
+
+def test_one_accounts_cache_stays_bounded_however_many_weeks_it_asks_for(api, world, auth):
+    for week in range(400):
+        api.get(f"/week?start={1792339200000 + week * 7 * 86400 * 1000}", headers=auth)
+    assert len(api.app.state.service.account(ME).cache) <= 300
+
+
+def test_an_idle_non_owner_is_signed_out_after_12_hours_and_the_owner_never(api, world, auth, b_auth, clock):
+    service = api.app.state.service
+    clock.t += IDLE_SECONDS - 60
+    assert api.get("/courses", headers=b_auth).status_code == 200            # used just in time: kept
+    clock.t += IDLE_SECONDS - 60
+    assert api.get("/courses", headers=b_auth).status_code == 200
+    clock.t += IDLE_SECONDS + 1
+    assert api.get("/courses", headers=auth).status_code == 200              # any request sweeps
+    assert OTHER not in service.yungu._sessions and OTHER not in service._accounts
+    assert OTHER not in service.auth._memory.values()
+    assert api.get("/courses", headers=b_auth).json() == {"error": SIGN_IN_AGAIN}
+    assert world.logins == ["S106"] and ME in service.yungu._sessions
+    assert api.get("/courses", headers=b_sign_in(api)).status_code == 200    # and S207 can sign in again
+
+
+def test_a_non_owner_keeps_only_its_newest_tokens(api, world, auth):
+    tokens = [b_sign_in(api) for _ in range(MAX_TOKENS_PER_ACCOUNT + 3)]
+    assert sum(1 for u in api.app.state.service.auth._memory.values() if u == OTHER) == MAX_TOKENS_PER_ACCOUNT
+    assert api.get("/courses", headers=tokens[0]).status_code == 401
+    assert api.get("/courses", headers=tokens[-1]).status_code == 200
+
+
+# ---------------------------------------------- sign-in throttling (fix round 1)
+def bad_sign_in(api, login_id="S207"):
+    return api.post("/session", json={"loginId": login_id, "password": "wrong"})
+
+
+def test_five_failed_sign_ins_in_15_minutes_back_off_without_calling_yungu(api, world, clock):
+    for _ in range(5):
+        assert bad_sign_in(api).json() == {"ok": False, "error": "账号或密码错误"}
+    r = api.post("/session", json={"loginId": "S207", "password": B_PW})       # even the right password waits
+    assert r.status_code == 429 and r.json() == {"ok": False, "error": TOO_MANY}
+    assert bad_sign_in(api).status_code == 429 and world.peer.logins == ["S207"] * 5
+    assert api.post("/session", json={"loginId": "S106", "password": "hunter2-xyz"}).json()["ok"] is True
+    clock.t += 15 * 60 + 1
+    assert api.get("/courses", headers=b_sign_in(api)).status_code == 200
+
+
+def test_failures_older_than_15_minutes_do_not_count(api, world, clock):
+    for _ in range(4):
+        bad_sign_in(api)
+    clock.t += 15 * 60 + 1
+    for _ in range(4):
+        assert bad_sign_in(api).status_code == 200
+    assert world.peer.logins == ["S207"] * 8
+
+
+def test_a_successful_sign_in_clears_the_count(api, world):
+    for _ in range(4):
+        bad_sign_in(api)
+    b_sign_in(api)
+    for _ in range(4):
+        assert bad_sign_in(api).status_code == 200
+    assert b_sign_in(api)
+
+
+def test_the_back_off_counts_a_login_id_whatever_its_case_or_spaces(api, world):
+    for login_id in ("s207", " S207", "S207 ", "s207", "S207"):
+        bad_sign_in(api, login_id)
+    assert api.post("/session", json={"loginId": "S207", "password": B_PW}).status_code == 429
+
+
+def test_yungu_being_down_does_not_count_as_a_failed_sign_in(api, world, monkeypatch):
+    with monkeypatch.context() as m:
+        login_down(m)
+        for _ in range(6):
+            assert api.post("/session", json={"loginId": "S207", "password": B_PW}).status_code == 502
+    assert b_sign_in(api)
+
+
+def test_sign_ins_beyond_the_concurrent_cap_are_refused_without_calling_yungu(api, world):
+    world.peer.login_hang = threading.Event()
+    hung = [threading.Thread(target=lambda: api.post("/session", json={"loginId": "S207", "password": B_PW}))
+            for _ in range(MAX_CONCURRENT_SIGN_INS)]
+    for t in hung:
+        t.start()
+    try:
+        wait_until(lambda: len(world.peer.logins) == MAX_CONCURRENT_SIGN_INS)
+        r = within(3, lambda: api.post("/session", json={"loginId": "S106", "password": "hunter2-xyz"}))
+        assert r.status_code == 429 and r.json() == {"ok": False, "error": BUSY} and world.logins == []
+    finally:
+        world.peer.login_hang.set()
+        for t in hung:
+            t.join(10)
+    assert sign_in(api)                                                    # free again once they finish
 
 
 # ------------------------------------------------------------------ reads
@@ -804,6 +1073,7 @@ def test_unknown_assignment_is_a_404(api, auth):
 
 
 def test_file_redirect(api, world, auth):
+    own(api, 11128687)
     r = api.get("/files/11128687?preview=1", headers=auth)
     assert r.json() == {"redirect": world.redirect}
     assert world.calls[-1] == ("file_redirect", (11128687, True))
@@ -855,6 +1125,7 @@ def test_refresh_clears_the_cache(api, world, auth):
     ("POST", "/notifications/7790000/read", None),
 ])
 def test_writes_clear_the_cache(api, world, auth, method, path, body):
+    own(api, 11128687, 11130500)
     api.get("/courses", headers=auth)
     assert api.request(method, path, json=body, headers=auth).status_code < 300
     api.get("/courses", headers=auth)
@@ -933,6 +1204,7 @@ def test_first_request_after_restart_logs_in_lazily_once(make, world, auth):
 
 
 def test_writes_are_retried_once_after_a_relogin(api, world, auth):
+    own(api, 11128687)
     world.expire_all()
     r = api.put("/assignments/94929/draft", json={"fileIds": ["11128687"]}, headers=auth)
     assert r.status_code == 204
@@ -940,6 +1212,7 @@ def test_writes_are_retried_once_after_a_relogin(api, world, auth):
 
 
 def test_a_file_redirect_to_the_login_page_counts_as_expiry(api, world, auth):
+    own(api, 11128687)
     good = world.redirect
     world.redirect = "https://login.yungu.org/cas/login?service=https%3A%2F%2Ftask.yungu.org%2F"
     seen = []
@@ -1014,6 +1287,7 @@ def test_signing_in_after_a_rejection_works_again(api, world, auth):
     KeyError("content"),
 ])
 def test_yungu_failures_are_a_502(api, world, auth, exc):
+    own(api, 1)
     world.fail = exc
     for path in ("/courses", "/todo", "/submitted", "/assignments/93251", "/files/1"):
         r = api.get(path, headers=auth)
@@ -1192,6 +1466,7 @@ def test_a_file_yungu_has_no_bytes_for_is_a_422_not_a_502(real, preview):
     """Live, Yungu answers an empty HTTP 200 (no 302) on preview_file / new_download_file for an online
     document (type "onlineDocument", its text kept in Yungu) and for an id it has no file for."""
     api, auth = real
+    own(api, 11117133)
     path = "/api/preview_file" if preview == "1" else "/api/new_download_file"
     responses.get(BASE + path, status=200, body="")
     r = api.get(f"/files/11117133?preview={preview}", headers=auth)
@@ -1202,6 +1477,7 @@ def test_a_file_yungu_has_no_bytes_for_is_a_422_not_a_502(real, preview):
 @responses.activate
 def test_other_file_answers_stay_a_502(real):
     api, auth = real
+    own(api, 11117133)
     responses.get(BASE + "/api/new_download_file", status=500, body="busy")
     r = api.get("/files/11117133", headers=auth)
     assert r.status_code == 502 and r.json() == {"error": UNREACHABLE}
@@ -1453,6 +1729,7 @@ def test_upload_without_a_token_is_refused_before_reading_the_body(api, world):
 
 # ------------------------------------------------------------------ writes
 def test_draft_saves_the_list_against_the_task_user_relation(api, world, auth):
+    own(api, 11128687, 11128608)
     r = api.put("/assignments/94929/draft", json={"fileIds": ["11128687", "11128608"]}, headers=auth)
     assert r.status_code == 204
     rel = world.ach[94929]["taskUserRelationId"]
@@ -1469,6 +1746,7 @@ def test_draft_on_an_unknown_assignment_is_a_404(api, world, auth):
 
 
 def test_submit_saves_the_draft_then_hands_in_and_returns_the_time(api, world, auth):
+    own(api, 11128687)
     r = api.post("/assignments/93251/submit", json={"fileIds": ["11128687"]}, headers=auth)
     assert r.status_code == 200 and r.json() == {"submittedAt": int(NOW * 1000)}
     names = [c[0] for c in world.calls if c[0] in ("save_draft", "submit")]
@@ -1476,6 +1754,7 @@ def test_submit_saves_the_draft_then_hands_in_and_returns_the_time(api, world, a
 
 
 def test_submitted_file_ids_are_kept_per_assignment_across_restarts(make, api, world, state_dir, auth):
+    own(api, 11128687)
     api.post("/assignments/93251/submit", json={"fileIds": ["11128687"]}, headers=auth)
     world.ach[93251]["fileModelList"].append({**world.ach[93251]["fileModelList"][0], "fileId": 11128999,
                                               "fileName": "draft.txt"})      # draft edited after the hand-in
@@ -1489,6 +1768,7 @@ def test_submitted_file_ids_are_kept_per_assignment_across_restarts(make, api, w
 def test_an_old_record_written_after_the_move_is_merged_in(make, world, state_dir, auth):
     # The single-account service ran again after the move (a rollback): its top-level record is newer.
     api = make()
+    own(api, 11128687, 11128608)
     api.post("/assignments/93251/submit", json={"fileIds": ["11128687"]}, headers=auth)
     api.post("/assignments/94929/submit", json={"fileIds": ["11128608"]}, headers=auth)
     (state_dir / "submitted-files.json").write_text(json.dumps({"94929": ["11130300"], "95000": ["1"]}))
@@ -1517,6 +1797,7 @@ def test_without_a_kept_list_submitted_file_ids_fall_back_to_the_current_files(a
 ])
 def test_submit_picks_first_submit_or_update_by_achievement_id(real, load, achievement_id, endpoint):
     api, auth = real
+    own(api, 11128608)
     ach = {**load("achievement_93251.json"), "achievementId": achievement_id}
     responses.post(BASE + "/api/student/getAchievementDetail", json={"code": 0, "content": ach})
     responses.get(BASE + "/api/student/submitAchievementForDrafts", json={"code": 0})
@@ -1573,7 +1854,6 @@ def test_someone_elses_comment_is_left_alone_and_is_a_404(api, world, auth):
 
 
 # ------------------------------------------------------- online documents
-DELTA = '{"ops":[{"insert":"研究计划\\n"},{"insert":"第一步","attributes":{"bold":true}},{"insert":"\\n"}]}'
 WRITES = ("create_online_doc", "update_online_doc", "save_draft", "submit", "mark_submitted")
 
 
@@ -1623,6 +1903,7 @@ def test_created_doc_content_is_the_delta_sent_even_if_yungu_echoes_otherwise(ap
 
 
 def test_update_online_doc_keeps_its_id(api, world, auth):
+    own(api, 11130500)
     r = api.put("/assignments/94929/online-docs/11130500", json={"title": "改过的", "content": DELTA}, headers=auth)
     assert r.status_code == 200, r.text
     ref = r.json()
@@ -1632,6 +1913,7 @@ def test_update_online_doc_keeps_its_id(api, world, auth):
 
 
 def test_update_online_doc_sends_the_achievement_id(api, world, auth):
+    own(api, 11130500)
     world.ach[94929]["achievementId"] = 870001
     api.put("/assignments/94929/online-docs/11130500", json={"title": "t", "content": DELTA}, headers=auth)
     assert writes(world) == [("update_online_doc", (11130500, "t", DELTA, 870001))]
@@ -1649,6 +1931,7 @@ def test_a_document_needs_a_title(api, world, auth, method, path, title):
 @pytest.mark.parametrize("method,path", [
     ("POST", "/assignments/94929/online-docs"), ("PUT", "/assignments/94929/online-docs/11130500")])
 def test_a_delta_of_65535_bytes_is_sent(api, world, auth, method, path):
+    own(api, 11130500)
     content = delta_of_bytes(65535)
     r = api.request(method, path, json={"title": "长文", "content": content}, headers=auth)
     assert r.status_code == 200, r.text
@@ -1684,6 +1967,7 @@ def test_the_cut_count_is_plural_from_two(api, world, auth):
 @pytest.mark.parametrize("method,path", [
     ("POST", "/assignments/94929/online-docs"), ("PUT", "/assignments/94929/online-docs/11130500")])
 def test_yungus_code_1008_under_the_limit_is_a_502_not_too_long(api, world, auth, method, path, caplog):
+    own(api, 11130500)
     # Over the limit never reaches Yungu (the 413 above), so a 1008 here is not about length.
     world.doc_error = code_1008()
     content = delta_of_bytes(65535)
@@ -1702,6 +1986,7 @@ def test_other_yungu_failures_on_a_document_are_a_502(api, world, auth):
 
 
 def test_a_handed_in_document_is_never_updated_in_place(api, world, auth):
+    own(api, world.ach[93251]["fileModelList"][0]["fileId"])
     handed_in = world.ach[93251]["fileModelList"][0]["fileId"]
     r = api.put(f"/assignments/93251/online-docs/{handed_in}", json={"title": "t", "content": DELTA}, headers=auth)
     assert r.status_code == 409 and r.json() == {"error": "This document was handed in — save it as a new one."}
@@ -1709,6 +1994,7 @@ def test_a_handed_in_document_is_never_updated_in_place(api, world, auth):
 
 
 def test_the_kept_hand_in_list_decides_what_was_handed_in(api, world, auth):
+    own(api, 11128687, 11130777)
     api.post("/assignments/93251/submit", json={"fileIds": ["11128687"]}, headers=auth)
     world.ach[93251]["ifEditStatus"] = True                         # a draft is open after the hand-in
     world.calls.clear()
@@ -1743,6 +2029,7 @@ def test_a_hand_in_made_on_yungu_is_remembered_once_a_draft_replaces_a_document(
 
 
 def test_a_later_hand_in_on_yungu_replaces_the_kept_list(api, world, auth):
+    own(api, 11128687, 11130300)
     api.post("/assignments/93251/submit", json={"fileIds": ["11128687"]}, headers=auth)
     # Later, on Yungu's website: document 11130300 added and handed in (no draft open).
     ach = world.ach[93251]
@@ -1759,6 +2046,7 @@ def test_a_later_hand_in_on_yungu_replaces_the_kept_list(api, world, auth):
 
 
 def test_with_a_draft_open_and_no_kept_list_every_current_document_counts_as_handed_in(api, world, auth):
+    own(api, 11130300)
     ach = world.ach[93251]
     ach["fileModelList"] = [online_doc(11130300), *ach["fileModelList"]]
     ach["ifEditStatus"] = True                                           # unsure what the teacher has
@@ -1770,6 +2058,7 @@ def test_the_hand_in_check_reads_yungu_not_the_cache(api, world, auth):
     api.get("/assignments/94929", headers=auth)                     # cached as not submitted
     world.ach[94929].update(achievementStatus=4, fileModelList=[{**world.ach[93251]["fileModelList"][0]}])
     fid = world.ach[94929]["fileModelList"][0]["fileId"]
+    own(api, fid)
     r = api.put(f"/assignments/94929/online-docs/{fid}", json={"title": "t", "content": DELTA}, headers=auth)
     assert r.status_code == 409 and writes(world) == []
 

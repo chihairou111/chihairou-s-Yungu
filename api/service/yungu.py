@@ -29,6 +29,8 @@ PASSWORD_CHANGED = "Sign in again — your Yungu password may have changed."
 UNREACHABLE = "Can't reach Yungu right now. Try again."
 WRONG_LOGIN = "Wrong student ID or password."
 LOGIN_RETRY_SECONDS = 30.0
+IDLE_SECONDS = 12 * 3600.0          # an account other than the owner unused this long is signed out
+SWEEP_SECONDS = 60.0                # idle accounts are looked for at most this often
 
 
 class ServiceError(Exception):
@@ -299,15 +301,18 @@ class MemorySession:
     no re-login: when Yungu says the session is gone it ends (`on_end`), and so does every request until
     the account signs in again. `_lock` guards `_client` only; calls run outside it."""
 
-    def __init__(self, user_id: int, on_end: Callable[[int], None]):
+    def __init__(self, user_id: int, on_end: Callable[[int], None], clock: Callable[[], float]):
         self.user_id = user_id
         self._on_end = on_end
+        self._clock = clock
         self._lock = threading.Lock()
         self._client = None
+        self._used = clock()
 
     def call(self, fn: Callable[[object], T]) -> T:
         with self._lock:
             client = self._client
+            self._used = self._clock()
         if client is None:
             raise SignInAgain()
         done, value = _run(client, fn, "Yungu call")
@@ -320,6 +325,7 @@ class MemorySession:
     def signed_in(self, client) -> None:
         with self._lock:
             self._client = client
+            self._used = self._clock()
 
     def end(self, client=None) -> None:
         """Sign-out (any client), or expiry of `client` (only while it is still the current one: a newer
@@ -335,7 +341,18 @@ class MemorySession:
 
     def live(self) -> bool:
         with self._lock:
+            self._used = self._clock()
             return self._client is not None
+
+    def ended_if_idle(self, since: float) -> bool:
+        """Unused since before `since`: end it (if it is still on) and answer True, so it can go."""
+        with self._lock:
+            if self._used >= since:
+                return False
+            if self._client is not None:
+                self._client = None
+                self._on_end(self.user_id)
+            return True
 
 
 class Yungu:
@@ -350,20 +367,36 @@ class Yungu:
         self._on_end = on_end           # an account other than the owner ended (expiry or sign-out)
         self._lock = threading.Lock()
         self._sessions: Dict[int, object] = {}
+        self._swept = clock()
 
     def _get(self, user_id: int):
-        """The account's session; the owner's is made on first use (after a restart it logs in lazily
-        with the saved password), another account's only exists from its sign-in on."""
         owner = self._auth.owner()
         with self._lock:
-            session = self._sessions.get(user_id)
-            if session is None or isinstance(session, OwnerSession) != (user_id == owner):
-                if user_id == owner:
-                    session = OwnerSession(user_id, self._auth, self._factory, self._clock)
-                else:
-                    session = MemorySession(user_id, self._ended)
-                self._sessions[user_id] = session
-            return session
+            return self._get_locked(user_id, owner)
+
+    def _get_locked(self, user_id: int, owner: Optional[int]):
+        """The account's session; the owner's is made on first use (after a restart it logs in lazily
+        with the saved password), another account's only exists from its sign-in on."""
+        session = self._sessions.get(user_id)
+        if session is None or isinstance(session, OwnerSession) != (user_id == owner):
+            if user_id == owner:
+                session = OwnerSession(user_id, self._auth, self._factory, self._clock)
+            else:
+                session = MemorySession(user_id, self._ended, self._clock)
+            self._sessions[user_id] = session
+        return session
+
+    def sweep(self) -> None:
+        """At most every SWEEP_SECONDS: sign out and forget every account other than the owner that has
+        not been used for IDLE_SECONDS. The owner's session is never swept."""
+        now = self._clock()
+        with self._lock:
+            if now - self._swept < SWEEP_SECONDS:
+                return
+            self._swept = now
+            for user_id, session in list(self._sessions.items()):
+                if isinstance(session, MemorySession) and session.ended_if_idle(now - IDLE_SECONDS):
+                    del self._sessions[user_id]
 
     def _ended(self, user_id: int) -> None:
         self._auth.drop_tokens(user_id)
@@ -380,10 +413,14 @@ class Yungu:
         The password is saved only when the account is the owner. Returns (userId, Yungu's user)."""
         client = self._factory(login_id, password)
         user, user_id = _logged_in(client)
-        if self._auth.claim_owner(login_id, user_id):
-            self._get(user_id).signed_in(client, Credentials(login_id, password))
-        else:
-            self._get(user_id).signed_in(client)
+        is_owner = self._auth.claim_owner(login_id, user_id)
+        owner = self._auth.owner()
+        with self._lock:                    # installed in the session the registry holds, never a swept one
+            session = self._get_locked(user_id, owner)
+            if is_owner:
+                session.signed_in(client, Credentials(login_id, password))
+            else:
+                session.signed_in(client)
         return user_id, user
 
     def sign_out(self, user_id: int) -> None:
