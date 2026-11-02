@@ -17,7 +17,9 @@ background schedule. The store and the engine are todoist_sync.py; the client is
 * **Status** is kept in memory (running, last error) and the last error is also saved, best effort, in the
   store. Reads never take the store's lock: a token refresh holds it across a network call.
 * **Back-off:** a Todoist outage (429, 5xx, network) holds automatic triggers (schedule, Refresh, sign-in) for
-  15 min, doubling per failure in a row up to 2 h; Todoist's Retry-After holds every trigger, also Try again.
+  15 min, doubling per failure in a row up to 2 h; Todoist's Retry-After (at most 2 h) holds every trigger,
+  also Try again. In `reauth` automatic triggers are held until Reconnect (also after a restart: the error is
+  saved); Try again still asks Todoist. A non-owner whose session is off gets `signin` without a worker.
 
 Tokens, codes, states and the client secret are never logged or answered.
 """
@@ -164,10 +166,12 @@ class TodoistService:
     """`_lock` guards `_accounts` and `_states`; nothing under it does I/O or takes another lock."""
 
     def __init__(self, state: StateDir, api: TodoistApi, todo_for: Callable[[int], List[dict]],
-                 now: Callable[[], float], monotonic: Callable[[], float]):
+                 now: Callable[[], float], monotonic: Callable[[], float],
+                 can_sync: Callable[[int], bool] = lambda uid: True):
         self._state = state
         self._api = api
         self._todo_for = todo_for          # the account's To-do list; SignInAgain / Unavailable as the routes
+        self._can_sync = can_sync          # the owner, or an account whose Yungu session is on; no I/O, no wait
         self._now, self._monotonic = now, monotonic
         self._lock = threading.Lock()
         self._changed = threading.Condition(self._lock)
@@ -186,6 +190,13 @@ class TodoistService:
 
     def connected(self, user_id: int) -> bool:
         return connected(self._state, user_id)
+
+    def _peek(self, user_id: int) -> Optional[dict]:
+        """The account's store, read without its lock; None when absent or unreadable."""
+        try:
+            return self._store(user_id).load()
+        except OSError:
+            return None
 
     def _account(self, user_id: int) -> _Account:          # under _lock
         return self._accounts.setdefault(user_id, _Account())
@@ -218,16 +229,23 @@ class TodoistService:
             raise NotAccepted()
         try:
             grant = self._api.exchange(code)
-            me = self._api.client(grant["access_token"]).me()
         except TodoistUnavailable as e:
             log.warning("Todoist connect for account %s failed: %s", user_id, e)
             raise TodoistDown() from None
         except TodoistError as e:
             log.warning("Todoist connect for account %s refused: %s", user_id, e)
             raise NotAccepted() from None
-        if not me.get("id"):
-            log.warning("Todoist connect for account %s: the Todoist user has no id", user_id)
-            raise NotAccepted()
+        try:
+            me = self._api.client(grant["access_token"]).me()
+            if not me.get("id"):
+                log.warning("Todoist connect for account %s: the Todoist user has no id", user_id)
+                raise NotAccepted()
+        except (TodoistError, NotAccepted) as e:
+            self._revoke_quietly(user_id, grant["access_token"])       # never stored: give the grant back
+            if isinstance(e, NotAccepted):
+                raise
+            log.warning("Todoist connect for account %s: reading the user failed: %s", user_id, e)
+            raise (TodoistDown() if isinstance(e, TodoistUnavailable) else NotAccepted()) from None
         store = self._store(user_id)
         mark = int(self._now() * 1000)
         with store.lock:
@@ -254,10 +272,14 @@ class TodoistService:
         if token:
             log.info("Todoist disconnected for account %s", user_id)
             if self.configured:
-                try:
-                    self._api.revoke(token)
-                except Exception as e:                    # the token is forgotten either way
-                    log.info("Todoist revoke for account %s failed: %s", user_id, type(e).__name__)
+                self._revoke_quietly(user_id, token)
+
+    def _revoke_quietly(self, user_id: int, token: str) -> None:
+        """Best effort: the token is forgotten (or was never kept) either way. Logs the exception type only."""
+        try:
+            self._api.revoke(token)
+        except Exception as e:
+            log.info("Todoist revoke for account %s failed: %s", user_id, type(e).__name__)
 
     # ------------------------------------------------------------- status
     def status(self, user_id: int) -> dict:
@@ -289,12 +311,24 @@ class TodoistService:
     def trigger(self, user_id: int, manual: bool = False) -> bool:
         """Start the account's sync unless one runs (then it runs once more after) or a back-off holds it.
         True when a sync is started or queued. Never waits."""
-        if not self.configured or not self.connected(user_id):
+        if not self.configured:
             return False
+        data = self._peek(user_id)
+        if not data or not data.get("token"):
+            return False
+        can_sync = self._can_sync(user_id)
         now = self._monotonic()
         with self._lock:
             a = self._account(user_id)
+            error = a.error if a.error is not _UNKNOWN else data.get("lastError")
+            if not manual and error == "reauth":
+                return False                      # a dead token: only Try again or Reconnect asks Todoist
             if now < a.retry_until or (not manual and now < a.not_before):
+                return False
+            if not can_sync and not a.running:    # its Yungu session is gone: no worker, no login
+                if a.error != "signin":
+                    log.warning("Todoist sync for account %s: signin", user_id)
+                a.error = "signin"
                 return False
             if a.running:
                 a.again = True
@@ -311,20 +345,26 @@ class TodoistService:
         return True
 
     def _worker(self, user_id: int) -> None:
+        finished = False
         try:
             while True:
                 with self._slots:
                     self._sync_once(user_id)
+                with self._lock:          # decide and clear `running` at once: a trigger after this starts anew
+                    a = self._account(user_id)
+                    if a.again and not self._stop.is_set():
+                        a.again = False
+                        continue
+                    a.running = a.again = False
+                    finished = True
+                    self._changed.notify_all()
+                    return
+        finally:
+            if not finished:              # only when something escaped _sync_once
                 with self._lock:
                     a = self._account(user_id)
-                    if not a.again or self._stop.is_set():
-                        break
-                    a.again = False
-        finally:
-            with self._lock:
-                a = self._account(user_id)
-                a.running = a.again = False
-                self._changed.notify_all()
+                    a.running = a.again = False
+                    self._changed.notify_all()
 
     def wait_idle(self, timeout: float) -> bool:
         """Until no sync runs (tests, shutdown); False on timeout."""
@@ -333,13 +373,13 @@ class TodoistService:
 
     def _sync_once(self, user_id: int) -> None:
         store = self._store(user_id)
-        start = store.load()
-        if not start or not start.get("token"):
-            return
-        account_id = (start.get("account") or {}).get("id")
-        mark = start.get("adoptPending")
-        retry_after = None
+        account_id, retry_after = None, None
         try:
+            start = store.load()
+            if not start or not start.get("token"):
+                return
+            account_id = (start.get("account") or {}).get("id")
+            mark = start.get("adoptPending")
             todo = self._todo_for(user_id)
             client = self._api.client_for(store)
             if client is None:
@@ -377,7 +417,7 @@ class TodoistService:
             if error == "todoist_unreachable":
                 a.failures += 1
                 a.not_before = now + min(BACKOFF_MAX_SECONDS, BACKOFF_FIRST_SECONDS * 2 ** (a.failures - 1))
-                a.retry_until = now + retry_after if retry_after else 0.0
+                a.retry_until = now + min(retry_after, BACKOFF_MAX_SECONDS) if retry_after else 0.0
             elif error is None:
                 a.failures, a.not_before, a.retry_until = 0, 0.0, 0.0
         if error is not None and error != before:   # once per change, not every 15 minutes

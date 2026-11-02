@@ -69,8 +69,8 @@ Error codes: `reauth` (token rejected), `todoist_unreachable` (Todoist down, 429
 connected on disk (one thread in the app lifespan, first round 30 s after start). One sync per account at a
 time (a trigger meanwhile runs it once more after), at most 4 accounts at once. The owner syncs through its
 automatic re-login; any other account only while its memory session is on (else `signin`, no login tried).
-A Todoist outage holds automatic triggers 15 min, doubling up to 2 h; Todoist's Retry-After holds every
-trigger. An account with Todoist connected is not signed out by the 12 h idle sweep (it stays until Yungu
+A Todoist outage holds automatic triggers 15 min, doubling up to 2 h; Todoist's Retry-After (capped at 2 h)
+holds every trigger; `reauth` holds automatic triggers until Reconnect (Try again still asks Todoist). An account with Todoist connected is not signed out by the 12 h idle sweep (it stays until Yungu
 ends its session). Tokens, codes, states and the client secret are never logged or answered.
 
 ## Run by hand

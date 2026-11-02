@@ -2864,6 +2864,7 @@ class FakeTodoistApi:
         self.exchanged = []
         self.revoked = []
         self.revoke_error = None
+        self.clients_made = 0         # syncs that got as far as asking Todoist
         self._n = 0
 
     def user(self, uid, name="", email=""):
@@ -2892,6 +2893,7 @@ class FakeTodoistApi:
         return FakeTodoistClient(self, token)
 
     def client_for(self, store):
+        self.clients_made += 1
         data = store.load()
         return FakeTodoistClient(self, data["token"]) if data and data.get("token") else None
 
@@ -3038,6 +3040,21 @@ def test_todoist_unreachable_during_the_callback_is_a_502(api, auth, tapi, chi, 
     r = api.post("/todoist/callback", json={"code": tapi.code_for(chi), "state": state}, headers=auth)
     assert r.status_code == 502 and r.json() == {"error": "Can't reach Todoist right now. Try again."}
     assert not store_of(state_dir, ME).is_connected()
+    assert len(tapi.revoked) == 1 and tapi.tokens == {}            # fix round 1: the fresh grant is revoked
+
+
+@pytest.mark.parametrize("how", ["refused", "no id"])
+def test_a_grant_whose_user_cannot_be_read_is_revoked_and_never_stored(api, auth, tapi, state_dir, caplog, how):
+    """Fix round 1: the code exchange worked but GET /user did not."""
+    user = FakeTodoistUser("" if how == "no id" else "42", "Chi", "chi@example.com")
+    if how == "refused":
+        user.fail = TodoistAuthError("Todoist user: HTTP 403", 403)
+    tapi.revoke_error = TodoistUnavailable("Todoist revoke: ConnectTimeout")      # best effort: still a 502
+    state = state_of(api.post("/todoist/connect", headers=auth).json()["authorizeUrl"])
+    r = api.post("/todoist/callback", json={"code": tapi.code_for(user), "state": state}, headers=auth)
+    assert r.status_code == 502 and r.json() == {"error": NOT_ACCEPTED}
+    assert len(tapi.revoked) == 1 and not store_of(state_dir, ME).is_connected()
+    assert tapi.revoked[0] not in caplog.text and tapi.revoked[0] not in r.text
 
 
 # ---------------------------------------------------------------- connect, sync, status
@@ -3457,3 +3474,135 @@ def test_the_callback_on_the_wire_sends_the_code_server_side_and_keeps_secrets_o
     assert saved["token"] == access and saved["refreshToken"] == refresh
     for secret in (access, refresh, CLIENT_SECRET, "the-CODE-1", state):
         assert secret not in caplog.text and secret not in r.text and secret not in status.text
+
+
+# ================================================================== Todoist fix round 1
+class _HookLock:
+    """Wraps the service's lock: on the `n`-th release by the first sync worker thread, run `hook` once."""
+
+    def __init__(self, inner, n, hook):
+        self.inner, self.n, self.hook = inner, n, hook
+        self.seen, self.worker, self.result = 0, None, None
+        self.done = threading.Event()
+
+    def acquire(self, *a, **k):
+        return self.inner.acquire(*a, **k)
+
+    def release(self):
+        self.inner.release()
+        me = threading.current_thread()
+        if not me.name.startswith("todoist-sync-"):
+            return
+        if self.worker is None:
+            self.worker = me
+        if me is self.worker:
+            self.seen += 1
+            if self.seen == self.n:
+                self.result = self.hook()
+                self.done.set()
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc):
+        self.release()
+
+
+@pytest.mark.parametrize("n", range(1, 4))
+def test_a_trigger_while_the_worker_finishes_is_never_lost(tmp_path, n):
+    """Fix round 1: a trigger answered True ("started or queued") always gets a sync after it."""
+    import service.todoist_service as ts
+    state = service_app.StateDir(str(tmp_path / "s"))
+    TodoistStore(state, 1).connect("tok", "rt", {"id": "9", "name": "n", "email": ""})
+    runs = []
+
+    class Api:
+        configured = True
+
+        def client_for(self, store):
+            return None                                   # ends the run right after the To-do read
+
+    svc = ts.TodoistService(state, Api(), lambda uid: runs.append(uid) or [], lambda: 1000.0, lambda: 1000.0)
+    hook = _HookLock(svc._lock, n, lambda: (len(runs), svc.trigger(1)))
+    svc._lock = hook
+    svc.trigger(1)
+    assert svc.wait_idle(5)
+    hook.done.wait(0.5)                                   # a hook in the worker's last release may still run
+    assert svc.wait_idle(5)
+    if hook.result is None:                               # the worker released the lock fewer than n times
+        assert hook.seen < n
+    else:
+        runs_then, answered = hook.result
+        if answered:
+            assert len(runs) == runs_then + 1, (runs_then, len(runs))
+    assert not svc._accounts[1].running and not svc._accounts[1].again
+
+
+def test_retry_after_is_capped_at_the_longest_back_off(api, auth, tapi, chi, clock):
+    import service.todoist_service as ts
+    connect_todoist(api, auth, tapi, chi)
+    chi.fail = TodoistUnavailable("Todoist: HTTP 429", 429, retry_after=10 ** 9)
+    api.post("/todoist/sync", headers=auth)
+    settle(api)
+    chi.fail = None
+    clock.t += ts.BACKOFF_MAX_SECONDS + 1
+    api.post("/todoist/sync", headers=auth)
+    settle(api)
+    assert api.get("/todoist", headers=auth).json()["state"] == "ok"
+
+
+def test_reauth_holds_automatic_triggers_until_reconnect(make, api, auth, tapi, chi, clock):
+    connect_todoist(api, auth, tapi, chi)
+    tapi.tokens.clear()
+    api.post("/todoist/sync", headers=auth)
+    settle(api)
+    assert error_of(api, auth)["code"] == "reauth"
+    chi.calls.clear()
+    asked = tapi.clients_made
+    for _ in range(3):                                         # schedule, Refresh, sign-in: no Todoist calls
+        clock.t += SYNC_INTERVAL_SECONDS
+        tsvc(api).tick()
+        api.post("/refresh", headers=auth)
+        sign_in(api)
+        settle(api)
+    restarted = make()                                         # also after a restart (the error is on disk)
+    tsvc(restarted).tick()
+    settle(restarted)
+    assert tapi.clients_made == asked and chi.calls == []
+    api.post("/todoist/sync", headers=auth)                    # Try again still asks Todoist
+    settle(api)
+    assert tapi.clients_made == asked + 1 and error_of(api, auth)["code"] == "reauth"
+    connect_todoist(api, auth, tapi, chi)                      # Reconnect: back to normal
+    assert api.get("/todoist", headers=auth).json()["state"] == "ok"
+    chi.calls.clear()
+    clock.t += SYNC_INTERVAL_SECONDS
+    tsvc(api).tick()
+    settle(api)
+    assert "me" in chi.names()
+
+
+def test_a_non_owner_without_a_session_gets_no_worker_thread(api, auth, b_auth, tapi, bea, world, monkeypatch):
+    connect_todoist(api, b_auth, tapi, bea)
+    api.delete("/session", headers=b_auth)
+    svc = tsvc(api)
+    started = []
+    monkeypatch.setattr(svc, "_worker", lambda uid: started.append(uid))
+    svc.tick()
+    assert started == [] and not svc._accounts[OTHER].running
+    assert svc.status(OTHER)["error"] == {"code": "signin", "message": MESSAGES["signin"]}
+    assert world.peer.logins == ["S207"]
+
+
+def test_a_store_that_cannot_be_read_in_the_worker_is_an_error_state(api, auth, tapi, chi, monkeypatch):
+    connect_todoist(api, auth, tapi, chi)
+    real = TodoistStore.load
+
+    def load(self):
+        if threading.current_thread().name.startswith("todoist-sync-"):
+            raise PermissionError("denied")
+        return real(self)
+    monkeypatch.setattr(TodoistStore, "load", load)
+    api.post("/todoist/sync", headers=auth)
+    settle(api)
+    assert error_of(api, auth)["code"] == "todoist_unreachable"

@@ -532,10 +532,14 @@ class Service:
             log.error("after sign-in: %s", type(e).__name__)
         return {"ok": True, "displayName": _display_name(user, login_id), "token": token}
 
+    def can_sync(self, user_id: int) -> bool:
+        """The owner (re-login with the saved password), or an account whose memory session is on."""
+        return user_id == self.auth.owner() or self.yungu.is_on(user_id)
+
     def todo_for_sync(self, user_id: int) -> List[dict]:
         """The account's To-do list for its Todoist sync: the owner through its session (re-login with the saved
         password), any other account only while its memory session is on (else SignInAgain, no login)."""
-        if user_id != self.auth.owner() and not self.yungu.is_on(user_id):
+        if not self.can_sync(user_id):
             raise SignInAgain()
         return Student(self, user_id).todo()
 
@@ -883,7 +887,7 @@ def create_app(state_dir: Optional[str] = None, client_factory=yungu_client,
     service = Service(state_dir or os.environ.get("YUNGU_STATE_DIR") or DEFAULT_STATE_DIR,
                       client_factory, now, monotonic)
     todoist = TodoistService(service._state, todoist_api or TodoistApi.from_env(), service.todo_for_sync,
-                             now, monotonic)
+                             now, monotonic, can_sync=service.can_sync)
     service.on_sign_in = todoist.trigger
 
     @asynccontextmanager
