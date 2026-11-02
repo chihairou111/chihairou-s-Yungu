@@ -17,6 +17,7 @@ import threading
 import time
 import weakref
 from collections import OrderedDict, deque
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Callable, Deque, Dict, Iterable, List, Optional, TypeVar
 
@@ -35,6 +36,7 @@ from yungu_task import ACHIEVEMENT_NOT_SUBMITTED, CST, ONLINE_DOC_MAX_BYTES, SUB
 from .auth import Auth
 from .cache import ReadCache
 from .state import StateDir, SubmittedFiles
+from .todoist_service import NotConnected, NotSetUp, TodoistApi, TodoistService, connected as todoist_connected
 from .yungu import (UNREACHABLE, ServiceError, SignInAgain, SignInRefused, Unavailable, Yungu, checked_redirect,
                     error_code)
 
@@ -202,6 +204,11 @@ class TextBody(BaseModel):
 class OnlineDocBody(BaseModel):
     title: str
     content: str          # the Quill delta JSON string, stored by Yungu as is
+
+
+class TodoistCallbackBody(BaseModel):
+    code: str = Field("", max_length=2048)
+    state: str = Field("", max_length=512)
 
 
 def _known(lookup: Callable[[], T]) -> T:
@@ -470,7 +477,9 @@ class Service:
     def __init__(self, state_dir: str, client_factory, now: Callable[[], float], monotonic: Callable[[], float]):
         self._state = StateDir(state_dir)
         self.auth = Auth(self._state)
-        self.yungu = Yungu(self.auth, client_factory, clock=monotonic, on_end=self._ended)
+        self.yungu = Yungu(self.auth, client_factory, clock=monotonic, on_end=self._ended,
+                           keep=lambda uid: todoist_connected(self._state, uid))
+        self.on_sign_in: Callable[[int], object] = lambda uid: None      # Todoist: resume the account's sync
         self._now, self._monotonic = now, monotonic
         self._lock = threading.Lock()          # guards _accounts only
         self._accounts: Dict[int, Account] = {}     # made on first use: importing the app touches nothing
@@ -516,7 +525,19 @@ class Service:
         user_id, user = self._gate.run(login_id, address, lambda: self.yungu.sign_in(login_id, password),
                                        owner_login=self.auth.owner_login())
         self.account(user_id).cache.clear()
-        return {"ok": True, "displayName": _display_name(user, login_id), "token": self.auth.issue_token(user_id)}
+        token = self.auth.issue_token(user_id)
+        try:
+            self.on_sign_in(user_id)
+        except Exception as e:                       # never fails a sign-in
+            log.error("after sign-in: %s", type(e).__name__)
+        return {"ok": True, "displayName": _display_name(user, login_id), "token": token}
+
+    def todo_for_sync(self, user_id: int) -> List[dict]:
+        """The account's To-do list for its Todoist sync: the owner through its session (re-login with the saved
+        password), any other account only while its memory session is on (else SignInAgain, no login)."""
+        if user_id != self.auth.owner() and not self.yungu.is_on(user_id):
+            raise SignInAgain()
+        return Student(self, user_id).todo()
 
 
 class Student:
@@ -856,11 +877,26 @@ class Student:
 
 # --------------------------------------------------------------------- app
 def create_app(state_dir: Optional[str] = None, client_factory=yungu_client,
-               now: Callable[[], float] = time.time, monotonic: Callable[[], float] = time.monotonic) -> FastAPI:
+               now: Callable[[], float] = time.time, monotonic: Callable[[], float] = time.monotonic,
+               todoist_api: Optional[TodoistApi] = None) -> FastAPI:
+    """`todoist_api`: the Todoist seam; by default the OAuth app from TODOIST_CLIENT_ID / TODOIST_CLIENT_SECRET."""
     service = Service(state_dir or os.environ.get("YUNGU_STATE_DIR") or DEFAULT_STATE_DIR,
                       client_factory, now, monotonic)
-    app = FastAPI(title="Yungu LMS service", docs_url=None, redoc_url=None, openapi_url=None)
+    todoist = TodoistService(service._state, todoist_api or TodoistApi.from_env(), service.todo_for_sync,
+                             now, monotonic)
+    service.on_sign_in = todoist.trigger
+
+    @asynccontextmanager
+    async def lifespan(app):
+        todoist.start()                  # the 15-minute schedule
+        try:
+            yield
+        finally:
+            todoist.stop()
+
+    app = FastAPI(title="Yungu LMS service", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.service = service
+    app.state.todoist = todoist
     app.add_middleware(CatchAll)
 
     @app.exception_handler(ServiceError)
@@ -915,6 +951,35 @@ def create_app(state_dir: Optional[str] = None, client_factory=yungu_client,
     @app.post("/refresh", status_code=204)
     def clear_cache(me: Student = Me):
         me.cache.clear()
+        todoist.trigger(me.user_id)          # returns at once; the sync runs in the background
+        return Response(status_code=204)
+
+    # ------------------------------------------------------------ Todoist
+    @app.get("/todoist")
+    def todoist_status(me: Student = Me):
+        return todoist.status(me.user_id)
+
+    @app.post("/todoist/connect")
+    def todoist_connect(me: Student = Me):
+        return {"authorizeUrl": todoist.start_connect(me.user_id)}
+
+    @app.post("/todoist/callback", status_code=204)
+    def todoist_callback(body: TodoistCallbackBody, me: Student = Me):
+        todoist.finish_connect(me.user_id, body.code, body.state)
+        return Response(status_code=204)
+
+    @app.post("/todoist/sync", status_code=202)
+    def todoist_sync(me: Student = Me):
+        if not todoist.configured:
+            raise NotSetUp()
+        if not todoist.connected(me.user_id):
+            raise NotConnected()
+        todoist.trigger(me.user_id, manual=True)
+        return Response(status_code=202)
+
+    @app.delete("/todoist", status_code=204)
+    def todoist_disconnect(me: Student = Me):
+        todoist.disconnect(me.user_id)
         return Response(status_code=204)
 
     # -------------------------------------------------------------- reads

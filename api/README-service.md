@@ -8,6 +8,9 @@ FastAPI app in `service/`, listening on `127.0.0.1:8100` only. State lives in `Y
     tokens.json        {userId, hashes}: the owner's dashboard tokens (an old {hashes} list is bound to
                        the owner on first use)
     users/<userId>/submitted-files.json   each account's hand-in record
+    users/<userId>/todoist.json           each account's Todoist link: token, refresh token, Todoist user,
+                                          pairings, last sync, last error (kept when the account signs out
+                                          or is forgotten; Disconnect drops the token, keeps the pairings)
 
 ## Accounts
 Any Yungu student account can sign in. The **owner** (owner.json) keeps today's behaviour: password saved,
@@ -29,8 +32,8 @@ service (with `submitted-files.json` at the top) is moved into `users/<owner>/` 
   Yungu call. Memory only, at most 5000 per account:
   after a restart, opening the assignment again makes its files usable.
 - **Bounds:** each account's read cache drops expired entries and holds at most 300; an account other than
-  the owner unused for 12 h is signed out and forgotten (the owner never); such an account keeps its 10
-  newest tokens.
+  the owner unused for 12 h is signed out and forgotten (the owner never, nor an account with Todoist
+  connected); such an account keeps its 10 newest tokens.
 - **Sign-in throttling:** login id over 64 or password over 256 characters → 400 before anything else.
   Before any Yungu call: a login id with 5 refused sign-ins in 15 min, or a client address with 10 refused
   sign-ins across all ids in 15 min, gets 429 "Too many attempts. Try again in a few minutes."; past 3
@@ -43,12 +46,41 @@ service (with `submitted-files.json` at the top) is moved into `users/<owner>/` 
   by nginx and passed on by the dashboard's sign-in (trusted because the service listens on 127.0.0.1);
   without it, the socket peer.
 
+## Todoist sync
+Each account can connect its own Todoist (OAuth app; `TODOIST_CLIENT_ID` / `TODOIST_CLIENT_SECRET` from
+`/etc/yungu-lms/todoist.env`, root-only 0600, loaded by the unit's `EnvironmentFile=`; without them the
+routes answer 503 "Todoist isn't set up on this server."). Code: `todoist.py` (client), `service/todoist_sync.py`
+(store + engine), `service/todoist_service.py` (OAuth, status, guard, schedule). Bearer on every route:
+
+    POST   /todoist/connect    → {authorizeUrl}  (state: random, this account's, single use, 10 min)
+    POST   /todoist/callback   {code, state} → 204, after the server-side code exchange; a missing, unknown,
+                               used, expired or other account's state → 400 "That Todoist link expired. Try
+                               connecting again." (nothing stored, the code never sent); Todoist refusing →
+                               502 "Todoist didn't accept the connection. Try again."; Todoist down → 502
+                               "Can't reach Todoist right now. Try again."
+    GET    /todoist            → {connected, account?, state: ok|syncing|error, lastSyncAt?, error?: {code, message}}
+    POST   /todoist/sync       → 202 (409 "Connect Todoist first." when not connected)
+    DELETE /todoist            → 204: forget the token (pairings kept per Todoist account), revoke it, best effort
+    POST   /refresh            also triggers the account's sync (returns at once)
+
+Error codes: `reauth` (token rejected), `todoist_unreachable` (Todoist down, 429/5xx, anything unexpected),
+`signin` (the account's Yungu session ended), `yungu_unreachable`. Syncs: right after connect (adopting open
+"Yungu"-labelled tasks first), on Refresh, on sign-in, on POST /todoist/sync and every 15 min for every account
+connected on disk (one thread in the app lifespan, first round 30 s after start). One sync per account at a
+time (a trigger meanwhile runs it once more after), at most 4 accounts at once. The owner syncs through its
+automatic re-login; any other account only while its memory session is on (else `signin`, no login tried).
+A Todoist outage holds automatic triggers 15 min, doubling up to 2 h; Todoist's Retry-After holds every
+trigger. An account with Todoist connected is not signed out by the 12 h idle sweep (it stays until Yungu
+ends its session). Tokens, codes, states and the client secret are never logged or answered.
+
 ## Run by hand
     cd /root/yungu-lms/api
     .venv/bin/pip install -r requirements.txt     # venv: python3 -m venv .venv
     YUNGU_STATE_DIR=/tmp/yungu-state .venv/bin/uvicorn service.app:app --host 127.0.0.1 --port 8100
 
 ## systemd
+    install -d -m 0700 /etc/yungu-lms
+    install -m 0600 /root/.config/yungu-lms/todoist-oauth.env /etc/yungu-lms/todoist.env
     cp deploy/yungu-lms-api.service /etc/systemd/system/
     systemctl daemon-reload && systemctl enable --now yungu-lms-api
     journalctl -u yungu-lms-api -f

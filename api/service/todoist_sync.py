@@ -201,10 +201,19 @@ def sync_account(client: TodoistClient, todo: List[dict], store: TodoistStore, n
             pending.discard(key)
             result["adopted"] += 1
         if pending:                 # no open labelled task for these: the create never happened
-            gone = set(pending)
-            write(lambda ps: [ps.pop(k, None) for k in gone])
+            gone, settled = set(pending), {}
+
+            def drop(ps):           # only what is still pending: anything settled meanwhile stays
+                for k in gone:
+                    p = ps.get(k)
+                    if isinstance(p, dict) and "pending" in p:
+                        del ps[k]
+                    elif p is not None:
+                        settled[k] = p
+            write(drop)
             for k in gone:
                 pairs.pop(k, None)
+            pairs.update(settled)
 
     label_ready = False
     seen = set()
@@ -260,7 +269,8 @@ def sync_account(client: TodoistClient, todo: List[dict], store: TodoistStore, n
 
 def make_client(store: TodoistStore, client_id: str, client_secret: str) -> Optional[TodoistClient]:
     """The account's client, refreshing an expired access token with the stored refresh token (rotated and
-    saved under the account's lock). None when the account is not connected.
+    saved under the account's lock). None when the account is not connected. The refresh holds the store lock
+    across its network call (at most one timeout, about 25 s): readers that must not wait use `load()`.
 
     The client stays bound to the Todoist account it was made for: if the account was disconnected or
     connected to another Todoist account meanwhile, a refresh raises SyncCancelled instead of switching

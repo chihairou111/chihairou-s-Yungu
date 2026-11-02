@@ -8,6 +8,9 @@ Type=simple
 WorkingDirectory=/root/yungu-lms/api
 Environment=YUNGU_STATE_DIR=/var/lib/yungu-lms
 Environment=PYTHONUNBUFFERED=1
+# TODOIST_CLIENT_ID / TODOIST_CLIENT_SECRET (root-only 0600; not in the repo). Optional: without it the
+# Todoist routes answer 503.
+EnvironmentFile=-/etc/yungu-lms/todoist.env
 ExecStart=/root/yungu-lms/api/.venv/bin/uvicorn service.app:app --host 127.0.0.1 --port 8100
 Restart=on-failure
 RestartSec=3

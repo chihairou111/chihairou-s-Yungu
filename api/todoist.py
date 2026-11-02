@@ -227,7 +227,9 @@ def exchange_code(client_id: str, client_secret: str, code: str, redirect_uri: s
 
 def refresh_access_token(client_id: str, client_secret: str, refresh_token: str) -> dict:
     """POST /oauth/access_token grant_type=refresh_token → same shape. The refresh token rotates: store the
-    new one; a retry within 60 s answers without one (keep the old); `invalid_grant` → TodoistAuthError."""
+    new one. A repeat within 60 s answers without one, and the old one is then consumed (presenting it again
+    after 60 s makes Todoist revoke all the user's tokens): drop it, never keep it (see make_client).
+    `invalid_grant` → TodoistAuthError."""
     resp = _send("POST", TOKEN_URL, "token refresh", data={"client_id": client_id, "client_secret": client_secret,
                                                            "grant_type": "refresh_token",
                                                            "refresh_token": refresh_token})

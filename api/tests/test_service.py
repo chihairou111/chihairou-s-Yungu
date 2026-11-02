@@ -309,11 +309,11 @@ def clock():
 
 
 @pytest.fixture
-def make(world, state_dir, clock):
-    def _make(factory=None):
+def make(world, state_dir, clock, tapi):
+    def _make(factory=None, todoist_api=None):
         app = create_app(state_dir=str(state_dir),
                          client_factory=factory or (lambda login_id, pw: FakeClient(world, login_id, pw)),
-                         now=clock, monotonic=clock)
+                         now=clock, monotonic=clock, todoist_api=todoist_api or tapi)
         return TestClient(app)
     return _make
 
@@ -398,6 +398,8 @@ ENDPOINTS = [
     ("PUT", "/assignments/94929/online-docs/11130500", {"title": "t", "content": "{}"}),
     ("GET", "/notifications/count", None), ("GET", "/notifications?read=false", None),
     ("POST", "/notifications/7790000/read", None), ("GET", "/behaviour?month=2026-10", None),
+    ("GET", "/todoist", None), ("POST", "/todoist/connect", None), ("POST", "/todoist/sync", None),
+    ("POST", "/todoist/callback", {"code": "c", "state": "s"}), ("DELETE", "/todoist", None),
 ]
 
 
@@ -2764,3 +2766,694 @@ def test_behaviour_after_an_expired_session_signs_in_again(api, world, auth):
     r = api.get("/behaviour?month=2026-10", headers=auth)
     assert r.status_code == 200 and r.json()["score"] == 91
     assert world.logins == ["S106", "S106"]
+
+
+# ================================================================== Todoist (Task 2)
+from urllib.parse import parse_qs, urlparse                                    # noqa: E402
+
+import todoist                                                                  # noqa: E402
+from service.todoist_service import (MESSAGES, REDIRECT_URI, STATE_TTL_SECONDS, SYNC_INTERVAL_SECONDS,  # noqa: E402
+                                     TodoistApi)
+from service.todoist_sync import TodoistStore                                   # noqa: E402
+from todoist import TodoistAuthError, TodoistUnavailable                        # noqa: E402
+
+NOT_SET_UP = "Todoist isn't set up on this server."
+LINK_EXPIRED = "That Todoist link expired. Try connecting again."
+NOT_ACCEPTED = "Todoist didn't accept the connection. Try again."
+CLIENT_SECRET = "client-SECRET-0f1e2d3c4b5a"
+
+
+class FakeTodoistUser:
+    """One Todoist account: its tasks, labels and a call log; `fail` is raised by every call, `hang` (an Event)
+    holds every call until set."""
+
+    def __init__(self, uid, name, email):
+        self.id, self.name, self.email = uid, name, email
+        self.tasks = {}
+        self.labels = ["Work"]
+        self.calls = []
+        self.fail = None
+        self.hang = None
+        self.entered = threading.Event()
+        self.active = 0
+        self.most_at_once = 0
+        self._next = 1
+
+    def names(self):
+        return [c[0] for c in self.calls]
+
+
+class FakeTodoistClient:
+    def __init__(self, api, token):
+        self.api, self.token = api, token
+
+    def _call(self, name, *args):
+        user = self.api.tokens.get(self.token)
+        if user is None:
+            raise TodoistAuthError("Todoist: HTTP 401", 401)
+        user.calls.append((name, *args))
+        user.active += 1
+        user.most_at_once = max(user.most_at_once, user.active)
+        try:
+            user.entered.set()
+            if user.hang is not None:
+                assert user.hang.wait(10)
+            if user.fail is not None:
+                raise user.fail
+        finally:
+            user.active -= 1
+        return user
+
+    def me(self):
+        u = self._call("me")
+        return {"id": u.id, "name": u.name, "email": u.email, "timezone": "Asia/Shanghai"}
+
+    def ensure_label(self, name):
+        u = self._call("ensure_label", name)
+        if name not in u.labels:
+            u.labels.append(name)
+
+    def find_tasks(self, label):
+        u = self._call("find_tasks", label)
+        return [dict(t) for t in u.tasks.values() if label in t["labels"]]
+
+    def get_task(self, task_id):
+        u = self._call("get_task", task_id)
+        return dict(u.tasks[task_id]) if task_id in u.tasks else None
+
+    def create_task(self, content, description, due_datetime, labels):
+        u = self._call("create_task", content, description, due_datetime, list(labels))
+        tid = f"{u.id}-t{u._next}"
+        u._next += 1
+        u.tasks[tid] = {"id": tid, "content": content, "description": description, "labels": list(labels),
+                        "due": {"date": due_datetime} if due_datetime else None, "checked": False}
+        return dict(u.tasks[tid])
+
+    def update_due(self, task_id, due_datetime):
+        u = self._call("update_due", task_id, due_datetime)
+        u.tasks[task_id]["due"] = {"date": due_datetime} if due_datetime else None
+
+
+class FakeTodoistApi:
+    """The service's Todoist seam (TodoistApi) over in-memory Todoist accounts. A code from `code_for` is good once."""
+
+    def __init__(self):
+        self.configured = True
+        self.codes = {}               # code -> FakeTodoistUser
+        self.tokens = {}              # live access token -> FakeTodoistUser
+        self.exchanged = []
+        self.revoked = []
+        self.revoke_error = None
+        self._n = 0
+
+    def user(self, uid, name="", email=""):
+        return FakeTodoistUser(uid, name, email)
+
+    def code_for(self, user):
+        self._n += 1
+        code = f"code-{user.id}-{self._n}"
+        self.codes[code] = user
+        return code
+
+    def authorize_url(self, state):
+        return "https://app.todoist.com/oauth/authorize?" + todoist.urlencode({"state": state})
+
+    def exchange(self, code):
+        self.exchanged.append(code)
+        user = self.codes.pop(code, None)
+        if user is None:
+            raise TodoistAuthError("Todoist token exchange: HTTP 400 bad_authorization_code", 400)
+        self._n += 1
+        token = f"tok-SECRET-{user.id}-{self._n}"
+        self.tokens[token] = user
+        return {"access_token": token, "refresh_token": f"rt-SECRET-{self._n}", "expires_in": 3600}
+
+    def client(self, token):
+        return FakeTodoistClient(self, token)
+
+    def client_for(self, store):
+        data = store.load()
+        return FakeTodoistClient(self, data["token"]) if data and data.get("token") else None
+
+    def revoke(self, token):
+        self.revoked.append(token)
+        if self.revoke_error is not None:
+            raise self.revoke_error
+        self.tokens.pop(token, None)
+
+
+@pytest.fixture
+def tapi():
+    return FakeTodoistApi()
+
+
+@pytest.fixture
+def chi():
+    return FakeTodoistUser("42", "Chi", "chi@example.com")
+
+
+@pytest.fixture
+def bea():
+    return FakeTodoistUser("77", "", "bea@example.com")
+
+
+def tsvc(api):
+    return api.app.state.todoist
+
+
+def settle(api):
+    assert tsvc(api).wait_idle(5), "a Todoist sync did not finish"
+
+
+def state_of(authorize_url):
+    return parse_qs(urlparse(authorize_url).query)["state"][0]
+
+
+def connect_todoist(api, headers, tapi, user, settle_after=True):
+    r = api.post("/todoist/connect", headers=headers)
+    assert r.status_code == 200, r.text
+    state = state_of(r.json()["authorizeUrl"])
+    r = api.post("/todoist/callback", json={"code": tapi.code_for(user), "state": state}, headers=headers)
+    assert r.status_code == 204, r.text
+    if settle_after:
+        settle(api)
+
+
+def store_of(state_dir, user_id):
+    return TodoistStore(str(state_dir), user_id)
+
+
+# ---------------------------------------------------------------- set-up and the OAuth state
+def test_connect_without_the_client_env_is_503(world, state_dir, clock, auth, monkeypatch):
+    monkeypatch.delenv("TODOIST_CLIENT_ID", raising=False)
+    monkeypatch.delenv("TODOIST_CLIENT_SECRET", raising=False)
+    api = TestClient(create_app(state_dir=str(state_dir), client_factory=lambda l, p: FakeClient(world, l, p),
+                                now=clock, monotonic=clock))
+    headers = sign_in(api)
+    r = api.post("/todoist/connect", headers=headers)
+    assert r.status_code == 503 and r.json() == {"error": NOT_SET_UP}
+    assert api.post("/todoist/sync", headers=headers).json() == {"error": NOT_SET_UP}
+    assert api.get("/todoist", headers=headers).json() == {"connected": False, "state": "ok"}
+
+
+def test_connect_answers_todoists_authorize_url_with_a_fresh_state(world, state_dir, clock, monkeypatch):
+    monkeypatch.setenv("TODOIST_CLIENT_ID", "cid-123")
+    monkeypatch.setenv("TODOIST_CLIENT_SECRET", CLIENT_SECRET)
+    api = TestClient(create_app(state_dir=str(state_dir), client_factory=lambda l, p: FakeClient(world, l, p),
+                                now=clock, monotonic=clock))
+    headers = sign_in(api)
+    one, two = (api.post("/todoist/connect", headers=headers) for _ in range(2))
+    assert one.status_code == 200 and set(one.json()) == {"authorizeUrl"}
+    url = urlparse(one.json()["authorizeUrl"])
+    assert f"{url.scheme}://{url.netloc}{url.path}" == todoist.AUTHORIZE_URL
+    q = parse_qs(url.query)
+    assert q["client_id"] == ["cid-123"] and q["scope"] == ["data:read_write"] and q["response_type"] == ["code"]
+    assert q["redirect_uri"] == [REDIRECT_URI] == ["https://yungu.chihairou.dev/api/todoist/callback"]
+    assert len(q["state"][0]) >= 32 and q["state"] != parse_qs(urlparse(two.json()["authorizeUrl"]).query)["state"]
+    assert CLIENT_SECRET not in one.text and not state_dir.joinpath("users").exists()
+    assert CLIENT_SECRET not in repr(api.app.state.todoist._api)
+
+
+def test_todoist_api_reads_its_credentials_from_the_environment_and_hides_the_secret():
+    a = TodoistApi.from_env({"TODOIST_CLIENT_ID": " cid ", "TODOIST_CLIENT_SECRET": CLIENT_SECRET})
+    assert a.configured and CLIENT_SECRET not in repr(a) and CLIENT_SECRET not in str(vars(a).keys())
+    assert not TodoistApi.from_env({"TODOIST_CLIENT_ID": "cid"}).configured
+    assert not TodoistApi.from_env({}).configured
+
+
+@pytest.mark.parametrize("how", ["missing", "unknown", "reused", "expired", "another account's"])
+def test_a_callback_with_a_bad_state_stores_nothing(api, auth, b_auth, tapi, chi, state_dir, clock, how):
+    """Review Focus 4."""
+    state = state_of(api.post("/todoist/connect", headers=auth).json()["authorizeUrl"])
+    body = {"code": tapi.code_for(chi), "state": state}
+    who = auth
+    if how == "missing":
+        del body["state"]
+    elif how == "unknown":
+        body["state"] = "x" * 43
+    elif how == "reused":
+        first = {"code": tapi.code_for(chi), "state": state}
+        assert api.post("/todoist/callback", json=first, headers=auth).status_code == 204
+        settle(api)
+        api.delete("/todoist", headers=auth)
+        tapi.exchanged.clear()
+    elif how == "expired":
+        clock.t += STATE_TTL_SECONDS + 1
+    else:
+        who = b_auth                                  # S207 posts the owner's state with its own session
+    r = api.post("/todoist/callback", json=body, headers=who)
+    assert r.status_code == 400 and r.json() == {"error": LINK_EXPIRED}
+    assert tapi.exchanged == []                       # the code never went to Todoist
+    for uid in (ME, OTHER):
+        assert not store_of(state_dir, uid).is_connected()
+    assert api.get("/todoist", headers=auth).json()["connected"] is False
+    assert api.get("/todoist", headers=b_auth).json()["connected"] is False
+
+
+def test_another_accounts_state_is_used_up_by_the_attempt(api, auth, b_auth, tapi, chi):
+    state = state_of(api.post("/todoist/connect", headers=auth).json()["authorizeUrl"])
+    api.post("/todoist/callback", json={"code": tapi.code_for(chi), "state": state}, headers=b_auth)
+    r = api.post("/todoist/callback", json={"code": tapi.code_for(chi), "state": state}, headers=auth)
+    assert r.status_code == 400 and r.json() == {"error": LINK_EXPIRED}
+
+
+def test_a_state_is_good_for_10_minutes(api, auth, tapi, chi, clock):
+    state = state_of(api.post("/todoist/connect", headers=auth).json()["authorizeUrl"])
+    clock.t += STATE_TTL_SECONDS - 1
+    r = api.post("/todoist/callback", json={"code": tapi.code_for(chi), "state": state}, headers=auth)
+    assert r.status_code == 204
+    settle(api)
+
+
+def test_todoist_refusing_the_code_is_a_502_and_stores_nothing(api, auth, tapi, state_dir):
+    state = state_of(api.post("/todoist/connect", headers=auth).json()["authorizeUrl"])
+    r = api.post("/todoist/callback", json={"code": "not-a-code", "state": state}, headers=auth)
+    assert r.status_code == 502 and r.json() == {"error": NOT_ACCEPTED}
+    assert not store_of(state_dir, ME).is_connected()
+
+
+def test_todoist_unreachable_during_the_callback_is_a_502(api, auth, tapi, chi, state_dir):
+    state = state_of(api.post("/todoist/connect", headers=auth).json()["authorizeUrl"])
+    chi.fail = TodoistUnavailable("Todoist user: ConnectTimeout")
+    r = api.post("/todoist/callback", json={"code": tapi.code_for(chi), "state": state}, headers=auth)
+    assert r.status_code == 502 and r.json() == {"error": "Can't reach Todoist right now. Try again."}
+    assert not store_of(state_dir, ME).is_connected()
+
+
+# ---------------------------------------------------------------- connect, sync, status
+def test_connect_stores_the_token_0600_adopts_and_syncs_and_never_echoes_it(api, auth, tapi, chi, state_dir, caplog):
+    caplog.set_level("DEBUG")
+    mine = "td-old"
+    chi.tasks[mine] = {"id": mine, "content": "x", "labels": ["Yungu"], "checked": False, "due": None,
+                       "description": "https://yungu.chihairou.dev/assignments?task=94929"}
+    r = api.post("/todoist/connect", headers=auth)
+    state = state_of(r.json()["authorizeUrl"])
+    r2 = api.post("/todoist/callback", json={"code": tapi.code_for(chi), "state": state}, headers=auth)
+    assert r2.status_code == 204 and r2.content == b""
+    settle(api)
+    path = state_dir / "users" / str(ME) / "todoist.json"
+    assert mode(path) == 0o600 and mode(path.parent) == 0o700
+    saved = json.loads(path.read_text())
+    token = saved["token"]
+    assert token in tapi.tokens and saved["refreshToken"].startswith("rt-SECRET-")
+    assert saved["account"] == {"id": "42", "name": "Chi", "email": "chi@example.com"}
+    assert "adoptPending" not in saved                                   # adopted once, then cleared
+    assert saved["pairings"] == {"94929": {"todoistId": mine, "dueMs": 1792764000000}}
+    assert "create_task" not in chi.names()                              # adopted, not duplicated
+    status = api.get("/todoist", headers=auth)
+    assert status.json() == {"connected": True, "account": "Chi", "state": "ok", "lastSyncAt": int(NOW * 1000)}
+    for text in (r.text, r2.text, status.text, caplog.text):
+        assert token not in text and "rt-SECRET" not in text and state not in caplog.text
+
+
+def content_of(row):
+    return f"[{row['courseName']}] {row['title']}"
+
+
+def test_the_first_sync_creates_each_todo_assignment_once(api, auth, tapi, chi, world):
+    connect_todoist(api, auth, tapi, chi)
+    made = [c for c in chi.calls if c[0] == "create_task"]
+    assert made == [("create_task", content_of(world.lists[TODO][0]),
+                     "https://yungu.chihairou.dev/assignments?task=94929", todoist.due_datetime(1792764000000),
+                     ["Yungu"])]
+    chi.calls.clear()
+    assert api.post("/todoist/sync", headers=auth).status_code == 202
+    settle(api)
+    assert "create_task" not in chi.names() and "find_tasks" not in chi.names()      # a plain sync: no adopt scan
+
+
+def test_status_while_a_sync_runs_is_syncing(api, auth, tapi, chi):
+    connect_todoist(api, auth, tapi, chi)
+    chi.entered.clear()
+    chi.hang = threading.Event()
+    api.post("/todoist/sync", headers=auth)
+    assert chi.entered.wait(5)
+    assert api.get("/todoist", headers=auth).json() == {"connected": True, "account": "Chi", "state": "syncing",
+                                                        "lastSyncAt": int(NOW * 1000)}
+    chi.hang.set()
+    settle(api)
+    assert api.get("/todoist", headers=auth).json()["state"] == "ok"
+
+
+def test_the_account_name_falls_back_to_the_email(api, auth, tapi, bea):
+    connect_todoist(api, auth, tapi, bea)
+    assert api.get("/todoist", headers=auth).json()["account"] == "bea@example.com"
+
+
+def error_of(api, headers):
+    body = api.get("/todoist", headers=headers).json()
+    assert body["connected"] is True and body["state"] == "error", body
+    return body["error"]
+
+
+def test_a_rejected_todoist_token_is_reauth(api, auth, tapi, chi):
+    connect_todoist(api, auth, tapi, chi)
+    tapi.tokens.clear()                                    # the user revoked the app in Todoist
+    api.post("/todoist/sync", headers=auth)
+    settle(api)
+    assert error_of(api, auth) == {"code": "reauth", "message": "Todoist needs you to connect again."}
+
+
+def test_todoist_down_is_todoist_unreachable(api, auth, tapi, chi):
+    connect_todoist(api, auth, tapi, chi)
+    chi.fail = TodoistUnavailable("Todoist tasks: HTTP 503", 503)
+    api.post("/todoist/sync", headers=auth)
+    settle(api)
+    assert error_of(api, auth) == {"code": "todoist_unreachable", "message": "Can't reach Todoist right now."}
+    chi.fail = None
+    api.post("/todoist/sync", headers=auth)                  # Try again
+    settle(api)
+    assert api.get("/todoist", headers=auth).json()["state"] == "ok"
+
+
+def test_yungu_down_is_yungu_unreachable_and_todoist_is_not_called(api, auth, tapi, chi, world):
+    connect_todoist(api, auth, tapi, chi)
+    chi.calls.clear()
+    world.fail = requests.ConnectionError("down")
+    api.post("/refresh", headers=auth)                       # past the 60 s read cache
+    settle(api)
+    assert error_of(api, auth) == {"code": "yungu_unreachable", "message": "Can't reach Yungu right now."}
+    assert chi.calls == []
+
+
+def test_a_non_owner_whose_yungu_session_ended_is_signin_without_a_login(api, auth, b_auth, tapi, chi, world):
+    connect_todoist(api, b_auth, tapi, chi)
+    world.peer.expire_all()
+    api.post("/refresh", headers=b_auth)
+    settle(api)
+    assert tsvc(api).status(OTHER)["error"] == {"code": "signin", "message": MESSAGES["signin"]}
+    assert world.peer.logins == ["S207"] and world.logins == ["S106"]       # no login attempted for S207
+    b = b_sign_in(api)                                                        # signing in again resumes the sync
+    settle(api)
+    assert api.get("/todoist", headers=b).json()["state"] == "ok"
+    assert store_of(api.app.state.service._state.path, OTHER).load()["lastSyncAt"] == int(NOW * 1000)
+
+
+def test_the_signin_state_shows_after_the_session_ended(api, auth, b_auth, tapi, chi, world, state_dir):
+    connect_todoist(api, b_auth, tapi, chi)
+    api.delete("/session", headers=b_auth)                     # signed out: the Todoist link stays on disk
+    assert store_of(state_dir, OTHER).is_connected()
+    tsvc(api).tick()
+    settle(api)
+    assert tsvc(api).status(OTHER)["error"] == {"code": "signin", "message": MESSAGES["signin"]}
+    assert world.peer.logins == ["S207"]
+
+
+def test_messages_are_the_global_constraints_wording():
+    assert MESSAGES == {"reauth": "Todoist needs you to connect again.",
+                        "todoist_unreachable": "Can't reach Todoist right now.",
+                        "signin": "Sign in to the dashboard again to keep syncing.",
+                        "yungu_unreachable": "Can't reach Yungu right now."}
+
+
+def test_the_last_error_survives_a_restart(make, api, auth, tapi, chi):
+    connect_todoist(api, auth, tapi, chi)
+    tapi.tokens.clear()
+    api.post("/todoist/sync", headers=auth)
+    settle(api)
+    assert make().get("/todoist", headers=auth).json()["error"]["code"] == "reauth"
+
+
+def test_a_crash_inside_a_sync_is_an_error_state_not_a_dead_worker(api, auth, tapi, chi, caplog):
+    connect_todoist(api, auth, tapi, chi)
+    chi.fail = RuntimeError("boom with a SECRET-ish message")
+    api.post("/todoist/sync", headers=auth)
+    settle(api)
+    assert error_of(api, auth)["code"] == "todoist_unreachable"
+    assert "SECRET-ish" not in caplog.text
+    chi.fail = None
+    api.post("/todoist/sync", headers=auth)
+    settle(api)
+    assert api.get("/todoist", headers=auth).json()["state"] == "ok"
+
+
+def test_status_reads_do_not_wait_for_the_store_lock(api, auth, tapi, chi, state_dir):
+    """A token refresh holds the account's store lock across a network call: status and Refresh must not wait."""
+    connect_todoist(api, auth, tapi, chi)
+    held, release = threading.Event(), threading.Event()
+
+    def hold():
+        with store_of(state_dir, ME).lock:
+            held.set()
+            release.wait(10)
+    t = threading.Thread(target=hold)
+    t.start()
+    try:
+        assert held.wait(5)
+        done = within(2, lambda: (api.get("/todoist", headers=auth), api.post("/refresh", headers=auth)))
+        assert done[0].json()["connected"] is True and done[1].status_code == 204
+    finally:
+        release.set()
+        t.join()
+    settle(api)
+
+
+# ---------------------------------------------------------------- triggers and the per-account guard
+def test_refresh_triggers_a_sync_and_returns_at_once(api, auth, tapi, chi, world):
+    connect_todoist(api, auth, tapi, chi)
+    world.lists[TODO].append({**world.lists[TODO][0], "taskPublishId": 95000, "title": "New one"})
+    chi.entered.clear()
+    chi.hang = threading.Event()
+    r = within(2, lambda: api.post("/refresh", headers=auth))
+    assert r.status_code == 204
+    assert chi.entered.wait(5) and api.get("/todoist", headers=auth).json()["state"] == "syncing"
+    chi.hang.set()
+    settle(api)
+    assert [c[1] for c in chi.calls if c[0] == "create_task"] == [content_of(world.lists[TODO][0]),
+                                                                  content_of(world.lists[TODO][1])]
+
+
+def test_refresh_without_todoist_starts_nothing(api, auth, tapi):
+    assert api.post("/refresh", headers=auth).status_code == 204
+    assert tsvc(api).wait_idle(0.1) and not tsvc(api)._accounts
+
+
+def test_manual_sync_when_not_connected_is_409(api, auth):
+    r = api.post("/todoist/sync", headers=auth)
+    assert r.status_code == 409 and r.json() == {"error": "Connect Todoist first."}
+
+
+def test_one_sync_per_account_at_a_time_and_triggers_meanwhile_run_once_more(api, auth, tapi, chi, world):
+    connect_todoist(api, auth, tapi, chi)
+    runs_before = world.count("iter_tasks")
+    chi.calls.clear()
+    chi.entered.clear()
+    chi.hang = threading.Event()
+    world.lists[TODO].append({**world.lists[TODO][0], "taskPublishId": 95000, "title": "New one"})
+    api.post("/refresh", headers=auth)                                  # Refresh ...
+    assert chi.entered.wait(5)
+    for _ in range(3):                                                  # ... scheduler, manual, Refresh again
+        tsvc(api).tick()
+        api.post("/todoist/sync", headers=auth)
+        api.post("/refresh", headers=auth)
+    chi.hang.set()
+    settle(api)
+    assert chi.most_at_once == 1
+    assert world.count("iter_tasks") - runs_before == 2                 # the running one, then exactly one more
+    assert sum(1 for c in chi.calls if c[0] == "create_task") == 1
+
+
+def test_a_todoist_429_backs_off_automatic_triggers(api, auth, tapi, chi, clock, world):
+    connect_todoist(api, auth, tapi, chi)
+    chi.fail = TodoistUnavailable("Todoist tasks: HTTP 429", 429, retry_after=120)
+    world.lists[TODO].append({**world.lists[TODO][0], "taskPublishId": 95000, "title": "New one"})
+    api.post("/todoist/sync", headers=auth)
+    settle(api)
+    chi.calls.clear()
+    tsvc(api).tick()
+    api.post("/refresh", headers=auth)
+    api.post("/todoist/sync", headers=auth)                    # even Try again waits out Todoist's Retry-After
+    settle(api)
+    assert chi.calls == []
+    clock.t += 121
+    chi.fail = None
+    api.post("/todoist/sync", headers=auth)
+    settle(api)
+    assert "create_task" in chi.names() and api.get("/todoist", headers=auth).json()["state"] == "ok"
+
+
+def test_repeated_todoist_outages_back_off_the_schedule(api, auth, tapi, chi, clock, world):
+    connect_todoist(api, auth, tapi, chi)
+    world.lists[TODO].append({**world.lists[TODO][0], "taskPublishId": 95000, "title": "New one"})
+    chi.calls.clear()
+    chi.fail = TodoistUnavailable("Todoist tasks: HTTP 502", 502)
+    for _ in range(3):
+        tsvc(api).tick()
+        settle(api)
+        clock.t += SYNC_INTERVAL_SECONDS
+    tries = chi.names().count("me")
+    assert 1 <= tries < 3                                      # not every tick once it keeps failing
+    chi.fail = None
+    api.post("/todoist/sync", headers=auth)                    # Try again is not held by the back-off
+    settle(api)
+    assert api.get("/todoist", headers=auth).json()["state"] == "ok"
+
+
+# ---------------------------------------------------------------- disconnect
+def test_disconnect_forgets_the_token_keeps_pairings_and_revokes(api, auth, tapi, chi, state_dir):
+    connect_todoist(api, auth, tapi, chi)
+    token = store_of(state_dir, ME).load()["token"]
+    r = api.delete("/todoist", headers=auth)
+    assert r.status_code == 204
+    left = store_of(state_dir, ME).load()
+    assert left == {"pairings": {"94929": {"todoistId": "42-t1", "dueMs": 1792764000000}}, "pairingsAccount": "42"}
+    assert tapi.revoked == [token]
+    assert api.get("/todoist", headers=auth).json() == {"connected": False, "state": "ok"}
+    chi.calls.clear()
+    tsvc(api).tick()
+    api.post("/refresh", headers=auth)
+    settle(api)
+    assert chi.calls == []                                       # no more syncing
+    connect_todoist(api, auth, tapi, chi)                        # the same Todoist account: nothing re-created
+    assert sum(1 for c in chi.calls if c[0] == "create_task") == 0 and len(chi.tasks) == 1
+
+
+def test_disconnect_when_revoke_fails_still_forgets(api, auth, tapi, chi, state_dir, caplog):
+    connect_todoist(api, auth, tapi, chi)
+    tapi.revoke_error = TodoistUnavailable("Todoist revoke: ConnectTimeout")
+    assert api.delete("/todoist", headers=auth).status_code == 204
+    assert not store_of(state_dir, ME).is_connected()
+    assert api.delete("/todoist", headers=auth).status_code == 204          # twice is fine
+
+
+def test_disconnect_while_a_sync_runs_stops_it(api, auth, tapi, chi, state_dir, world):
+    connect_todoist(api, auth, tapi, chi)
+    world.lists[TODO].append({**world.lists[TODO][0], "taskPublishId": 95000, "title": "New one"})
+    chi.entered.clear()
+    chi.hang = threading.Event()
+    api.post("/todoist/sync", headers=auth)
+    assert chi.entered.wait(5)
+    assert api.delete("/todoist", headers=auth).status_code == 204
+    chi.hang.set()
+    settle(api)
+    assert not store_of(state_dir, ME).is_connected()
+    assert api.get("/todoist", headers=auth).json() == {"connected": False, "state": "ok"}
+
+
+# ---------------------------------------------------------------- Review Focus 5: isolation
+def test_one_accounts_failure_never_shows_on_or_stops_another(api, auth, b_auth, tapi, chi, bea, world, clock):
+    connect_todoist(api, auth, tapi, chi)
+    connect_todoist(api, b_auth, tapi, bea)
+    assert [t["content"] for t in bea.tasks.values()] == [content_of(world.peer.lists[TODO][0])]
+    assert [t["content"] for t in chi.tasks.values()] == [content_of(world.lists[TODO][0])]
+    assert world.peer.lists[TODO][0]["title"] != world.lists[TODO][0]["title"]
+    for t in tapi.tokens.copy():                                   # A's token revoked in Todoist
+        if tapi.tokens[t] is chi:
+            del tapi.tokens[t]
+    world.peer.lists[TODO].append({**world.peer.lists[TODO][0], "taskPublishId": 96000, "title": "B new"})
+    clock.t += 61
+    tsvc(api).tick()
+    settle(api)
+    assert error_of(api, auth)["code"] == "reauth"
+    assert api.get("/todoist", headers=b_auth).json()["state"] == "ok" and len(bea.tasks) == 2
+
+
+def test_a_crash_in_one_accounts_sync_does_not_stop_the_scheduler(api, auth, b_auth, tapi, chi, bea, world, clock):
+    connect_todoist(api, auth, tapi, chi)
+    connect_todoist(api, b_auth, tapi, bea)
+    chi.fail = KeyError("boom")
+    world.peer.lists[TODO].append({**world.peer.lists[TODO][0], "taskPublishId": 96000, "title": "B new"})
+    clock.t += 61                                                 # past the 60 s read cache
+    tsvc(api).tick()
+    settle(api)
+    assert len(bea.tasks) == 2 and api.get("/todoist", headers=b_auth).json()["state"] == "ok"
+    world.peer.lists[TODO].append({**world.peer.lists[TODO][0], "taskPublishId": 96001, "title": "B newer"})
+    clock.t += SYNC_INTERVAL_SECONDS
+    tsvc(api).tick()                                              # the next round still runs
+    settle(api)
+    assert len(bea.tasks) == 3
+
+
+def test_b_keeps_syncing_while_as_yungu_session_is_gone(api, auth, b_auth, tapi, chi, bea, world, clock):
+    connect_todoist(api, b_auth, tapi, bea)
+    connect_todoist(api, auth, tapi, chi)
+    world.expire_all()
+    world.accounts["S106"]["password"] = "changed"                   # the owner's re-login is refused
+    world.peer.lists[TODO].append({**world.peer.lists[TODO][0], "taskPublishId": 96000, "title": "B new"})
+    clock.t += 61
+    tsvc(api).tick()
+    settle(api)
+    assert tsvc(api).status(ME)["error"]["code"] == "signin"
+    assert api.get("/todoist", headers=b_auth).json()["state"] == "ok" and len(bea.tasks) == 2
+
+
+def test_the_scheduler_task_body_catches_everything(api, auth, tapi, chi, monkeypatch):
+    connect_todoist(api, auth, tapi, chi)
+    svc = tsvc(api)
+    monkeypatch.setattr(svc, "trigger", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+    svc.tick()                                                         # logged, not raised
+
+
+# ---------------------------------------------------------------- idle sweep and restart
+def test_the_idle_sweep_keeps_a_todoist_connected_non_owner_but_not_one_without(api, auth, b_auth, tapi, bea, clock):
+    service = api.app.state.service
+    connect_todoist(api, b_auth, tapi, bea)
+    clock.t += IDLE_SECONDS + 61
+    assert api.get("/courses", headers=auth).status_code == 200              # any request sweeps
+    assert service.yungu.is_on(OTHER) and api.get("/courses", headers=b_auth).status_code == 200
+    api.delete("/todoist", headers=b_auth)                                  # Todoist disconnected: idles out as before
+    clock.t += IDLE_SECONDS + 61
+    assert api.get("/courses", headers=auth).status_code == 200
+    assert not service.yungu.is_on(OTHER) and OTHER not in service.yungu._sessions
+    assert api.get("/courses", headers=b_auth).json() == {"error": SIGN_IN_AGAIN}
+
+
+def test_a_restart_restores_the_schedule_from_disk(make, api, auth, b_auth, tapi, chi, bea, world):
+    connect_todoist(api, auth, tapi, chi)
+    connect_todoist(api, b_auth, tapi, bea)
+    world.lists[TODO].append({**world.lists[TODO][0], "taskPublishId": 95000, "title": "New one"})
+    restarted = make()                                       # a new process: S207's memory session is gone
+    tsvc(restarted).tick()
+    settle(restarted)
+    assert sum(1 for c in chi.calls if c[0] == "create_task") == 2              # the owner kept syncing
+    assert tsvc(restarted).status(OTHER)["error"]["code"] == "signin"
+    assert world.logins == ["S106", "S106"] and world.peer.logins == ["S207"]  # the owner's re-login only
+
+
+def test_the_scheduler_runs_in_the_app_lifespan(make, monkeypatch):
+    import service.todoist_service as ts
+    monkeypatch.setattr(ts, "FIRST_TICK_SECONDS", 0.01)
+    ticked = threading.Event()
+    api = make()
+    monkeypatch.setattr(tsvc(api), "tick", ticked.set)
+    with api:
+        assert ticked.wait(5)
+        assert tsvc(api)._thread is not None and tsvc(api)._thread.is_alive()
+    assert not tsvc(api)._thread.is_alive()
+
+
+# ---------------------------------------------------------------- the real adapter, on the wire (responses)
+@responses.activate
+def test_the_callback_on_the_wire_sends_the_code_server_side_and_keeps_secrets_out(world, state_dir, clock,
+                                                                                 monkeypatch, caplog):
+    caplog.set_level("DEBUG")
+    monkeypatch.setenv("TODOIST_CLIENT_ID", "cid-123")
+    monkeypatch.setenv("TODOIST_CLIENT_SECRET", CLIENT_SECRET)
+    access, refresh = "acc-SECRET-wire-0001", "ref-SECRET-wire-0001"
+    responses.add(responses.POST, todoist.TOKEN_URL,
+                  json={"access_token": access, "token_type": "Bearer", "expires_in": 3600,
+                        "refresh_token": refresh, "scope": "data:read_write"})
+    responses.add(responses.GET, f"{todoist.API}/user",
+                  json={"id": "42", "full_name": "Chi", "email": "chi@example.com", "token": access,
+                        "tz_info": {"timezone": "Asia/Shanghai"}})
+    responses.add(responses.GET, f"{todoist.API}/tasks", json={"results": [], "next_cursor": None})
+    responses.add(responses.GET, f"{todoist.API}/labels", json={"results": [], "next_cursor": None})
+    responses.add(responses.POST, f"{todoist.API}/labels", json={"id": "1", "name": "Yungu"})
+    responses.add(responses.POST, f"{todoist.API}/tasks", json={"id": "t-1", "content": "x"})
+    api = TestClient(create_app(state_dir=str(state_dir), client_factory=lambda l, p: FakeClient(world, l, p),
+                                now=clock, monotonic=clock))
+    headers = sign_in(api)
+    state = state_of(api.post("/todoist/connect", headers=headers).json()["authorizeUrl"])
+    r = api.post("/todoist/callback", json={"code": "the-CODE-1", "state": state}, headers=headers)
+    assert r.status_code == 204, r.text
+    settle(api)
+    exchange = parse_qs(responses.calls[0].request.body)
+    assert exchange == {"client_id": ["cid-123"], "client_secret": [CLIENT_SECRET], "code": ["the-CODE-1"],
+                        "redirect_uri": [REDIRECT_URI]}
+    assert all(c.request.headers.get("Authorization") == f"Bearer {access}" for c in responses.calls[1:])
+    status = api.get("/todoist", headers=headers)
+    assert status.json() == {"connected": True, "account": "Chi", "state": "ok", "lastSyncAt": int(NOW * 1000)}
+    saved = json.loads((state_dir / "users" / str(ME) / "todoist.json").read_text())
+    assert saved["token"] == access and saved["refreshToken"] == refresh
+    for secret in (access, refresh, CLIENT_SECRET, "the-CODE-1", state):
+        assert secret not in caplog.text and secret not in r.text and secret not in status.text

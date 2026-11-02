@@ -530,6 +530,23 @@ def test_a_pending_pairing_with_no_task_and_no_longer_to_do_is_dropped(store):
     assert pairings(store) == {} and td.names() == ["find_tasks"]
 
 
+def test_a_pending_pairing_settled_meanwhile_is_kept_and_not_created_again(store):
+    """Task 2 carry-over: the drop of an unmatched pending pairing only drops it while it is still pending."""
+    td = FakeTodoist()
+    store.update(lambda d: d["pairings"].update({"93251": {"pending": NOW}}))
+    real_find = td.find_tasks
+
+    def find_then_settled(label):
+        found = real_find(label)                               # nothing labelled yet ...
+        store.update(lambda d: d["pairings"].update({"93251": {"todoistId": "tdX", "dueMs": DUE}}))
+        return found                                           # ... but the pairing was settled meanwhile
+    td.find_tasks = find_then_settled
+    r = sync_account(td, todo(CASE), store, NOW + 1, adopt=False)
+    assert r == {"created": 0, "updated": 0, "adopted": 0, "skipped": 0}
+    assert pairings(store) == {"93251": {"todoistId": "tdX", "dueMs": DUE}}
+    assert "create_task" not in td.names()
+
+
 # ------------------------------------------------------------------- fix round 1: labels, content
 def test_adoption_matches_the_label_whatever_its_case(store):
     td = FakeTodoist(labels=("yungu",))
