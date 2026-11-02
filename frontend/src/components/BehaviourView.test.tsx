@@ -1,6 +1,6 @@
 import { render, screen, within } from './test-render';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Behaviour, BehaviourRecord } from '@/lib/types';
 import BehaviourView from './BehaviourView';
 
@@ -48,7 +48,15 @@ const card = () => screen.getByRole('region', { name: /^凌云积分/ });
 const rows = () => screen.getAllByRole('listitem');
 const row = (name: string) => rows().find((li) => li.textContent?.includes(name))!;
 
-afterEach(() => nav.push.mockReset());
+// The view follows the device clock after mount (useNow): it is held at NOW, so "this month" stays October.
+beforeEach(() => {
+  vi.spyOn(Date, 'now').mockReturnValue(NOW);
+});
+
+afterEach(() => {
+  nav.push.mockReset();
+  vi.restoreAllMocks();
+});
 
 describe('BehaviourView card', () => {
   it("shows Yungu's score, named for screen readers, under the month's label", () => {

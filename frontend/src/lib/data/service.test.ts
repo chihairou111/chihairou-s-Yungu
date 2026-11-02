@@ -548,3 +548,60 @@ describe('serviceData notifications', () => {
     await expect(data.markNotificationRead('1')).rejects.toBeInstanceOf(YunguUnavailable);
   });
 });
+
+describe('serviceData Todoist', () => {
+  it('getTodoist GETs /todoist with the session token and returns the status', async () => {
+    const status = { connected: true, account: 'Bruce', state: 'ok', lastSyncAt: 1 };
+    reply(json(200, status));
+    expect(await data.getTodoist()).toEqual(status);
+    expect(call().url).toBe('http://127.0.0.1:8100/todoist');
+    expect(call().method).toBe('GET');
+    expect(call().headers.get('authorization')).toBe('Bearer tok-123');
+  });
+
+  it('connectTodoist POSTs /todoist/connect and returns the authorize URL', async () => {
+    reply(json(200, { authorizeUrl: 'https://app.todoist.com/oauth/authorize?state=s' }));
+    expect(await data.connectTodoist()).toBe('https://app.todoist.com/oauth/authorize?state=s');
+    expect(call().url).toBe('http://127.0.0.1:8100/todoist/connect');
+    expect(call().method).toBe('POST');
+  });
+
+  it('connectTodoist without an authorize URL in the answer is unavailable', async () => {
+    reply(json(200, {}));
+    await expect(data.connectTodoist()).rejects.toBeInstanceOf(YunguUnavailable);
+  });
+
+  it('finishTodoist POSTs the code and state as JSON', async () => {
+    reply(empty(204));
+    await data.finishTodoist('the-code', 'the-state');
+    expect(call().url).toBe('http://127.0.0.1:8100/todoist/callback');
+    expect(call().method).toBe('POST');
+    expect(call().headers.get('content-type')).toBe('application/json');
+    expect(bodyOf()).toEqual({ code: 'the-code', state: 'the-state' });
+  });
+
+  it('syncTodoist POSTs /todoist/sync; disconnectTodoist DELETEs /todoist', async () => {
+    reply(empty(202));
+    reply(empty(204));
+    await data.syncTodoist();
+    await data.disconnectTodoist();
+    expect([call(0).method, call(0).url]).toEqual(['POST', 'http://127.0.0.1:8100/todoist/sync']);
+    expect([call(1).method, call(1).url]).toEqual(['DELETE', 'http://127.0.0.1:8100/todoist']);
+  });
+
+  it("passes the service's own messages on: 400 expired link, 502 refused, 503 not set up", async () => {
+    reply(json(400, { error: 'That Todoist link expired. Try connecting again.' }));
+    await expect(data.finishTodoist('c', 's')).rejects.toEqual(new ServiceError(400, 'That Todoist link expired. Try connecting again.'));
+    reply(json(502, { error: "Todoist didn't accept the connection. Try again." }));
+    await expect(data.finishTodoist('c', 's')).rejects.toEqual(new YunguUnavailable("Todoist didn't accept the connection. Try again."));
+    reply(json(503, { error: "Todoist isn't set up on this server." }));
+    const notSetUp = await data.connectTodoist().catch((e: unknown) => e);
+    expect(notSetUp).toBeInstanceOf(ServiceError);
+    expect(notSetUp).toMatchObject({ status: 503, message: "Todoist isn't set up on this server." });
+  });
+
+  it('a 503 without a message is still unavailable', async () => {
+    reply(new Response('<html>', { status: 503 }));
+    await expect(data.getTodoist()).rejects.toEqual(new YunguUnavailable(UNAVAILABLE));
+  });
+});

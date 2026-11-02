@@ -1,5 +1,5 @@
 import 'server-only';
-import type { Assignment, AssignmentDetail, Behaviour, ClassEvent, Comment, Course, FileRef, NotificationPage } from '../types';
+import type { Assignment, AssignmentDetail, Behaviour, ClassEvent, Comment, Course, FileRef, NotificationPage, TodoistStatus } from '../types';
 import { mockData } from './mock';
 import { serviceData } from './service';
 
@@ -102,8 +102,25 @@ export interface YunguData {
   getNotifications(read: boolean, page: number): Promise<NotificationPage>;
   /** Marks one notification read on Yungu (what clicking it there does). */
   markNotificationRead(id: string): Promise<void>;
-  /** Drops every cached read, so the next ones come fresh from Yungu (the refresh button). */
+  /** Drops every cached read, so the next ones come fresh from Yungu (the refresh button); also starts a Todoist sync when connected. */
   refresh(): Promise<void>;
+  /** The account's Todoist sync: connected or not, to whom, ok / syncing / error (and why), the last sync. */
+  getTodoist(): Promise<TodoistStatus>;
+  /**
+   * Starts connecting Todoist: the URL of Todoist's authorize page, carrying a one-use `state` bound to
+   * this account (the mock answers with its own callback URL). 503 when the server has no Todoist app.
+   */
+  connectTodoist(): Promise<string>;
+  /**
+   * Finishes connecting with what Todoist sent back to the callback; the service exchanges the code
+   * itself and starts the first sync. 400 for a missing, used, expired or foreign `state` (the message
+   * `TODOIST_LINK_EXPIRED`); 502 when Todoist refuses or cannot be reached.
+   */
+  finishTodoist(code: string, state: string): Promise<void>;
+  /** "Try again": starts a sync now (returns at once); 409 when not connected. */
+  syncTodoist(): Promise<void>;
+  /** Forgets the Todoist token and stops syncing; tasks already in Todoist stay. Idempotent. */
+  disconnectTodoist(): Promise<void>;
   signIn(loginId: string, password: string): Promise<SignInResult>;
   signOut(token: string): Promise<void>;
 }

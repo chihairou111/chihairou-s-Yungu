@@ -177,3 +177,19 @@ export interface Behaviour {
   deductionCount: number;
   records: BehaviourRecord[];
 }
+
+/** Why a connected account's Todoist sync is stuck (the service's `GET /todoist` error codes). */
+export type TodoistErrorCode = 'reauth' | 'todoist_unreachable' | 'signin' | 'yungu_unreachable';
+
+/**
+ * The signed-in account's Todoist sync, as the service's `GET /todoist` answers it. `account` is the
+ * Todoist name or email (absent when Todoist has neither); `lastSyncAt` the last successful sync (absent
+ * before the first); `error` only with `state: 'error'`. Not connected is always `state: 'ok'`.
+ */
+export interface TodoistStatus {
+  connected: boolean;
+  account?: string;
+  state: 'ok' | 'syncing' | 'error';
+  lastSyncAt?: number;
+  error?: { code: TodoistErrorCode; message: string };
+}

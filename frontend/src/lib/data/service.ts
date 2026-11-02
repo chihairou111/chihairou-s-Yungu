@@ -2,7 +2,7 @@ import 'server-only';
 import { cookies, headers } from 'next/headers';
 import { sanitizeInstructions } from '../sanitize';
 import { SESSION_COOKIE, decodeSession } from '../session-cookie';
-import type { Assignment, AssignmentDetail, Behaviour, ClassEvent, Comment, Course, FileRef, NotificationPage } from '../types';
+import type { Assignment, AssignmentDetail, Behaviour, ClassEvent, Comment, Course, FileRef, NotificationPage, TodoistStatus } from '../types';
 import { AssignmentNotFound, CommentNotFound, DocumentHandedIn, DocumentTooLong, ServiceError, SessionEnded, YunguUnavailable } from './errors';
 import type { SignInResult, StoredFile, YunguData } from './index';
 import { NOTIFICATION_PAGE_SIZE } from './messages';
@@ -51,6 +51,8 @@ async function send(path: string, init: RequestInit, timeoutMs?: number): Promis
   if (res.ok) return res;
   const message = await errorText(res);
   if (res.status === 401) throw new SessionEnded(message ?? undefined);
+  // The service's own 503 ("Todoist isn't set up on this server."), not a proxy's page: kept as is.
+  if (res.status === 503 && message) throw new ServiceError(503, message);
   if (res.status >= 500) throw new YunguUnavailable(res.status === 502 && message ? message : undefined);
   throw new ServiceError(res.status, message ?? GENERIC_ERROR);
 }
@@ -172,6 +174,21 @@ export const serviceData: YunguData = {
   },
   async refresh() {
     await authed('/refresh', { method: 'POST' });
+  },
+  getTodoist: () => get<TodoistStatus>('/todoist'),
+  async connectTodoist() {
+    const { authorizeUrl } = await body<{ authorizeUrl?: unknown }>(await authed('/todoist/connect', { method: 'POST' }));
+    if (typeof authorizeUrl !== 'string' || !authorizeUrl) throw new YunguUnavailable();
+    return authorizeUrl;
+  },
+  async finishTodoist(code, state) {
+    await authed('/todoist/callback', jsonInit('POST', { code, state }));
+  },
+  async syncTodoist() {
+    await authed('/todoist/sync', { method: 'POST' });
+  },
+  async disconnectTodoist() {
+    await authed('/todoist', { method: 'DELETE' });
   },
   async signIn(loginId, password): Promise<SignInResult> {
     let answer: { ok?: unknown; displayName?: unknown; token?: unknown; error?: unknown };

@@ -203,7 +203,7 @@ test.describe('one style', () => {
     const bar = page.getByRole('banner');
     await expect(bar.getByRole('button', { name: 'Settings' })).toHaveCount(0);
     const labels = await bar.getByRole('button').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')));
-    expect(labels).toEqual([expect.stringMatching(/^Notifications/), 'Refresh', expect.stringMatching(/^Account: /)]);
+    expect(labels).toEqual([expect.stringMatching(/^Todoist/), expect.stringMatching(/^Notifications/), 'Refresh', expect.stringMatching(/^Account: /)]);
   });
 
   test('the sign-in page is Rounded on first paint, whatever an old style cookie says', async ({ page, context, baseURL }) => {

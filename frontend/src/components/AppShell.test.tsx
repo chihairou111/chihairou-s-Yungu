@@ -125,10 +125,10 @@ function ThemeProbe() {
 }
 
 describe('app bar', () => {
-  it('holds, on the right, Notifications, Refresh and the account avatar, and no Settings gear', () => {
+  it('holds, on the right, Todoist, Notifications, Refresh and the account avatar, and no Settings gear', () => {
     render(<AppShell userName="Bruce Zheng">content</AppShell>);
     const buttons = within(screen.getByRole('banner')).getAllByRole('button');
-    expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(['Notifications', 'Refresh', 'Account: Bruce Zheng']);
+    expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(['Todoist', 'Notifications', 'Refresh', 'Account: Bruce Zheng']);
     expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument();
   });
 

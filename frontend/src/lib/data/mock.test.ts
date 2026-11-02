@@ -5,7 +5,7 @@ import { dayIndex, weekStartOf } from '../time';
 import { chinaMonth } from '../behaviour';
 import { AssignmentNotFound, CommentNotFound, ServiceError } from './errors';
 import { BLANK_CREDENTIALS_ERROR, data } from './index';
-import { mockData } from './mock';
+import { MOCK_DISPLAY_NAME, MOCK_SYNC_MS, mockData } from './mock';
 import { resetMockStore } from './store';
 
 const DAY = 24 * 3600_000;
@@ -266,5 +266,62 @@ describe('mock behaviour', () => {
     for (const month of ['2026-11', '2026-13', 'October']) {
       await expect(mockData.getBehaviour(month)).rejects.toEqual(new ServiceError(400, 'Bad request.'));
     }
+  });
+});
+
+describe('mock Todoist', () => {
+  const T0 = Date.UTC(2026, 10, 2, 4, 0);
+  const at = (ms: number) => vi.spyOn(Date, 'now').mockReturnValue(ms);
+  const stateOf = (url: string) => new URL(url, 'http://localhost').searchParams.get('state')!;
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetMockStore();
+  });
+
+  it('starts not connected', async () => {
+    expect(await mockData.getTodoist()).toEqual({ connected: false, state: 'ok' });
+  });
+
+  it('connects through its own callback URL, then syncs for a moment', async () => {
+    at(T0);
+    const url = await mockData.connectTodoist();
+    expect(url).toMatch(/^\/api\/todoist\/callback\?code=[\w-]+&state=[\w-]+$/);
+    await mockData.finishTodoist('mock-code', stateOf(url));
+    expect(await mockData.getTodoist()).toEqual({ connected: true, account: MOCK_DISPLAY_NAME, state: 'syncing' });
+    at(T0 + MOCK_SYNC_MS);
+    expect(await mockData.getTodoist()).toEqual({ connected: true, account: MOCK_DISPLAY_NAME, state: 'ok', lastSyncAt: T0 + MOCK_SYNC_MS });
+  });
+
+  it('refuses a callback with a state it did not hand out, or one used already (400)', async () => {
+    at(T0);
+    const expired = new ServiceError(400, 'That Todoist link expired. Try connecting again.');
+    await expect(mockData.finishTodoist('c', 'made-up')).rejects.toEqual(expired);
+    const state = stateOf(await mockData.connectTodoist());
+    await mockData.finishTodoist('c', state);
+    await expect(mockData.finishTodoist('c', state)).rejects.toEqual(expired);
+    expect((await mockData.getTodoist()).connected).toBe(true);
+  });
+
+  it('Try again and Refresh sync a connected account; Try again needs a connection (409)', async () => {
+    at(T0);
+    await expect(mockData.syncTodoist()).rejects.toEqual(new ServiceError(409, 'Connect Todoist first.'));
+    await mockData.refresh();
+    expect((await mockData.getTodoist()).state).toBe('ok');
+    await mockData.finishTodoist('c', stateOf(await mockData.connectTodoist()));
+    at(T0 + 10 * MOCK_SYNC_MS);
+    expect((await mockData.getTodoist()).state).toBe('ok');
+    await mockData.syncTodoist();
+    expect((await mockData.getTodoist()).state).toBe('syncing');
+    at(T0 + 20 * MOCK_SYNC_MS);
+    await mockData.refresh();
+    expect((await mockData.getTodoist()).state).toBe('syncing');
+  });
+
+  it('Disconnect forgets the connection', async () => {
+    at(T0);
+    await mockData.finishTodoist('c', stateOf(await mockData.connectTodoist()));
+    await mockData.disconnectTodoist();
+    expect(await mockData.getTodoist()).toEqual({ connected: false, state: 'ok' });
+    await mockData.disconnectTodoist();
   });
 });

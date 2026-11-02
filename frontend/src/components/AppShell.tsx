@@ -27,6 +27,7 @@ import {
 import { PHONE_NAV_CLEARANCE } from './NavRail';
 import { BOTTOM_FAB_MEDIA, showsTodayPanel } from './TodayDrawer';
 import NotificationsMenu from './NotificationsMenu';
+import TodoistMenu from './TodoistMenu';
 import RefreshButton from './RefreshButton';
 import { RefreshProvider } from './RefreshContext';
 
@@ -50,7 +51,7 @@ interface AppShellProps {
 }
 
 /**
- * Material app bar (section title, notifications, Refresh and the account menu) over the page content. A page
+ * Material app bar (section title, Todoist, notifications, Refresh and the account menu) over the page content. A page
  * may extend the bar with a `PageHeader` (tabs, page controls); the bar then gives up its bottom edge
  * so the two read as one header. The Today's classes panel sits beside the content on every page.
  */
@@ -94,6 +95,7 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
           <Typography variant="h1" sx={{ flexGrow: 1, minWidth: 0 }} noWrap>
             {title}
           </Typography>
+          <TodoistMenu />
           <NotificationsMenu />
           <RefreshButton />
           <IconButton
