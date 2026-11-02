@@ -11,11 +11,14 @@ function whyOf(error: ServiceError): TodoistWhy {
   return 'failed';
 }
 
-/** Connected and syncing normally: a used-up link was this browser's own, reloaded after it worked. */
+/**
+ * Connected, and not waiting to be connected again: a used-up link was this browser's own, reloaded after the
+ * connect worked (its first sync may since have failed for another reason, which the menu shows).
+ */
 async function alreadyConnected(): Promise<boolean> {
   try {
     const status = await data.getTodoist();
-    return status.connected && status.state !== 'error';
+    return status.connected && status.error?.code !== 'reauth';
   } catch {
     return false;
   }
@@ -29,8 +32,8 @@ async function alreadyConnected(): Promise<boolean> {
  * (nginx keeps no access log for this path) and never passed on in a URL.
  *
  * The service is always asked first, so a fresh code is never skipped (Reconnect while connected). A link
- * it no longer knows (400) after this account is connected and well is a reload of this page after the
- * connect worked: that lands as connected, not as an expired link.
+ * it no longer knows (400) while this account is connected (and not asking to connect again) is a reload of
+ * this page after the connect worked: that lands as connected, not as an expired link.
  */
 export async function GET(request: Request): Promise<Response> {
   const out = await signedOut();

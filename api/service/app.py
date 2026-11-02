@@ -36,7 +36,7 @@ from yungu_task import ACHIEVEMENT_NOT_SUBMITTED, CST, ONLINE_DOC_MAX_BYTES, SUB
 from .auth import Auth
 from .cache import ReadCache
 from .state import StateDir, SubmittedFiles
-from .todoist_service import NotConnected, NotSetUp, TodoistApi, TodoistService, connected as todoist_connected
+from .todoist_service import NotConnected, NotSetUp, TodoistApi, TodoistService, keeps_session as todoist_keeps_session
 from .yungu import (UNREACHABLE, ServiceError, SignInAgain, SignInRefused, Unavailable, Yungu, checked_redirect,
                     error_code)
 
@@ -478,7 +478,7 @@ class Service:
         self._state = StateDir(state_dir)
         self.auth = Auth(self._state)
         self.yungu = Yungu(self.auth, client_factory, clock=monotonic, on_end=self._ended,
-                           keep=lambda uid: todoist_connected(self._state, uid))
+                           keep=lambda uid: todoist_keeps_session(self._state, uid))
         self.on_sign_in: Callable[[int], object] = lambda uid: None      # Todoist: resume the account's sync
         self._now, self._monotonic = now, monotonic
         self._lock = threading.Lock()          # guards _accounts only

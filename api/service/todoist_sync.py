@@ -30,8 +30,8 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, TypedDict, Union
 
 import mapping
-from todoist import (TodoistAuthError, TodoistClient, TodoistNotFound, due_datetime as _due_datetime,
-                     refresh_access_token)
+from todoist import (TodoistAuthError, TodoistClient, TodoistError, TodoistNotFound, TodoistUnavailable,
+                     due_datetime as _due_datetime, refresh_access_token)
 
 from .state import StateDir
 
@@ -53,6 +53,16 @@ def _lock_for(path: Path) -> threading.RLock:
 
 class SyncCancelled(Exception):
     """The account was disconnected (or connected to another Todoist account) while the sync ran."""
+
+
+class SyncRefused(Exception):
+    """The run went through, but Todoist refused some assignments' create or due update outright (a 4xx that
+    is neither "connect again" nor an outage). Those were skipped (nothing pending left behind) and are tried
+    again on the next sync; everything else was synced and `lastSyncAt` is set."""
+
+    def __init__(self, refused: int, result: "SyncResult"):
+        super().__init__(f"Todoist refused {refused} assignment(s)")
+        self.refused, self.result = refused, result
 
 
 class SyncResult(TypedDict):
@@ -155,11 +165,17 @@ def _due_ms_of(task: dict) -> Optional[int]:
     return mapping.china_ms(date.replace("T", " "))
 
 
+def _refusal(e: TodoistError) -> bool:
+    """Todoist refused this one request (a plain 4xx): not "connect again", not an outage."""
+    return not isinstance(e, (TodoistAuthError, TodoistUnavailable))
+
+
 def sync_account(client: TodoistClient, todo: List[dict], store: TodoistStore, now_ms: int, *,
                  adopt: bool) -> SyncResult:
     """One sync of one account. `todo` is the service's To-do Assignment list (`id`, `title`, `course`, `dueAt`).
     Raises TodoistAuthError / TodoistUnavailable / TodoistError from the client (pairings made so far stay
-    saved) and SyncCancelled when the store vanished or changed account mid-way. Not reentrant per account:
+    saved) and SyncCancelled when the store vanished or changed account mid-way. A create or due update that
+    Todoist refuses outright skips that assignment only; the run finishes and then raises SyncRefused. Not reentrant per account:
     the caller runs one sync per account at a time."""
     start = store.load()
     if start is None or not start.get("token"):
@@ -216,6 +232,7 @@ def sync_account(client: TodoistClient, todo: List[dict], store: TodoistStore, n
             pairs.update(settled)
 
     label_ready = False
+    refused = 0
     seen = set()
     for a in todo:
         key = str(int(a["id"]))
@@ -229,7 +246,17 @@ def sync_account(client: TodoistClient, todo: List[dict], store: TodoistStore, n
                 client.ensure_label(LABEL)
                 label_ready = True
             put(key, {"pending": now_ms})          # settled by the next sync's scan if the create goes wrong
-            t = client.create_task(_content(a), description_for(a["id"]), _due(due_ms), [LABEL])
+            try:
+                t = client.create_task(_content(a), description_for(a["id"]), _due(due_ms), [LABEL])
+            except TodoistError as e:
+                if not _refusal(e):
+                    raise
+                # Todoist answered and made nothing: no pending left to rescan; the rest goes on.
+                write(lambda ps, k=key: ps.pop(k, None) if "pending" in (ps.get(k) or {}) else None)
+                pairs.pop(key, None)
+                refused += 1
+                log.warning("Todoist refused assignment %s of account %s: %s", key, store.user_id, e)
+                continue
             put(key, {"todoistId": str(t["id"]), "dueMs": due_ms})
             result["created"] += 1
             continue
@@ -251,6 +278,12 @@ def sync_account(client: TodoistClient, todo: List[dict], store: TodoistStore, n
             put(key, {**p, "closed": True})
             result["skipped"] += 1
             continue
+        except TodoistError as e:
+            if not _refusal(e):
+                raise
+            refused += 1                           # the pairing keeps its old due: tried again next time
+            log.warning("Todoist refused the due update of assignment %s of account %s: %s", key, store.user_id, e)
+            continue
         put(key, {"todoistId": tid, "dueMs": due_ms})
         result["updated"] += 1
 
@@ -264,6 +297,8 @@ def sync_account(client: TodoistClient, todo: List[dict], store: TodoistStore, n
         raise SyncCancelled("disconnected")
     if any(result.values()):
         log.info("Todoist sync for account %s: %s", store.user_id, result)
+    if refused:
+        raise SyncRefused(refused, result)
     return result
 
 

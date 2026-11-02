@@ -9,8 +9,9 @@ import responses
 import mapping
 import todoist
 from service.state import StateDir
-from service.todoist_sync import (LABEL, SyncCancelled, TodoistStore, description_for, make_client, sync_account)
-from todoist import TodoistAuthError, TodoistNotFound, TodoistUnavailable, due_datetime
+from service.todoist_sync import (LABEL, SyncCancelled, SyncRefused, TodoistStore, description_for, make_client,
+                                  sync_account)
+from todoist import TodoistAuthError, TodoistError, TodoistNotFound, TodoistUnavailable, due_datetime
 
 USER = 106
 TOKEN = "tok-SECRET-abcdef0123456789"
@@ -350,6 +351,59 @@ def test_pairings_made_before_a_failure_are_kept(store):
     assert r == {"created": 1, "updated": 0, "adopted": 0, "skipped": 0} and len(td.tasks) == 2
     assert td.names()[0] == "find_tasks"                 # the pending pairing was settled first: no match
     assert pairings(store)["93300"] == {"todoistId": "td2", "dueMs": LATER}
+
+
+def test_an_assignment_todoist_refuses_does_not_block_the_others(store, caplog):
+    td = FakeTodoist()
+    real = td.create_task
+
+    def refuse_the_case(content, *rest):
+        if content.startswith("[CL Business]"):
+            td.calls.append(("create_task", content))
+            raise TodoistError("Todoist create task: HTTP 400 INVALID_ARGUMENT_VALUE", 400)
+        return real(content, *rest)
+    td.create_task = refuse_the_case
+    with caplog.at_level(logging.INFO), pytest.raises(SyncRefused) as e:
+        sync_account(td, todo(CASE, ESSAY), store, NOW, adopt=False)
+    assert e.value.refused == 1 and e.value.result == {"created": 1, "updated": 0, "adopted": 0, "skipped": 0}
+    # The refused one was never made: no pending pairing (nothing to rescan), the rest went on, the run counts.
+    assert pairings(store) == {"93300": {"todoistId": "td1", "dueMs": LATER}}
+    assert store.load()["lastSyncAt"] == NOW
+    assert "93251" in caplog.text and "INVALID_ARGUMENT_VALUE" in caplog.text and "Case Study" not in caplog.text
+    td.create_task = real
+    td.calls.clear()
+    r = sync_account(td, todo(CASE, ESSAY), store, NOW + 1, adopt=False)
+    assert r == {"created": 1, "updated": 0, "adopted": 0, "skipped": 0}
+    assert "find_tasks" not in td.names() and len(td.tasks) == 2
+
+
+def test_a_due_update_todoist_refuses_is_kept_for_next_time_and_does_not_stop_the_rest(store):
+    td = FakeTodoist()
+    sync_account(td, todo(CASE, ESSAY), store, NOW, adopt=False)
+    real = td.update_due
+
+    def refuse_td1(task_id, due):
+        if task_id == "td1":
+            raise TodoistError("Todoist update task: HTTP 400 INVALID_ARGUMENT_VALUE", 400)
+        return real(task_id, due)
+    td.update_due = refuse_td1
+    moved = todo((93251, "1.8B Case Study", "CL Business", LATER + 60_000), (93300, "Essay draft", "English", LATER + 120_000))
+    with pytest.raises(SyncRefused) as e:
+        sync_account(td, moved, store, NOW + 1, adopt=False)
+    assert e.value.refused == 1 and e.value.result["updated"] == 1
+    assert pairings(store)["93251"] == {"todoistId": "td1", "dueMs": DUE}         # unchanged: tried again next time
+    assert pairings(store)["93300"]["dueMs"] == LATER + 120_000
+    td.update_due = real
+    assert sync_account(td, moved, store, NOW + 2, adopt=False)["updated"] == 1
+
+
+@pytest.mark.parametrize("error", [TodoistAuthError("401", 401), TodoistUnavailable("429", 429)])
+def test_auth_and_outage_on_a_create_still_stop_the_run(store, error):
+    td = FakeTodoist()
+    td.fail_on["create_task"] = error
+    with pytest.raises(type(error)):
+        sync_account(td, todo(CASE, ESSAY), store, NOW, adopt=False)
+    assert pairings(store) == {"93251": {"pending": NOW}} and td.names().count("create_task") == 1
 
 
 def test_auth_error_propagates(store):

@@ -195,7 +195,8 @@ export default function TodoistMenu() {
 
   return (
     <>
-      <Tooltip title={problem ? 'Todoist: sync problem' : 'Todoist'} describeChild>
+      {/* Plain: the button's own name already says when something is wrong. */}
+      <Tooltip title="Todoist" describeChild>
         <IconButton
           ref={button}
           aria-label={problem ? 'Todoist, sync problem' : 'Todoist'}

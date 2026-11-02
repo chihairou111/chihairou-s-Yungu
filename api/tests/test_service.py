@@ -2775,7 +2775,7 @@ import todoist                                                                  
 from service.todoist_service import (MESSAGES, REDIRECT_URI, STATE_TTL_SECONDS, SYNC_INTERVAL_SECONDS,  # noqa: E402
                                      TodoistApi)
 from service.todoist_sync import TodoistStore                                   # noqa: E402
-from todoist import TodoistAuthError, TodoistUnavailable                        # noqa: E402
+from todoist import TodoistAuthError, TodoistError, TodoistUnavailable          # noqa: E402
 
 NOT_SET_UP = "Todoist isn't set up on this server."
 LINK_EXPIRED = "That Todoist link expired. Try connecting again."
@@ -3413,6 +3413,45 @@ def test_the_idle_sweep_keeps_a_todoist_connected_non_owner_but_not_one_without(
     assert api.get("/courses", headers=auth).status_code == 200
     assert not service.yungu.is_on(OTHER) and OTHER not in service.yungu._sessions
     assert api.get("/courses", headers=b_auth).json() == {"error": SIGN_IN_AGAIN}
+
+
+def test_the_idle_sweep_lets_a_non_owner_waiting_for_reconnect_idle_out(api, auth, b_auth, tapi, bea, clock):
+    service = api.app.state.service
+    connect_todoist(api, b_auth, tapi, bea)
+    tapi.tokens.clear()                                                      # the grant was revoked: reauth
+    api.post("/todoist/sync", headers=b_auth)
+    settle(api)
+    assert error_of(api, b_auth)["code"] == "reauth"
+    clock.t += IDLE_SECONDS + 61
+    assert api.get("/courses", headers=auth).status_code == 200              # any request sweeps
+    assert not service.yungu.is_on(OTHER) and OTHER not in service.yungu._sessions
+
+
+def test_an_assignment_todoist_refuses_shows_the_problem_but_holds_nothing_back(api, auth, tapi, chi, world,
+                                                                                 monkeypatch):
+    connect_todoist(api, auth, tapi, chi)
+    for pid, title in ((95000, "Refused one"), (95001, "Another one")):
+        world.lists[TODO].append({**world.lists[TODO][0], "taskPublishId": pid, "title": title})
+    real = FakeTodoistClient.create_task
+
+    def refuse(self, content, *rest):
+        if "Refused one" in content:
+            raise TodoistError("Todoist create task: HTTP 400 INVALID_ARGUMENT_VALUE", 400)
+        return real(self, content, *rest)
+    monkeypatch.setattr(FakeTodoistClient, "create_task", refuse)
+    api.post("/refresh", headers=auth)
+    settle(api)
+    assert error_of(api, auth) == {"code": "todoist_unreachable", "message": "Can't reach Todoist right now."}
+    assert any("Another one" in t["content"] for t in chi.tasks.values())     # the rest went on
+    chi.calls.clear()
+    api.post("/refresh", headers=auth)                                       # automatic triggers are not held
+    settle(api)
+    assert "me" in chi.names()
+    monkeypatch.setattr(FakeTodoistClient, "create_task", real)
+    api.post("/refresh", headers=auth)
+    settle(api)
+    assert api.get("/todoist", headers=auth).json()["state"] == "ok"
+    assert any("Refused one" in t["content"] for t in chi.tasks.values())
 
 
 def test_a_restart_restores_the_schedule_from_disk(make, api, auth, b_auth, tapi, chi, bea, world):

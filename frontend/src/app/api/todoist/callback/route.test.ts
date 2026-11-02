@@ -45,6 +45,16 @@ describe('GET /api/todoist/callback', () => {
     }
   });
 
+  it.each([
+    ['todoist_unreachable', "Can't reach Todoist right now."],
+    ['yungu_unreachable', "Can't reach Yungu right now."],
+    ['signin', 'Sign in to the dashboard again to keep syncing.'],
+  ] as const)('…also when the first sync then failed (%s): the connection itself worked', async (code, message) => {
+    vi.spyOn(data, 'finishTodoist').mockRejectedValue(EXPIRED);
+    vi.spyOn(data, 'getTodoist').mockResolvedValue({ connected: true, account: 'Ada', state: 'error', error: { code, message } });
+    expect((await get()).headers.get('location')).toBe(CONNECTED);
+  });
+
   it.each<[string, TodoistStatus]>([
     ['not connected', { connected: false, state: 'ok' }],
     ['connected but asking to connect again', { connected: true, state: 'error', error: { code: 'reauth', message: 'Todoist needs you to connect again.' } }],

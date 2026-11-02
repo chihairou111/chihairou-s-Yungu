@@ -70,8 +70,11 @@ connected on disk (one thread in the app lifespan, first round 30 s after start)
 time (a trigger meanwhile runs it once more after), at most 4 accounts at once. The owner syncs through its
 automatic re-login; any other account only while its memory session is on (else `signin`, no login tried).
 A Todoist outage holds automatic triggers 15 min, doubling up to 2 h; Todoist's Retry-After (capped at 2 h)
-holds every trigger; `reauth` holds automatic triggers until Reconnect (Try again still asks Todoist). An account with Todoist connected is not signed out by the 12 h idle sweep (it stays until Yungu
-ends its session). Tokens, codes, states and the client secret are never logged or answered.
+holds every trigger; `reauth` holds automatic triggers until Reconnect (Try again still asks Todoist). A 403 is
+`reauth` only when Todoist's error tag is about the token or scope. An assignment whose create or due update
+Todoist refuses outright (another 4xx) is skipped and tried again next sync; the rest still syncs, the menu shows
+`todoist_unreachable`, and nothing is held back. An account with Todoist connected (and not in `reauth`) is not
+signed out by the 12 h idle sweep (it stays until Yungu ends its session). Tokens, codes, states and the client secret are never logged or answered.
 
 ## Run by hand
     cd /root/yungu-lms/api

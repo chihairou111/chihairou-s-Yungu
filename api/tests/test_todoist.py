@@ -153,6 +153,23 @@ def test_rejected_token_raises_auth_error(status):
         TodoistClient(TOKEN).me()
 
 
+@pytest.mark.parametrize("tag", ["AUTH_INSUFFICIENT_TOKEN_SCOPE", "AUTH_INVALID_TOKEN", "UNAUTHORIZED"])
+@responses.activate
+def test_a_403_about_the_token_or_its_scope_is_an_auth_error(tag):
+    responses.post(f"{API}/tasks", status=403, json={"error_tag": tag})
+    with pytest.raises(TodoistAuthError):
+        TodoistClient(TOKEN).create_task("c", "d", None, ["Yungu"])
+
+
+@pytest.mark.parametrize("body", [{"error_tag": "FORBIDDEN"}, {"error_tag": "MAX_ITEMS_LIMIT_REACHED"}, None])
+@responses.activate
+def test_a_403_that_is_not_about_the_token_is_a_plain_refusal(body):
+    responses.post(f"{API}/tasks", status=403, **({"json": body} if body else {"body": "forbidden"}))
+    with pytest.raises(TodoistError) as e:
+        TodoistClient(TOKEN).create_task("c", "d", None, ["Yungu"])
+    assert not isinstance(e.value, (TodoistAuthError, TodoistUnavailable)) and e.value.status == 403
+
+
 @pytest.mark.parametrize("status", [429, 500, 502, 503])
 @responses.activate
 def test_rate_limit_and_server_errors_raise_unavailable(status):

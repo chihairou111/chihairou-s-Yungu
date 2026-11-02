@@ -85,6 +85,15 @@ describe('TodoistMenu: the icon', () => {
     expect(badge).toHaveTextContent('');
   });
 
+  it('its tooltip is plain "Todoist", even with the badge (the name already says the problem)', async () => {
+    serve(REAUTH);
+    render(<TodoistMenu />);
+    const button = await screen.findByRole('button', { name: 'Todoist, sync problem' });
+    await userEvent.hover(button);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/^Todoist$/);
+    expect(button).toHaveAccessibleDescription('Todoist');
+  });
+
   it('a status that cannot be read shows no badge', async () => {
     api.fetchTodoistStatus.mockRejectedValue(new ApiError(502, "Can't reach Yungu right now. Try again."));
     render(<TodoistMenu />);

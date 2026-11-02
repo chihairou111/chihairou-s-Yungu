@@ -9,6 +9,7 @@ account token; the token is never logged, put in an exception or shown in a repr
                   due_datetime(deadline_ms), ["Yungu"])
 """
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Callable, Dict, List, Optional
 from urllib.parse import urlencode
@@ -88,7 +89,12 @@ def _json(resp: requests.Response, what: str):
         raise TodoistUnavailable(f"Todoist {what}: HTTP {resp.status_code}, not JSON", resp.status_code) from None
 
 
-def _raise_for(resp: requests.Response, what: str, auth_statuses=(401, 403)) -> None:
+# A 403 is about the token only when Todoist says so (an invalid token, a missing scope); any other 403 (a plan
+# limit, a forbidden object) is a refusal of that one request, not "connect again".
+_AUTH_TAG = re.compile(r"AUTH|TOKEN|SCOPE", re.IGNORECASE)
+
+
+def _raise_for(resp: requests.Response, what: str, auth_statuses=(401,)) -> None:
     status = resp.status_code
     if status < 400:
         return
@@ -97,7 +103,8 @@ def _raise_for(resp: requests.Response, what: str, auth_statuses=(401, 403)) -> 
     except ValueError:
         body = None
     detail = f"Todoist {what}: HTTP {status} {_describe(body)}".rstrip()
-    if status in auth_statuses:
+    tag = str(body.get("error_tag") or "") if isinstance(body, dict) else ""
+    if status in auth_statuses or (status == 403 and _AUTH_TAG.search(tag)):
         raise TodoistAuthError(detail, status)
     if status == 429 or status >= 500:
         raise TodoistUnavailable(detail, status, _retry_after(resp, body))

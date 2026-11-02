@@ -36,7 +36,7 @@ import todoist
 from todoist import TodoistAuthError, TodoistClient, TodoistError, TodoistUnavailable
 
 from .state import StateDir
-from .todoist_sync import SyncCancelled, TodoistStore, make_client, sync_account
+from .todoist_sync import SyncCancelled, SyncRefused, TodoistStore, make_client, sync_account
 from .yungu import ServiceError, SignInAgain
 
 log = logging.getLogger("yungu_lms.todoist")
@@ -156,6 +156,17 @@ def connected(state: StateDir, user_id: int) -> bool:
         return TodoistStore(state, user_id).is_connected()
     except OSError:
         return False
+
+
+def keeps_session(state: StateDir, user_id: int) -> bool:
+    """For the idle sweep: Todoist is connected and syncing on its own (a token stored, not waiting for the
+    student to Reconnect). An account in `reauth` makes no Todoist calls until they act, so its Yungu session
+    idles out as one without Todoist. Takes no lock; False when the directory cannot be read."""
+    try:
+        data = TodoistStore(state, user_id).load()
+    except OSError:
+        return False
+    return bool(data and data.get("token")) and data.get("lastError") != "reauth"
 
 
 def _hash(state: str) -> str:
@@ -373,7 +384,7 @@ class TodoistService:
 
     def _sync_once(self, user_id: int) -> None:
         store = self._store(user_id)
-        account_id, retry_after = None, None
+        account_id, retry_after, backoff = None, None, True
         try:
             start = store.load()
             if not start or not start.get("token"):
@@ -385,10 +396,19 @@ class TodoistService:
             if client is None:
                 return
             client.me()                     # a cheap check, so a revoked token shows even when nothing changed
-            sync_account(client, todo, store, int(self._now() * 1000), adopt=mark is not None)
+            refused = None
+            try:
+                sync_account(client, todo, store, int(self._now() * 1000), adopt=mark is not None)
+            except SyncRefused as e:        # the run itself went through (its adopt scan included)
+                refused = e
             if mark is not None:
                 store.update(lambda d: d.pop("adoptPending", None) if d.get("adoptPending") == mark else None)
+            if refused is not None:
+                raise refused
             error = None
+        except SyncRefused:
+            # Some assignments Todoist would not take: shown, but not an outage, so nothing is held back.
+            error, backoff = "todoist_unreachable", False
         except SyncCancelled:
             return                                  # disconnected or reconnected meanwhile: no error state
         except SignInAgain:
@@ -405,16 +425,18 @@ class TodoistService:
         except Exception as e:
             log.error("Todoist sync for account %s crashed: %s", user_id, type(e).__name__)
             error = "todoist_unreachable"
-        self._record(user_id, store, account_id, error, retry_after)
+        self._record(user_id, store, account_id, error, retry_after, backoff)
 
     def _record(self, user_id: int, store: TodoistStore, account_id, error: Optional[str],
-                retry_after: Optional[int]) -> None:
+                retry_after: Optional[int], backoff: bool = True) -> None:
         now = self._monotonic()
         with self._lock:
             a = self._account(user_id)
             before = a.error
             a.error = error
-            if error == "todoist_unreachable":
+            if error == "todoist_unreachable" and not backoff:
+                a.failures, a.not_before, a.retry_until = 0, 0.0, 0.0
+            elif error == "todoist_unreachable":
                 a.failures += 1
                 a.not_before = now + min(BACKOFF_MAX_SECONDS, BACKOFF_FIRST_SECONDS * 2 ** (a.failures - 1))
                 a.retry_until = now + min(retry_after, BACKOFF_MAX_SECONDS) if retry_after else 0.0
