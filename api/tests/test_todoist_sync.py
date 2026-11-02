@@ -54,8 +54,9 @@ class FakeTodoist:
 
     def find_tasks(self, label):
         self._call("find_tasks", label)
-        return [dict(t) for t in self.tasks.values()
-                if label in t["labels"] and not t["checked"] and not t["is_deleted"]]
+        return [dict(t) for t in self.tasks.values()          # Todoist label names are case-insensitive
+                if label.casefold() in [n.casefold() for n in t["labels"]] and not t["checked"]
+                and not t["is_deleted"]]
 
     def get_task(self, task_id):
         self._call("get_task", task_id)
@@ -341,11 +342,14 @@ def test_pairings_made_before_a_failure_are_kept(store):
     td.create_task = flaky
     with pytest.raises(TodoistUnavailable):
         sync_account(td, todo(CASE, ESSAY), store, NOW, adopt=False)
-    assert list(pairings(store)) == ["93251"]
+    assert pairings(store) == {"93251": {"todoistId": "td1", "dueMs": DUE}, "93300": {"pending": NOW}}
     assert "lastSyncAt" not in store.load()
     td.create_task = real
+    td.calls.clear()
     r = sync_account(td, todo(CASE, ESSAY), store, NOW + 1, adopt=False)
-    assert r["created"] == 1 and len(td.tasks) == 2
+    assert r == {"created": 1, "updated": 0, "adopted": 0, "skipped": 0} and len(td.tasks) == 2
+    assert td.names()[0] == "find_tasks"                 # the pending pairing was settled first: no match
+    assert pairings(store)["93300"] == {"todoistId": "td2", "dueMs": LATER}
 
 
 def test_auth_error_propagates(store):
@@ -417,12 +421,39 @@ def test_make_client_refreshes_and_stores_the_rotated_tokens(store):
 
 
 @responses.activate
-def test_make_client_keeps_the_refresh_token_when_a_retry_answer_omits_it(store):
+def test_make_client_drops_the_consumed_refresh_token_when_the_answer_has_no_new_one(store, caplog):
+    # Todoist omits refresh_token only when an already-used one is presented again within 60 s; presenting
+    # it once more later would revoke all the user's tokens, so it is not kept. Logged, without values.
+    caplog.set_level(logging.DEBUG)
     responses.get(f"{todoist.API}/user", status=401, json={})
     responses.post(todoist.TOKEN_URL, json={"access_token": "A2", "expires_in": 3600})
     responses.get(f"{todoist.API}/user", json={"id": "42"})
     make_client(store, "cid", "s").me()
-    assert store.load()["refreshToken"] == "R1"
+    data = store.load()
+    assert data["token"] == "A2" and data["refreshToken"] is None
+    assert "without a new refresh token" in caplog.text
+    assert "R1" not in caplog.text and "A2" not in caplog.text and TOKEN not in caplog.text
+
+
+@responses.activate
+def test_refresh_never_switches_onto_another_todoist_accounts_token(store):
+    responses.get(f"{todoist.API}/user", status=401, json={})
+    c = make_client(store, "cid", "s")
+    store.connect("OTHER-TOKEN", "OTHER-R", {"id": "99", "name": "Someone", "email": "s@x"})
+    with pytest.raises(SyncCancelled):
+        c.me()
+    assert len(responses.calls) == 1                       # no refresh, no request with the other token
+    assert store.load()["token"] == "OTHER-TOKEN"
+
+
+@responses.activate
+def test_refresh_after_disconnect_cancels(store):
+    responses.get(f"{todoist.API}/user", status=401, json={})
+    c = make_client(store, "cid", "s")
+    store.forget_token()
+    with pytest.raises(SyncCancelled):
+        c.me()
+    assert len(responses.calls) == 1
 
 
 @responses.activate
@@ -443,3 +474,148 @@ def test_make_client_uses_a_token_another_thread_already_refreshed(store):
     c.me()
     assert [x.request.url for x in responses.calls if "oauth" in x.request.url] == []
     assert responses.calls[1].request.headers["Authorization"] == "Bearer A-new"
+
+
+# ------------------------------------------------------------------- fix round 1: creates that go wrong
+class Crash(BaseException):
+    """The process dying (not an Exception: nothing in the engine may catch it)."""
+
+
+@pytest.mark.parametrize("error", [TodoistUnavailable("timeout after the server made it"), Crash()])
+def test_a_create_that_fails_after_todoist_made_the_task_is_not_duplicated(state, store, error):
+    td = FakeTodoist()
+    real = td.create_task
+
+    def made_then_failed(*a):
+        real(*a)
+        raise error
+    td.create_task = made_then_failed
+    with pytest.raises(type(error)):
+        sync_account(td, todo(CASE), store, NOW, adopt=False)
+    assert len(td.tasks) == 1 and pairings(store) == {"93251": {"pending": NOW}}
+    td.create_task = real
+    again = TodoistStore(state, USER)                        # e.g. after a restart
+    r = sync_account(td, todo(CASE), again, NOW + 1, adopt=False)
+    assert r == {"created": 0, "updated": 0, "adopted": 1, "skipped": 0}
+    assert len(td.tasks) == 1 and pairings(again) == {"93251": {"todoistId": "td1", "dueMs": DUE}}
+    td.calls.clear()
+    sync_account(td, todo(CASE), again, NOW + 2, adopt=False)
+    assert td.calls == []                                     # settled: no more scans
+
+
+def test_a_crash_between_create_and_save_is_not_duplicated(state, store, monkeypatch):
+    td = FakeTodoist()
+    real_update = TodoistStore.update
+    seen = []
+
+    def update_then_die(self, change):
+        seen.append(1)
+        if len(seen) == 2:                                    # 1st: pending; 2nd: the real pairing
+            raise Crash()
+        return real_update(self, change)
+    monkeypatch.setattr(TodoistStore, "update", update_then_die)
+    with pytest.raises(Crash):
+        sync_account(td, todo(CASE), store, NOW, adopt=False)
+    monkeypatch.setattr(TodoistStore, "update", real_update)
+    assert len(td.tasks) == 1 and pairings(store) == {"93251": {"pending": NOW}}
+    r = sync_account(td, todo(CASE), TodoistStore(state, USER), NOW + 1, adopt=False)
+    assert r["created"] == 0 and r["adopted"] == 1 and len(td.tasks) == 1
+
+
+def test_a_pending_pairing_with_no_task_and_no_longer_to_do_is_dropped(store):
+    td = FakeTodoist()
+    store.update(lambda d: d["pairings"].update({"555": {"pending": NOW}}))
+    r = sync_account(td, todo(), store, NOW + 1, adopt=False)
+    assert r == {"created": 0, "updated": 0, "adopted": 0, "skipped": 0}
+    assert pairings(store) == {} and td.names() == ["find_tasks"]
+
+
+# ------------------------------------------------------------------- fix round 1: labels, content
+def test_adoption_matches_the_label_whatever_its_case(store):
+    td = FakeTodoist(labels=("yungu",))
+    mine = td.add_existing("t", "https://yungu.chihairou.dev/assignments?task=93251", labels=("yungu",),
+                           due={"date": "2026-11-05T15:59:00Z", "timezone": "Asia/Shanghai"})
+    r = sync_account(td, todo(CASE), store, NOW, adopt=True)
+    assert r == {"created": 0, "updated": 0, "adopted": 1, "skipped": 0}
+    assert pairings(store)["93251"] == {"todoistId": mine, "dueMs": DUE}
+    assert td.label_names == ["yungu"]
+
+
+def test_an_assignment_without_a_course_is_just_its_title(store):
+    td = FakeTodoist()
+    sync_account(td, todo((1, "Reading log", "", DUE), (2, "Quiz", None, DUE)), store, NOW, adopt=False)
+    assert [c[1] for c in td.calls if c[0] == "create_task"] == ["Reading log", "Quiz"]
+
+
+# ------------------------------------------------------------------- fix round 1: Disconnect keeps pairings
+ME = {"id": "42", "name": "Chi", "email": "c@example.com"}
+
+
+def test_connect_stores_the_authorization_and_forget_token_keeps_only_the_pairings(state, tmp_path):
+    s = TodoistStore(state, USER)
+    assert s.connect("T", "R", ME) is False and s.is_connected()
+    assert s.load() == {"token": "T", "refreshToken": "R", "account": ME, "pairingsAccount": "42", "pairings": {}}
+    s.forget_token()                                     # no pairings: nothing left
+    assert s.load() is None and not s.is_connected()
+    s.connect("T", "R", ME)
+    s.update(lambda d: d.update(lastSyncAt=NOW, error="x", pairings={"1": {"todoistId": "a", "dueMs": DUE}}))
+    s.forget_token()
+    assert s.load() == {"pairingsAccount": "42", "pairings": {"1": {"todoistId": "a", "dueMs": DUE}}}
+    assert not s.is_connected() and make_client(s, "cid", "sec") is None
+    assert stat.S_IMODE(os.stat(tmp_path / "state" / "users" / str(USER) / "todoist.json").st_mode) == 0o600
+    with pytest.raises(SyncCancelled):
+        sync_account(FakeTodoist(), todo(CASE), s, NOW, adopt=False)
+
+
+def test_disconnect_and_reconnect_of_the_same_todoist_account_recreates_nothing(state):
+    s = TodoistStore(state, USER)
+    s.connect("T1", "R1", ME)
+    td = FakeTodoist()
+    sync_account(td, todo(CASE, ESSAY), s, NOW, adopt=True)
+    done = pairings(s)["93251"]["todoistId"]
+    td.tasks[done]["checked"] = True                     # completed in Todoist
+    moved = (CASE[0], CASE[1], CASE[2], LATER)
+    sync_account(td, todo(moved, ESSAY), s, NOW + 1, adopt=False)
+    assert pairings(s)["93251"]["closed"] is True
+    s.forget_token()                                      # Disconnect
+    assert s.connect("T2", "R2", ME) is True               # same Todoist account
+    td.calls.clear()
+    later = (CASE[0], CASE[1], CASE[2], LATER + 3600000)
+    r = sync_account(td, todo(later, ESSAY), s, NOW + 2, adopt=True)
+    assert r == {"created": 0, "updated": 0, "adopted": 0, "skipped": 1}
+    assert td.names() == ["find_tasks"] and len(td.tasks) == 2
+
+
+def test_reconnect_with_another_todoist_account_starts_fresh(state):
+    s = TodoistStore(state, USER)
+    s.connect("T1", "R1", ME)
+    sync_account(FakeTodoist(), todo(CASE), s, NOW, adopt=True)
+    s.forget_token()
+    assert s.connect("T9", "R9", {"id": "99", "name": "Other", "email": "o@x"}) is False
+    assert s.load()["pairings"] == {} and s.load()["pairingsAccount"] == "99"
+    other = FakeTodoist()
+    r = sync_account(other, todo(CASE), s, NOW + 1, adopt=True)
+    assert r["created"] == 1 and len(other.tasks) == 1
+
+
+def test_disconnect_during_a_sync_keeps_the_token_forgotten(state):
+    s = TodoistStore(state, USER)
+    s.connect("T1", "R1", ME)
+    td = FakeTodoist()
+    real = td.create_task
+
+    def create_then_disconnect(*a):
+        out = real(*a)
+        s.forget_token()
+        return out
+    td.create_task = create_then_disconnect
+    with pytest.raises(SyncCancelled):
+        sync_account(td, todo(CASE, ESSAY), s, NOW, adopt=False)
+    data = TodoistStore(state, USER).load()
+    assert "token" not in data and "lastSyncAt" not in data
+    assert data["pairings"] == {"93251": {"pending": NOW}}   # settled on reconnect of this account
+    assert len(td.tasks) == 1
+    td.create_task = real
+    s.connect("T2", "R2", ME)
+    r = sync_account(td, todo(CASE, ESSAY), s, NOW + 1, adopt=True)
+    assert r == {"created": 1, "updated": 0, "adopted": 1, "skipped": 0} and len(td.tasks) == 2
