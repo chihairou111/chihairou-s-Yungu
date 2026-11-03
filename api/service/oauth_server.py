@@ -1,24 +1,27 @@
 """OAuth 2.1 for agents: the authorization server behind /mcp (MCP authorization spec 2026-07-28).
 
-Discovery: `GET /.well-known/oauth-protected-resource` (RFC 9728; also at the path-inserted
-`…/oauth-protected-resource/mcp`) names the resource `https://yungu.chihairou.dev/mcp` and this server as its
+Discovery: `GET /.well-known/oauth-protected-resource/mcp` (RFC 9728 §3.1, path-inserted: the URL /mcp's 401
+points at; also at the root `…/oauth-protected-resource`) names the resource `https://yungu.chihairou.dev/mcp` and this server as its
 authorization server; `GET /.well-known/oauth-authorization-server` (RFC 8414) lists the endpoints. The
 authorization endpoint is the dashboard's page `/oauth/authorize` (Next.js): it signs the person in, then asks
 this service through the dashboard-only consent API (`POST /oauth/authorize/request`, `/approve`).
 
 - Clients: public only, by dynamic registration (RFC 7591, `POST /oauth/register`): no client secrets; redirect
-  URIs https or loopback http (any port at the authorization request, RFC 8252 §7.3), else exact. At most
-  MAX_CLIENTS overall; REGISTRATIONS_PER_ADDRESS per address per window; a client unused for CLIENT_IDLE_SECONDS
-  goes; at the cap, one never approved for an hour makes room. Stored (no secrets in them) in the top state
+  URIs https or loopback http (any port at the authorization request, RFC 8252 §7.3), else exact; hosts ASCII
+  LDH (IDNs as xn--…) or IP literals, so the host the consent page shows is the one the browser goes to. At
+  most MAX_CLIENTS overall; REGISTRATIONS_PER_ADDRESS per address (IPv6: per /64) per window; a client unused for
+  CLIENT_IDLE_SECONDS goes; at the cap, one never approved for an hour makes room. Stored (no secrets in them) in the top state
   dir's oauth-clients.json (0600).
 - Codes: authorization code + PKCE S256 only; bound to client, redirect URI, challenge, account, resource and
-  scope; single use (any presentation spends it; a second one revokes what the first bought), CODE_SECONDS.
+  scope; single use (any presentation spends it; a second one revokes what the first bought, also while the
+  first exchange is still running), CODE_SECONDS.
   Kept in memory only: a restart just means connecting again.
 - Grants: one per account and client (connecting the same client again replaces it), at most MAX_GRANTS per
   account, in users/<userId>/agent-tokens.json beside the personal tokens (agent_tokens.py), hashed. Access
   tokens (`yla_…`) last ACCESS_SECONDS and are bound to the resource; refresh tokens (`ylr_…`) rotate on every
   use and lapse REFRESH_SECONDS after their issue; a rotated-out refresh token presented again revokes the
-  grant (OAuth 2.1 §4.3.1).
+  grant (OAuth 2.1 §4.3.1), except the one just rotated out coming back within REFRESH_GRACE_SECONDS (a retry
+  or a concurrent refresh): refused, the grant kept.
 - Access tokens resolve through `AgentAuth` (`OAuthAccessTokenVerifier`): expiry, resource and revocation are
   checked on every /mcp request.
 
@@ -26,6 +29,7 @@ Never logged: tokens, codes, verifiers, challenges, state; log lines carry the h
 """
 import base64
 import hashlib
+import ipaddress
 import json
 import logging
 import re
@@ -59,7 +63,9 @@ MAX_REDIRECT_URIS = 10
 MAX_URI_CHARS = 2000
 MAX_BODY_BYTES = 16 * 1024
 MAX_TOKEN_CHARS = 512
-MAX_CODES, MAX_CODES_PER_ACCOUNT = 1000, 20
+MAX_CODES, MAX_CODES_PER_ACCOUNT = 1000, 20     # codes waiting to be exchanged
+MAX_SPENT_CODES = 1000                          # spent ones kept (until expiry) to recognise a reuse
+REFRESH_GRACE_SECONDS = 30                      # the refresh token just rotated out, back this soon: a retry
 REGISTRATIONS_PER_ADDRESS, REGISTRATION_WINDOW_SECONDS = 20, 600.0
 USED_REFRESH_KEPT = 50                   # rotated-out refresh hashes kept per grant, for reuse detection
 ACCESS_KEPT = 3                          # live access tokens per grant (older ones go at a refresh)
@@ -70,6 +76,7 @@ BASIC_CHALLENGE = {"WWW-Authenticate": 'Basic realm="yungu-lms"'}     # RFC 6749
 
 _CHALLENGE = re.compile(r"[A-Za-z0-9_-]{43}")               # base64url(sha256), no padding
 _VERIFIER = re.compile(r"[A-Za-z0-9._~-]{43,128}")          # RFC 7636 §4.1
+_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")       # an LDH label (IDNA: xn--… is one too)
 _SCOPE = re.compile(r"[\x21\x23-\x5b\x5d-\x7e]+( [\x21\x23-\x5b\x5d-\x7e]+)*")     # RFC 6749 §3.3
 
 # The person's words (consent page error card); OAuth codes travel beside them.
@@ -138,23 +145,55 @@ class AuthorizeRefused(Exception):
 
 
 # ------------------------------------------------------------------ URIs
+def host_ok(netloc: str, host: Optional[str]) -> bool:
+    """A host a person reads the way a browser goes there: ASCII LDH labels (an IDN only as xn--…), an IPv4
+    literal or a bracketed IPv6 literal; no `%`, `\\` or non-ASCII anywhere in the authority."""
+    if not host or not netloc.isascii() or "%" in netloc or "\\" in netloc or "@" in netloc:
+        return False
+    if "[" in netloc or "]" in netloc:
+        try:
+            return ipaddress.ip_address(host).version == 6 and netloc.startswith(f"[{host}]")
+        except ValueError:
+            return False
+    if all(part.isdigit() for part in host.split(".")):
+        try:
+            return ipaddress.ip_address(host).version == 4
+        except ValueError:
+            return False
+    return len(host) <= 253 and all(_LABEL.fullmatch(label) for label in host.split("."))
+
+
 def redirect_uri_ok(uri) -> bool:
-    """https with a host, or http to a loopback host; no fragment, no user info, no whitespace or controls."""
+    """https to a host_ok host, or http to a loopback host; no fragment, no user info, no backslash, no
+    whitespace or controls."""
     if not isinstance(uri, str) or not uri or len(uri) > MAX_URI_CHARS:
         return False
-    if any(c.isspace() or unicodedata.category(c) == "Cc" for c in uri) or "#" in uri:
+    if any(c.isspace() or unicodedata.category(c) == "Cc" for c in uri) or "#" in uri or "\\" in uri:
         return False
     try:
         parts = urlsplit(uri)
-        host = parts.hostname
+        host = parts.hostname                       # lowercased, brackets dropped
         parts.port                                  # a bad port raises
     except ValueError:
         return False
-    if not host or "@" in parts.netloc:
+    if not host_ok(parts.netloc, host):
         return False
     if parts.scheme == "https":
         return True
     return parts.scheme == "http" and host in LOOPBACK_HOSTS
+
+
+def throttle_key(address: str) -> str:
+    """Registrations are counted per IPv4 address, per IPv6 /64 (one host usually holds a whole /64)."""
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return address or "-"
+    if ip.version == 6:
+        if ip.ipv4_mapped is not None:
+            return str(ip.ipv4_mapped)
+        return str(ipaddress.IPv6Network((ip, 64), strict=False))
+    return str(ip)
 
 
 def _without_port(uri: str) -> Optional[tuple]:
@@ -240,7 +279,7 @@ class OAuthClients:
         now = self._now()
         now_ms = int(now * 1000)
         with self._lock:
-            if self._throttled(address or "-", now):
+            if self._throttled(throttle_key(address), now):
                 raise OAuthError("temporarily_unavailable",
                                  "Too many registrations from this address. Try again later.", status=429)
             rows = self._live(self._rows(), now_ms)
@@ -291,29 +330,39 @@ class Codes:
         now = self._now()
         with self._lock:
             self._codes = {h: c for h, c in self._codes.items() if c["expiresAt"] > now}
+            spent = sorted((h for h, c in self._codes.items() if c["spent"]), key=lambda h: self._codes[h]["expiresAt"])
+            for h in spent[:max(0, len(spent) - MAX_SPENT_CODES)]:
+                del self._codes[h]                            # the oldest spent ones go first
             waiting = [c for c in self._codes.values() if not c["spent"]]
             mine = sum(c["userId"] == record["userId"] for c in waiting)
-            if len(self._codes) >= MAX_CODES or mine >= MAX_CODES_PER_ACCOUNT:
+            if len(waiting) >= MAX_CODES or mine >= MAX_CODES_PER_ACCOUNT:
                 raise AuthorizeRefused(BUSY, "temporarily_unavailable")
             code = secrets.token_urlsafe(32)
-            self._codes[token_hash(code)] = {**record, "expiresAt": now + CODE_SECONDS, "spent": False, "grantId": None}
+            self._codes[token_hash(code)] = {**record, "expiresAt": now + CODE_SECONDS, "spent": False,
+                                             "reused": False, "grantId": None}
         return code
 
     def spend(self, code: str) -> Tuple[Optional[dict], bool]:
-        """(the code's record or None, whether it was already spent). Spends it."""
+        """(the code's record or None, whether it was already spent). Spends it; a second presentation marks
+        it reused, so an exchange still running when it came drops what it bought (see `bought`)."""
         with self._lock:
             record = self._codes.get(token_hash(code))
             if record is None:
                 return None, False
             was = record["spent"]
             record["spent"] = True
-            return record, was
+            if was:
+                record["reused"] = True
+            return dict(record), was
 
-    def bought(self, code: str, grant_id: str) -> None:
+    def bought(self, code: str, grant_id: str) -> bool:
+        """Ties the grant to the code; True when the code was presented again meanwhile."""
         with self._lock:
             record = self._codes.get(token_hash(code))
-            if record is not None:
-                record["grantId"] = grant_id
+            if record is None:
+                return False
+            record["grantId"] = grant_id
+            return record["reused"]
 
 
 # ------------------------------------------------------------------ the server
@@ -493,7 +542,11 @@ class OAuthServer:
             raise OAuthError("invalid_grant", "The PKCE code_verifier does not match.")
         self._resource_of(form)
         grant_id, tokens = self._new_grant(record, token_hash(code))
-        self._codes.bought(code, grant_id)
+        if self._codes.bought(code, grant_id):                 # presented again while this exchange ran
+            self._drop_grant(record["userId"], grant_id)
+            log.warning("oauth: an authorization code was reused; its grant is revoked (account=%s)",
+                        account_hash(record["userId"]))
+            raise OAuthError("invalid_grant", "This code was already used.")
         self.clients.touch(cid)
         log.info("oauth: an agent connected (account=%s)", account_hash(record["userId"]))
         return tokens
@@ -532,8 +585,6 @@ class OAuthServer:
         hit = self._files.lookup(digest)
         if hit is None or hit.kind not in ("refresh", "used_refresh"):
             raise OAuthError("invalid_grant", "Unknown or expired refresh token.")
-        if hit.kind == "used_refresh":
-            self._reused(hit.user_id, hit.id)
         self._resource_of(form)
         now_ms = _now_ms(self._now)
         access, refresh, answer = self._tokens()
@@ -544,14 +595,19 @@ class OAuthServer:
             if grant is None:
                 return "gone", None
             if not secrets.compare_digest(grant["refreshHash"], digest):
-                if digest in (grant.get("usedRefresh") or []):
-                    return "reused", {**data, "oauth": [g for g in live if g["id"] != hit.id]}
-                return "gone", None
+                used = grant.get("usedRefresh") or []
+                if digest not in used:
+                    return "gone", None
+                rotated = grant.get("rotatedAt")
+                if used[-1] == digest and isinstance(rotated, int) and now_ms - rotated <= REFRESH_GRACE_SECONDS * 1000:
+                    return "retry", None                      # a retried or concurrent refresh: refused, kept
+                return "reused", {**data, "oauth": [g for g in live if g["id"] != hit.id]}
             if not secrets.compare_digest(grant["clientId"], cid):
                 return "client", None
             grant["usedRefresh"] = ((grant.get("usedRefresh") or []) + [digest])[-USED_REFRESH_KEPT:]
             grant["refreshHash"] = token_hash(refresh)
             grant["refreshExpiresAt"] = now_ms + REFRESH_SECONDS * 1000
+            grant["rotatedAt"] = now_ms
             fresh = [a for a in grant.get("access") or [] if isinstance(a, dict)
                      and isinstance(a.get("expiresAt"), int) and a["expiresAt"] > now_ms]
             new = {"hash": token_hash(access), "expiresAt": now_ms + ACCESS_SECONDS * 1000}
@@ -565,12 +621,6 @@ class OAuthServer:
             raise OAuthError("invalid_grant", "Unknown or expired refresh token.")
         self.clients.touch(cid)
         return answer
-
-    def _reused(self, user_id: int, grant_id: str):
-        self._drop_grant(user_id, grant_id)
-        log.warning("oauth: a rotated-out refresh token was reused; its grant is revoked (account=%s)",
-                    account_hash(user_id))
-        raise OAuthError("invalid_grant", "Unknown or expired refresh token.")
 
     def _drop_grant(self, user_id: int, grant_id: str) -> bool:
         def change(data):

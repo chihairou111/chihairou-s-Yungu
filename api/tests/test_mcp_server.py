@@ -26,7 +26,7 @@ from test_service import (B_PW, ENDPOINTS, ME, OTHER, SIGN_IN_AGAIN, UNREACHABLE
                           b_sign_in, clock, make, mode, no_network, sign_in, state_dir, tapi, world)
 
 BASE = "http://127.0.0.1:8100"
-METADATA = "https://yungu.chihairou.dev/.well-known/oauth-protected-resource"
+METADATA = "https://yungu.chihairou.dev/.well-known/oauth-protected-resource/mcp"      # RFC 9728 §3.1, path-inserted
 CHALLENGE = f'Bearer resource_metadata="{METADATA}", scope="read"'
 INVALID = f'Bearer error="invalid_token", resource_metadata="{METADATA}", scope="read"'
 TOOL_NAMES = {"list_todo", "list_submitted", "get_assignment", "get_schedule", "list_courses", "get_behaviour",

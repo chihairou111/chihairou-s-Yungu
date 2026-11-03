@@ -95,7 +95,7 @@ Code: `service/mcp_server.py` (endpoint, auth check, rate limit, logs), `service
   `AgentAuth.resolve` (personal tokens and OAuth access tokens, one `AgentFiles` index over every account's
   agent-tokens.json; one account's unreadable file is skipped and logged by type, never the others' failure).
   No Bearer credential (none, or another scheme) → 401
-  `WWW-Authenticate: Bearer resource_metadata="https://yungu.chihairou.dev/.well-known/oauth-protected-resource", scope="read"`;
+  `WWW-Authenticate: Bearer resource_metadata="https://yungu.chihairou.dev/.well-known/oauth-protected-resource/mcp", scope="read"`;
   a Bearer token that resolves to nothing (a dashboard token included) → the same with `error="invalid_token", `
   first. Agent tokens open nothing but `/mcp`: every other route keeps the dashboard token check, which knows
   nothing of them. Revoking stops the next request.
@@ -106,7 +106,7 @@ Code: `service/mcp_server.py` (endpoint, auth check, rate limit, logs), `service
   `DELETE /agent/clients/{id}` → 204 (404 for another account's or an unknown id). No expiry until revoked;
   dashboard sign-out does not revoke them (nor OAuth grants).
 - **OAuth 2.1** (MCP authorization spec 2026-07-28), issuer `https://yungu.chihairou.dev`, scope `read`:
-  - `GET /.well-known/oauth-protected-resource` (also `…/oauth-protected-resource/mcp`): `{resource:
+  - `GET /.well-known/oauth-protected-resource/mcp` (the 401's URL; the same at the root `…/oauth-protected-resource`): `{resource:
     "https://yungu.chihairou.dev/mcp", authorization_servers: ["https://yungu.chihairou.dev"], scopes_supported:
     ["read"], bearer_methods_supported: ["header"], resource_name}`. `GET /.well-known/oauth-authorization-server`:
     authorization_endpoint `/oauth/authorize` (the dashboard's Next page), token `/oauth/token`, registration
@@ -114,14 +114,16 @@ Code: `service/mcp_server.py` (endpoint, auth check, rate limit, logs), `service
     auth method `none`; `authorization_response_iss_parameter_supported: true` (redirects carry `iss`).
   - `POST /oauth/register` (RFC 7591, JSON) → 201 `{client_id (ylc_…), client_id_issued_at, client_name,
     redirect_uris, grant_types, response_types: ["code"], token_endpoint_auth_method: "none", scope: "read"}`:
-    public clients only (no secret, whatever was asked); redirect URIs https or http loopback (no fragment,
-    ≤ 10); name ≤ 64 (missing → "Unnamed agent"); errors 400 `invalid_redirect_uri` / `invalid_client_metadata`.
-    At most 500 clients (at the cap one never approved for an hour makes room, else 503); 20 per address per
-    10 min (429); a client unused for 30 days goes.
+    public clients only (no secret, whatever was asked); redirect URIs https or http loopback (no fragment, no
+    backslash, ≤ 10; hosts ASCII LDH labels — IDNs as xn--… — or IP literals, no `%` in the authority, so the
+    host shown on the consent page is where the browser goes); name ≤ 64 (missing → "Unnamed agent"); errors 400 `invalid_redirect_uri` / `invalid_client_metadata`.
+    At most 500 clients (at the cap one never approved for an hour makes room, else 503); 20 per address (IPv6:
+    per /64; X-Real-IP, else the socket peer) per 10 min (429); a client unused for 30 days goes.
   - Consent API (dashboard Bearer): `POST /oauth/authorize/request {response_type?, client_id, redirect_uri,
     state?, code_challenge, code_challenge_method, scope?, resource?}` → `{valid: true, client: {name,
     redirectHost}}`; `POST /oauth/authorize/approve {…same, decision: "allow"|"deny"}` → `{redirect}` (allow:
-    `<redirect_uri>?code=…&state=…&iss=…`; deny: `?error=access_denied&state=…&iss=…`). Refusals: 400 `{error:
+    `<redirect_uri>?code=…&state=…&iss=…`; deny: `?error=access_denied&state=…&iss=…`); `redirectHost` is the
+    parsed, lowercased host (IPv6 without brackets). Refusals: 400 `{error:
     <message for the person>, code: <OAuth error>, redirect?}`: no `redirect` when the client is unknown or the
     redirect URI isn't registered (never send the browser there); otherwise `redirect` returns the error to the
     client. Loopback redirect URIs match on any port; others exactly. At most 20 connected agents per account
@@ -129,9 +131,11 @@ Code: `service/mcp_server.py` (endpoint, auth check, rate limit, logs), `service
   - `POST /oauth/token` (form): `authorization_code` (code, code_verifier, redirect_uri, client_id, resource?)
     or `refresh_token` (refresh_token, client_id, resource?) → `{access_token (yla_…), token_type: "Bearer",
     expires_in: 3600, refresh_token (ylr_…), scope: "read"}`, `Cache-Control: no-store`. Codes: 5 min, single
-    use (any presentation spends one; a second presentation revokes what it bought), bound to client, redirect
+    use (any presentation spends one; a second presentation revokes what it bought, also mid-exchange; at most
+    1000 waiting, spent ones kept apart for reuse detection), bound to client, redirect
     URI, PKCE challenge, account and resource. Refresh tokens rotate on every use and lapse 30 days after
-    issue; a rotated-out one presented again revokes the grant. `client_id` may come as HTTP Basic user name.
+    issue; a rotated-out one presented again revokes the grant, except the one just rotated out within 30 s
+    (a retried or concurrent refresh): invalid_grant, grant kept. `client_id` may come as HTTP Basic user name.
     Errors per RFC 6749 §5.2 (+ `invalid_target`, RFC 8707).
   - `POST /oauth/revoke` (RFC 7009, form `token`, `client_id?`) → 200: an access token ends alone, a refresh
     token ends the grant.

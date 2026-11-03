@@ -6,6 +6,7 @@ import base64
 import hashlib
 import logging
 import secrets
+import threading
 from urllib.parse import parse_qsl, urlsplit
 
 import anyio
@@ -136,7 +137,9 @@ def test_the_401_points_at_the_metadata(api):
     r = rpc(api, None)
     assert r.status_code == 401
     assert r.headers["www-authenticate"] == \
-        f'Bearer resource_metadata="{PUBLIC}/.well-known/oauth-protected-resource", scope="read"'
+        f'Bearer resource_metadata="{PUBLIC}/.well-known/oauth-protected-resource/mcp", scope="read"'
+    assert api.get("/.well-known/oauth-protected-resource/mcp").json() == PRM == \
+        api.get("/.well-known/oauth-protected-resource").json()                 # both still served
 
 
 # ------------------------------------------------------------------ registration (RFC 7591)
@@ -153,7 +156,8 @@ def test_registration_makes_a_public_client(api, clock):
 
 
 @pytest.mark.parametrize("uri", [WEB_REDIRECT, "http://localhost:8080/cb", "http://[::1]:9/cb", "http://127.0.0.1/cb",
-                                 "https://app.example/cb?x=1"])
+                                 "https://app.example/cb?x=1", "https://xn--bcher-kva.example/cb", "https://10.0.0.5:8443/cb",
+                                 "https://[2001:db8::1]/cb", "https://my-app.example.com/cb%20x"])
 def test_https_and_loopback_redirect_uris_are_accepted(api, uri):
     assert register(api, redirect_uris=[uri]).status_code == 201
 
@@ -162,7 +166,14 @@ def test_https_and_loopback_redirect_uris_are_accepted(api, uri):
                                   ["ftp://x.example/cb"], ["not a url"], ["https:///cb"], ["https://u:p@x.example/cb"],
                                   ["https://x.example/c b"], [], None, "https://x.example/cb", [5],
                                   [WEB_REDIRECT, "http://evil.example/cb"], ["https://x.example/" + "a" * 2100],
-                                  [f"https://x.example/{i}" for i in range(11)]])
+                                  [f"https://x.example/{i}" for i in range(11)],
+                                  # hosts a person could misread on the consent page, or a browser reads otherwise
+                                  ["https://claude.ai%2eevil.example/cb"], ["https://evil.example\\.claude.ai/cb"],
+                                  ["https://claude.ai\\@evil.example/cb"], ["https://bücher.example/cb"],
+                                  ["https://claude.ai%00.evil.example/cb"], ["https://-bad.example/cb"],
+                                  ["https://bad-.example/cb"], ["https://a..example/cb"], ["https://claude.ai./cb"],
+                                  ["https://under_score.example/cb"], ["https://x.example/a\\b"],
+                                  ["https://claude.ai\u3002evil.example/cb"], ["https://[not-ipv6]/cb"]])
 def test_other_redirect_uris_are_refused(api, uris):
     r = register(api, redirect_uris=uris)
     assert r.status_code == 400 and r.json()["error"] == "invalid_redirect_uri" and r.json()["error_description"]
@@ -206,6 +217,21 @@ def test_registrations_are_capped_overall_and_never_used_ones_make_room_after_an
     assert api.post("/oauth/authorize/request", json=params(used, challenge), headers=auth).status_code == 200
 
 
+def test_ipv6_addresses_share_a_throttle_per_64(api):
+    for i in range(oauth_server.REGISTRATIONS_PER_ADDRESS):
+        assert register(api, address=f"2001:db8:1:2::{i + 1:x}").status_code == 201
+    assert register(api, address="2001:db8:1:2:ffff:1:2:3").status_code == 429       # the same /64
+    assert register(api, address="2001:db8:1:3::1").status_code == 201                # the next /64
+
+
+def test_without_x_real_ip_the_socket_peer_is_the_address(api):
+    body = {"client_name": "Claude", "redirect_uris": [REDIRECT]}
+    for _ in range(oauth_server.REGISTRATIONS_PER_ADDRESS):
+        assert api.post("/oauth/register", json=body).status_code == 201
+    assert api.post("/oauth/register", json=body).status_code == 429
+    assert register(api, address="198.51.100.77").status_code == 201
+
+
 def test_registrations_are_throttled_per_address(api, clock):
     for _ in range(oauth_server.REGISTRATIONS_PER_ADDRESS):
         assert register(api, address="192.0.2.1").status_code == 201
@@ -237,6 +263,16 @@ def test_clients_survive_a_restart(make, api, auth):
 
 
 # ------------------------------------------------------------------ the consent API
+@pytest.mark.parametrize("uri,host", [("https://APP.Example.COM/cb", "app.example.com"),
+                                      ("https://xn--bcher-kva.example/cb", "xn--bcher-kva.example"),
+                                      ("https://[2001:db8::1]:8443/cb", "2001:db8::1")])
+def test_the_return_host_shown_is_the_parsed_normalised_host(api, auth, uri, host):
+    cid = client_id(api, redirect_uris=[uri])
+    _, challenge = pkce()
+    r = api.post("/oauth/authorize/request", json=params(cid, challenge, redirect_uri=uri), headers=auth)
+    assert r.status_code == 200 and r.json()["client"]["redirectHost"] == host
+
+
 def test_a_valid_request_names_the_client_and_its_return_host(api, auth):
     cid = client_id(api)
     _, challenge = pkce()
@@ -386,6 +422,7 @@ def misuse_cases():
         ("wrong verifier", {"code_verifier": secrets.token_urlsafe(48)}, "invalid_grant"),
         ("missing verifier", {"code_verifier": None}, "invalid_grant"),
         ("short verifier", {"code_verifier": "abc"}, "invalid_grant"),
+        ("verifier bad charset", {"code_verifier": "+/=" * 15}, "invalid_grant"),
         ("wrong redirect", {"redirect_uri": "http://127.0.0.1:33418/other"}, "invalid_grant"),
         ("missing redirect", {"redirect_uri": None}, "invalid_grant"),
         ("wrong resource", {"resource": "https://evil.example/mcp"}, "invalid_target"),
@@ -433,6 +470,41 @@ def test_review_focus_3_a_reused_code_is_refused_and_revokes_what_it_bought(api,
     assert refresh(api, cid, first["refresh_token"]).json()["error"] == "invalid_grant"
 
 
+def test_review_focus_3_a_code_reused_while_its_first_exchange_runs_revokes_that_grant(api, auth, world, monkeypatch):
+    cid = client_id(api)
+    verifier, challenge = pkce()
+    code = get_code(api, auth, cid, challenge)
+    server = api.app.state.oauth
+    form = (f"grant_type=authorization_code&code={code}&code_verifier={verifier}&client_id={cid}"
+            f"&redirect_uri={REDIRECT}").encode()
+    original, second = oauth_server.OAuthServer._new_grant, []
+
+    def racing(self, record, code_hash):
+        made = original(self, record, code_hash)                     # the grant exists, not yet tied to the code
+        try:
+            self.token(form, "application/x-www-form-urlencoded", "")
+        except oauth_server.OAuthError as e:
+            second.append(e.code)
+        return made
+    monkeypatch.setattr(oauth_server.OAuthServer, "_new_grant", racing)
+    with pytest.raises(oauth_server.OAuthError) as first:
+        server.token(form, "application/x-www-form-urlencoded", "")
+    assert first.value.code == "invalid_grant" and second == ["invalid_grant"]
+    assert server.clients_of(ME) == []                                # what the code bought is gone
+
+
+def test_spent_codes_do_not_count_toward_the_cap_of_waiting_ones(api, auth, monkeypatch):
+    monkeypatch.setattr(oauth_server, "MAX_CODES", 2)
+    for _ in range(3):
+        connect(api, auth)                                            # each code issued, then spent
+    cid = client_id(api)
+    _, challenge = pkce()
+    get_code(api, auth, cid, challenge)
+    get_code(api, auth, cid, challenge)
+    r = approve(api, auth, params(cid, challenge))                    # two waiting: the cap
+    assert r.status_code == 400 and r.json()["code"] == "temporarily_unavailable"
+
+
 def test_review_focus_3_the_code_belongs_to_the_account_that_approved(api, auth, b_auth, world):
     _, b_tokens = connect(api, b_auth)
     theirs = call(api, b_tokens["access_token"], "list_courses").structured_content["courses"]
@@ -450,11 +522,50 @@ def test_refresh_after_the_hour_rotates_and_a_reused_refresh_token_revokes_the_g
     second = r.json()
     assert second["refresh_token"] != first["refresh_token"] and second["expires_in"] == 3600
     assert second["access_token"].startswith("yla_") and works(api, second["access_token"])
+    clock.t += oauth_server.REFRESH_GRACE_SECONDS + 1
     reused = refresh(api, cid, first["refresh_token"])                 # the rotated-out one comes back
     assert reused.status_code == 400 and reused.json()["error"] == "invalid_grant"
     assert not works(api, second["access_token"])                      # the whole grant is gone
     assert refresh(api, cid, second["refresh_token"]).json()["error"] == "invalid_grant"
     assert api.get("/agent/tokens", headers=auth).json()["clients"] == []
+
+
+def test_a_retried_refresh_within_the_grace_window_is_refused_without_revoking(api, auth, world, clock):
+    cid, first = connect(api, auth)
+    second = refresh(api, cid, first["refresh_token"]).json()
+    clock.t += oauth_server.REFRESH_GRACE_SECONDS - 1
+    retried = refresh(api, cid, first["refresh_token"])               # a retry of the same refresh
+    assert retried.status_code == 400 and retried.json()["error"] == "invalid_grant"
+    assert works(api, second["access_token"])                          # the grant lives on
+    third = refresh(api, cid, second["refresh_token"]).json()
+    older = refresh(api, cid, first["refresh_token"])                 # two rotations back: reuse, even now
+    assert older.json()["error"] == "invalid_grant"
+    assert not works(api, third["access_token"])
+    assert api.get("/agent/tokens", headers=auth).json()["clients"] == []
+    assert oauth_server.REFRESH_GRACE_SECONDS <= 60
+
+
+def test_concurrent_refreshes_with_one_token_leave_one_winner_and_the_grant(api, auth, world):
+    cid, first = connect(api, auth)
+    server = api.app.state.oauth
+    form = (f"grant_type=refresh_token&refresh_token={first['refresh_token']}&client_id={cid}").encode()
+    start, results = threading.Barrier(4), []
+
+    def go():
+        start.wait(5)
+        try:
+            results.append(("ok", server.token(form, "application/x-www-form-urlencoded", "")))
+        except oauth_server.OAuthError as e:
+            results.append((e.code, None))
+    threads = [threading.Thread(target=go) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+    assert sorted(r[0] for r in results) == ["invalid_grant"] * 3 + ["ok"]
+    winner = next(r[1] for r in results if r[0] == "ok")
+    assert works(api, winner["access_token"])
+    assert refresh(api, cid, winner["refresh_token"]).status_code == 200
 
 
 @pytest.mark.parametrize("over,error", [({"client_id": "other"}, "invalid_grant"), ({"client_id": "ylc_nope"}, "invalid_client"),
@@ -667,6 +778,7 @@ def test_no_token_code_or_verifier_reaches_a_log(api, auth, world, caplog, clock
     call(api, tokens["access_token"], "list_courses")
     clock.t += 3601
     second = refresh(api, cid2, tokens["refresh_token"]).json()
+    clock.t += oauth_server.REFRESH_GRACE_SECONDS + 1
     refresh(api, cid2, tokens["refresh_token"])                               # a reused refresh token: logged
     text = "\n".join(f"{r.name} {r.getMessage()}" for r in caplog.records
                      if not r.name.startswith(("mcp.client", "httpx2")))

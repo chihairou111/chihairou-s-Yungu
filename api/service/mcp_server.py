@@ -4,7 +4,7 @@ each one is authenticated afresh, so a revoked token stops the very next call).
 
 `McpEndpoint` (raw ASGI, mounted at /mcp by app.py) checks `Authorization: Bearer` through `AgentAuth`
 (personal tokens and OAuth access tokens) before the SDK sees the request: no token is a 401 with
-`WWW-Authenticate: Bearer resource_metadata="<PUBLIC_URL>/.well-known/oauth-protected-resource", scope="read"`
+`WWW-Authenticate: Bearer resource_metadata="<PUBLIC_URL>/.well-known/oauth-protected-resource/mcp", scope="read"`
 (MCP authorization spec / RFC 9728 / RFC 6750 §3), a refused Bearer token the same plus
 `error="invalid_token"`. GET (and DELETE) are 405: stateless, the server never streams to the client nor
 keeps a session to end. The token's `AccountRef` rides in the ASGI scope; the tool handler reads it from the
@@ -38,7 +38,7 @@ from .yungu import SignInAgain
 
 log = logging.getLogger("yungu_lms.mcp")
 RESOURCE = f"{PUBLIC_URL}/mcp"                  # the canonical URI agents' tokens are bound to (RFC 8707)
-RESOURCE_METADATA = f"{PUBLIC_URL}/.well-known/oauth-protected-resource"
+RESOURCE_METADATA = f"{PUBLIC_URL}/.well-known/oauth-protected-resource/mcp"     # RFC 9728 §3.1, path-inserted
 SCOPE = "read"                                  # the one scope: everything here is read-only
 PUBLIC_HOST = PUBLIC_URL.split("://", 1)[1]
 ACCOUNT = "yungu_lms.agent"                     # the ASGI scope key McpEndpoint sets
