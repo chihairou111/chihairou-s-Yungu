@@ -77,6 +77,7 @@ BASIC_CHALLENGE = {"WWW-Authenticate": 'Basic realm="yungu-lms"'}     # RFC 6749
 _CHALLENGE = re.compile(r"[A-Za-z0-9_-]{43}")               # base64url(sha256), no padding
 _VERIFIER = re.compile(r"[A-Za-z0-9._~-]{43,128}")          # RFC 7636 §4.1
 _LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")       # an LDH label (IDNA: xn--… is one too)
+_NUMERIC_LABEL = re.compile(r"[0-9]+|0x[0-9a-f]*", re.IGNORECASE)    # a label a browser reads as a number
 _SCOPE = re.compile(r"[\x21\x23-\x5b\x5d-\x7e]+( [\x21\x23-\x5b\x5d-\x7e]+)*")     # RFC 6749 §3.3
 
 # The person's words (consent page error card); OAuth codes travel beside them.
@@ -147,15 +148,19 @@ class AuthorizeRefused(Exception):
 # ------------------------------------------------------------------ URIs
 def host_ok(netloc: str, host: Optional[str]) -> bool:
     """A host a person reads the way a browser goes there: ASCII LDH labels (an IDN only as xn--…), an IPv4
-    literal or a bracketed IPv6 literal; no `%`, `\\` or non-ASCII anywhere in the authority."""
+    literal or a bracketed IPv6 literal (either case); never a last label of digits or 0x… unless the whole host
+    is an IPv4 literal; no `%`, `\\` or non-ASCII anywhere in the authority."""
     if not host or not netloc.isascii() or "%" in netloc or "\\" in netloc or "@" in netloc:
         return False
     if "[" in netloc or "]" in netloc:
         try:
-            return ipaddress.ip_address(host).version == 6 and netloc.startswith(f"[{host}]")
+            # `host` is lowercased; the bracket form in the authority may be written in either case.
+            return ipaddress.ip_address(host).version == 6 and netloc.lower().startswith(f"[{host}]")
         except ValueError:
             return False
-    if all(part.isdigit() for part in host.split(".")):
+    if _NUMERIC_LABEL.fullmatch(host.rsplit(".", 1)[-1]):
+        # A browser (WHATWG URL) parses a host ending in a number or 0x… as IPv4 (`0x7f.0.0.1` is 127.0.0.1;
+        # `example.123` fails): only a plain dotted-decimal IPv4 literal is what it looks like.
         try:
             return ipaddress.ip_address(host).version == 4
         except ValueError:

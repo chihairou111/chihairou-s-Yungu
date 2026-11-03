@@ -51,3 +51,14 @@ export function popIn(reduceMotion: boolean): Pick<TransitionProps, 'onEnter' | 
     },
   };
 }
+
+/**
+ * A message or a prompt appearing in place (an error above the buttons, an "are you sure" row): it
+ * fades in from a few pixels above on the strong ease-out. With reduced motion only the fade remains.
+ */
+export const ARRIVE_IN = {
+  animation: `yl-arrive-in ${FADE_MS}ms ${EASE_OUT}`,
+  '@keyframes yl-arrive-in': { from: { opacity: 0, transform: 'translateY(-4px)' } },
+  '@keyframes yl-arrive-fade': { from: { opacity: 0 } },
+  '@media (prefers-reduced-motion: reduce)': { animationName: 'yl-arrive-fade' },
+} as const;

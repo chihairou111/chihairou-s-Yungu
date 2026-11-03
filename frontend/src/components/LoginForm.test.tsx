@@ -39,6 +39,15 @@ describe('LoginForm', () => {
     await vi.waitFor(() => expect(nav.replace).toHaveBeenCalledWith('/assignments'));
   });
 
+  it('goes back to the page that sent it here (an agent\'s consent page) when given one', async () => {
+    stubFetch(200, { name: 'Bruce Zheng' });
+    render(<LoginForm next="/oauth/authorize?client_id=ylc_1" />);
+    await userEvent.type(screen.getByLabelText('Student ID'), 's123');
+    await userEvent.type(screen.getByLabelText('Password'), 'pw');
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await vi.waitFor(() => expect(nav.replace).toHaveBeenCalledWith('/oauth/authorize?client_id=ylc_1'));
+  });
+
   it('explains a network failure', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
     render(<LoginForm />);

@@ -1,5 +1,20 @@
 import 'server-only';
-import type { Assignment, AssignmentDetail, Behaviour, ClassEvent, Comment, Course, FileRef, NotificationPage, TodoistStatus } from '../types';
+import type { AuthorizeDecision, AuthorizeParams } from '../oauth';
+import type {
+  AgentAccess,
+  Assignment,
+  AssignmentDetail,
+  AuthorizeCheck,
+  AuthorizeOutcome,
+  Behaviour,
+  ClassEvent,
+  Comment,
+  Course,
+  FileRef,
+  NewAgentToken,
+  NotificationPage,
+  TodoistStatus,
+} from '../types';
 import { mockData } from './mock';
 import { serviceData } from './service';
 
@@ -121,6 +136,28 @@ export interface YunguData {
   syncTodoist(): Promise<void>;
   /** Forgets the Todoist token and stops syncing; tasks already in Todoist stay. Idempotent. */
   disconnectTodoist(): Promise<void>;
+  /** Agent access: this account's personal tokens and the agents connected through OAuth (never a token). */
+  getAgentAccess(): Promise<AgentAccess>;
+  /**
+   * A new personal token, its secret answered this once. 400 with the service's sentence for a blank
+   * name, one over 64 characters, or a 21st token.
+   */
+  createAgentToken(name: string): Promise<NewAgentToken>;
+  /** Revokes a personal token; the next agent call with it is refused. 404 for an unknown id. */
+  revokeAgentToken(id: string): Promise<void>;
+  /** Disconnects an OAuth-connected agent (its grant); the next call is refused. 404 for an unknown id. */
+  disconnectAgent(id: string): Promise<void>;
+  /**
+   * The consent page's check of an agent's authorization request (passed on field for field). A refusal
+   * is an answer, not an error: its `redirect` is present only when the service trusts the client's
+   * return address, and is always an http(s) URL. Only a 401 (`SessionEnded`) or an outage throws.
+   */
+  checkAuthorize(params: AuthorizeParams): Promise<AuthorizeCheck>;
+  /**
+   * Allow or Deny: the service checks the request again and answers where the browser goes (with a
+   * one-use code, or the denial). A refusal (e.g. 20 agents connected) is an answer, as above.
+   */
+  decideAuthorize(params: AuthorizeParams, decision: AuthorizeDecision): Promise<AuthorizeOutcome>;
   signIn(loginId: string, password: string): Promise<SignInResult>;
   signOut(token: string): Promise<void>;
 }

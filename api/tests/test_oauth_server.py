@@ -157,7 +157,10 @@ def test_registration_makes_a_public_client(api, clock):
 
 @pytest.mark.parametrize("uri", [WEB_REDIRECT, "http://localhost:8080/cb", "http://[::1]:9/cb", "http://127.0.0.1/cb",
                                  "https://app.example/cb?x=1", "https://xn--bcher-kva.example/cb", "https://10.0.0.5:8443/cb",
-                                 "https://[2001:db8::1]/cb", "https://my-app.example.com/cb%20x"])
+                                 "https://[2001:db8::1]/cb", "https://my-app.example.com/cb%20x",
+                                 # the bracket form compared without regard to case; an IPv4 literal is fine
+                                 "https://[2001:DB8::1]/cb", "https://[2001:DB8::ABCD]:8443/cb", "https://1.2.3.4/cb",
+                                 "https://a1.example/cb", "https://example.x123/cb", "https://0xa.example/cb"])
 def test_https_and_loopback_redirect_uris_are_accepted(api, uri):
     assert register(api, redirect_uris=[uri]).status_code == 201
 
@@ -173,7 +176,12 @@ def test_https_and_loopback_redirect_uris_are_accepted(api, uri):
                                   ["https://claude.ai%00.evil.example/cb"], ["https://-bad.example/cb"],
                                   ["https://bad-.example/cb"], ["https://a..example/cb"], ["https://claude.ai./cb"],
                                   ["https://under_score.example/cb"], ["https://x.example/a\\b"],
-                                  ["https://claude.ai\u3002evil.example/cb"], ["https://[not-ipv6]/cb"]])
+                                  ["https://claude.ai\u3002evil.example/cb"], ["https://[not-ipv6]/cb"],
+                                  # a numeric or 0x… last label makes a browser read the host as an IPv4 address
+                                  ["https://0x7f.0.0.1/cb"], ["https://example.123/cb"], ["https://claude.ai.0x7f/cb"],
+                                  ["https://example.0x/cb"], ["https://example.0XFF/cb"], ["https://1.2.3/cb"],
+                                  ["https://01.2.3.4/cb"], ["https://1.2.3.4.5/cb"], ["https://0x7f000001/cb"],
+                                  ["https://2130706433/cb"]])
 def test_other_redirect_uris_are_refused(api, uris):
     r = register(api, redirect_uris=uris)
     assert r.status_code == 400 and r.json()["error"] == "invalid_redirect_uri" and r.json()["error_description"]
@@ -265,7 +273,8 @@ def test_clients_survive_a_restart(make, api, auth):
 # ------------------------------------------------------------------ the consent API
 @pytest.mark.parametrize("uri,host", [("https://APP.Example.COM/cb", "app.example.com"),
                                       ("https://xn--bcher-kva.example/cb", "xn--bcher-kva.example"),
-                                      ("https://[2001:db8::1]:8443/cb", "2001:db8::1")])
+                                      ("https://[2001:db8::1]:8443/cb", "2001:db8::1"),
+                                      ("https://[2001:DB8::1]/cb", "2001:db8::1")])
 def test_the_return_host_shown_is_the_parsed_normalised_host(api, auth, uri, host):
     cid = client_id(api, redirect_uris=[uri])
     _, challenge = pkce()

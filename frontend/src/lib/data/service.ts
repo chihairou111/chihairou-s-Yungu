@@ -2,7 +2,22 @@ import 'server-only';
 import { cookies, headers } from 'next/headers';
 import { sanitizeInstructions } from '../sanitize';
 import { SESSION_COOKIE, decodeSession } from '../session-cookie';
-import type { Assignment, AssignmentDetail, Behaviour, ClassEvent, Comment, Course, FileRef, NotificationPage, TodoistStatus } from '../types';
+import { BAD_AUTHORIZE_REQUEST, isWebRedirect, type AuthorizeDecision, type AuthorizeParams } from '../oauth';
+import type {
+  AgentAccess,
+  Assignment,
+  AssignmentDetail,
+  AuthorizeCheck,
+  AuthorizeOutcome,
+  Behaviour,
+  ClassEvent,
+  Comment,
+  Course,
+  FileRef,
+  NewAgentToken,
+  NotificationPage,
+  TodoistStatus,
+} from '../types';
 import { AssignmentNotFound, CommentNotFound, DocumentHandedIn, DocumentTooLong, ServiceError, SessionEnded, YunguUnavailable } from './errors';
 import type { SignInResult, StoredFile, YunguData } from './index';
 import { NOTIFICATION_PAGE_SIZE } from './messages';
@@ -38,9 +53,10 @@ async function errorText(res: Response): Promise<string | null> {
  * One call to the service; a non-2xx answer, no answer at all, or no answer within `timeoutMs` (a GET
  * defaults to the read budget, anything else to the write budget) becomes the matching error type. The
  * budget covers the body too: a body that stops arriving fails its `res.json()`, which `body()` and
- * `errorText()` treat as unavailable.
+ * `errorText()` treat as unavailable. Statuses in `answers` come back as responses instead (the consent
+ * API's refusals carry more than a message).
  */
-async function send(path: string, init: RequestInit, timeoutMs?: number): Promise<Response> {
+async function send(path: string, init: RequestInit, timeoutMs?: number, answers: readonly number[] = []): Promise<Response> {
   const budget = timeoutMs ?? ((init.method ?? 'GET') === 'GET' ? READ_TIMEOUT_MS : WRITE_TIMEOUT_MS);
   let res: Response;
   try {
@@ -48,7 +64,7 @@ async function send(path: string, init: RequestInit, timeoutMs?: number): Promis
   } catch {
     throw new YunguUnavailable();
   }
-  if (res.ok) return res;
+  if (res.ok || answers.includes(res.status)) return res;
   const message = await errorText(res);
   if (res.status === 401) throw new SessionEnded(message ?? undefined);
   // The service's own 503 ("Todoist isn't set up on this server."), not a proxy's page: kept as is.
@@ -58,7 +74,7 @@ async function send(path: string, init: RequestInit, timeoutMs?: number): Promis
 }
 
 /** A call as the signed-in student: our session token from the request cookie as the Bearer token. */
-async function authed(path: string, init: RequestInit = {}, timeoutMs?: number): Promise<Response> {
+async function authed(path: string, init: RequestInit = {}, timeoutMs?: number, answers?: readonly number[]): Promise<Response> {
   const store = await cookies();
   const session = decodeSession(store.get(SESSION_COOKIE)?.value);
   if (!session) throw new SessionEnded();
@@ -69,7 +85,7 @@ async function authed(path: string, init: RequestInit = {}, timeoutMs?: number):
     const refresh = store.get(REFRESH_COOKIE)?.value === '1' || (await headers()).get(REFRESH_HEADER) === '1';
     if (refresh) sent.set('X-Refresh', '1');
   }
-  return send(path, { ...init, method, headers: sent }, timeoutMs);
+  return send(path, { ...init, method, headers: sent }, timeoutMs, answers);
 }
 
 async function body<T>(res: Response): Promise<T> {
@@ -117,6 +133,22 @@ async function orNull<T>(load: () => Promise<T>): Promise<T | null> {
     if (error instanceof ServiceError && error.status === 404) return null;
     throw error;
   }
+}
+
+/**
+ * A consent-API call (`/oauth/authorize/request` or `/approve`): the 200 body, or the refusal. A 400 is
+ * the service's refusal with its sentence and, when it trusts the client's return address, a redirect;
+ * a 422 is a field over the service's length limit, a request that isn't valid. A redirect that is not
+ * an http(s) URL is never passed on.
+ */
+async function consent(path: string, payload: unknown): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; error: string; redirect?: string }> {
+  const res = await authed(path, jsonInit('POST', payload), undefined, [400, 422]);
+  const answer = await body<unknown>(res);
+  const fields = answer && typeof answer === 'object' ? (answer as Record<string, unknown>) : {};
+  if (res.ok) return { ok: true, body: fields };
+  if (res.status === 422) return { ok: false, error: BAD_AUTHORIZE_REQUEST };
+  const error = typeof fields.error === 'string' && fields.error ? fields.error : BAD_AUTHORIZE_REQUEST;
+  return isWebRedirect(fields.redirect) ? { ok: false, error, redirect: fields.redirect } : { ok: false, error };
 }
 
 /** The Yungu service (`api/`, Task 2 of the real-data plan): server-only, token from our session cookie. */
@@ -189,6 +221,29 @@ export const serviceData: YunguData = {
   },
   async disconnectTodoist() {
     await authed('/todoist', { method: 'DELETE' });
+  },
+  getAgentAccess: () => get<AgentAccess>('/agent/tokens'),
+  async createAgentToken(name) {
+    return body<NewAgentToken>(await authed('/agent/tokens', jsonInit('POST', { name })));
+  },
+  async revokeAgentToken(id) {
+    await authed(`/agent/tokens/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+  async disconnectAgent(id) {
+    await authed(`/agent/clients/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+  async checkAuthorize(params): Promise<AuthorizeCheck> {
+    const answer = await consent('/oauth/authorize/request', params);
+    if (!answer.ok) return { valid: false, error: answer.error, ...(answer.redirect && { redirect: answer.redirect }) };
+    const client = answer.body.client as { name?: unknown; redirectHost?: unknown } | undefined;
+    if (answer.body.valid !== true || typeof client?.name !== 'string' || typeof client.redirectHost !== 'string') throw new YunguUnavailable();
+    return { valid: true, client: { name: client.name, redirectHost: client.redirectHost } };
+  },
+  async decideAuthorize(params: AuthorizeParams, decision: AuthorizeDecision): Promise<AuthorizeOutcome> {
+    const answer = await consent('/oauth/authorize/approve', { ...params, decision });
+    if (!answer.ok) return { ok: false, error: answer.error, ...(answer.redirect && { redirect: answer.redirect }) };
+    if (!isWebRedirect(answer.body.redirect)) throw new YunguUnavailable();
+    return { ok: true, redirect: answer.body.redirect };
   },
   async signIn(loginId, password): Promise<SignInResult> {
     let answer: { ok?: unknown; displayName?: unknown; token?: unknown; error?: unknown };

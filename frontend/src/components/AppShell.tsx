@@ -12,6 +12,7 @@ import MenuList from '@mui/material/MenuList';
 import Popover from '@mui/material/Popover';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
+import KeyRounded from '@mui/icons-material/KeyRounded';
 import Logout from '@mui/icons-material/Logout';
 import { sectionFor } from './nav-items';
 import {
@@ -30,6 +31,7 @@ import NotificationsMenu from './NotificationsMenu';
 import TodoistMenu from './TodoistMenu';
 import RefreshButton from './RefreshButton';
 import { RefreshProvider } from './RefreshContext';
+import AgentAccessDialog from './AgentAccessDialog';
 
 /** "Bruce Zheng" -> "BZ"; "郑博" -> "郑"; blank -> "?". */
 export function initials(name: string): string {
@@ -51,7 +53,7 @@ interface AppShellProps {
 }
 
 /**
- * Material app bar (section title, Todoist, notifications, Refresh and the account menu) over the page content. A page
+ * Material app bar (section title, Todoist, notifications, Refresh and the account menu: Agent access, Sign out) over the page content. A page
  * may extend the bar with a `PageHeader` (tabs, page controls); the bar then gives up its bottom edge
  * so the two read as one header. The Today's classes panel sits beside the content on every page.
  */
@@ -61,6 +63,7 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState(false);
+  const [agentAccessOpen, setAgentAccessOpen] = useState(false);
   const title = sectionFor(pathname)?.label ?? 'Yungu';
   const closeMenu = () => setMenuAnchor(null);
 
@@ -137,6 +140,17 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
                 if (e.key === 'Tab') closeMenu();
               }}
             >
+              <MenuItem
+                onClick={() => {
+                  closeMenu();
+                  setAgentAccessOpen(true);
+                }}
+              >
+                <ListItemIcon>
+                  <KeyRounded fontSize="small" />
+                </ListItemIcon>
+                Agent access
+              </MenuItem>
               <MenuItem onClick={signOut} disabled={signingOut}>
                 <ListItemIcon>
                   <Logout fontSize="small" />
@@ -150,6 +164,7 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
               </Typography>
             )}
           </Popover>
+          <AgentAccessDialog open={agentAccessOpen} onClose={() => setAgentAccessOpen(false)} />
         </Toolbar>
       </AppBar>
       <Box

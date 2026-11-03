@@ -25,3 +25,17 @@ describe('GET /api/session/ended', () => {
     }
   });
 });
+
+describe('GET /api/session/ended with a page to come back to', () => {
+  it('keeps a safe next for the sign-in page', async () => {
+    const res = await get(`?reason=ended&next=${encodeURIComponent('/oauth/authorize?client_id=a')}`);
+    expect(res.headers.get('location')).toBe(`/login?next=${encodeURIComponent('/oauth/authorize?client_id=a')}`);
+  });
+
+  it('drops an unsafe one', async () => {
+    for (const next of ['https://evil.example', '//evil.example', '/\\evil.example']) {
+      const res = await get(`?reason=ended&next=${encodeURIComponent(next)}`);
+      expect(res.headers.get('location'), next).toBe('/login');
+    }
+  });
+});

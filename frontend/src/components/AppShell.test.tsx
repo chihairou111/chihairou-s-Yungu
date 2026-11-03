@@ -115,7 +115,17 @@ describe('AppShell', () => {
     expect(button).toHaveAttribute('aria-controls', menu.id);
     expect(screen.getByText('Signed in as')).toBeVisible();
     expect(within(menu).queryByText('Signed in as')).not.toBeInTheDocument();
-    expect(within(menu).getAllByRole('menuitem')).toHaveLength(1);
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Agent access', 'Sign out']);
+  });
+
+  it('opens Agent access from the avatar menu, closing the menu', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({ personal: [], clients: [] })))));
+    render(<AppShell userName="Bruce Zheng">content</AppShell>);
+    await userEvent.click(screen.getByRole('button', { name: 'Account: Bruce Zheng' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Agent access' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Agent access' });
+    expect(await within(dialog).findByText('No tokens yet.')).toBeVisible();
+    await vi.waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
   });
 });
 

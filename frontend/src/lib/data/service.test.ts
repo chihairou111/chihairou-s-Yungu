@@ -605,3 +605,81 @@ describe('serviceData Todoist', () => {
     await expect(data.getTodoist()).rejects.toEqual(new YunguUnavailable(UNAVAILABLE));
   });
 });
+
+describe('serviceData agent access', () => {
+  const params = {
+    response_type: 'code', client_id: 'ylc_1', redirect_uri: 'https://claude.ai/cb', state: 's', code_challenge: 'c'.repeat(43),
+    code_challenge_method: 'S256', scope: '', resource: 'https://yungu.chihairou.dev/mcp',
+  };
+
+  it('lists, creates and revokes personal tokens and disconnects agents with the session token', async () => {
+    reply(json(200, { personal: [], clients: [] }));
+    expect(await data.getAgentAccess()).toEqual({ personal: [], clients: [] });
+    expect(call(0).url).toBe('http://127.0.0.1:8100/agent/tokens');
+    expect(call(0).headers.get('authorization')).toBe('Bearer tok-123');
+
+    reply(json(200, { id: 't1', name: 'Laptop', token: 'ylp_x' }));
+    expect(await data.createAgentToken('Laptop')).toEqual({ id: 't1', name: 'Laptop', token: 'ylp_x' });
+    expect(call(1).method).toBe('POST');
+    expect(bodyOf(1)).toEqual({ name: 'Laptop' });
+
+    reply(empty());
+    await data.revokeAgentToken('t/1');
+    expect(call(2)).toMatchObject({ url: 'http://127.0.0.1:8100/agent/tokens/t%2F1', method: 'DELETE' });
+
+    reply(empty());
+    await data.disconnectAgent('g1');
+    expect(call(3)).toMatchObject({ url: 'http://127.0.0.1:8100/agent/clients/g1', method: 'DELETE' });
+  });
+
+  it("passes the service's refusals on (a name, the 20 cap, an unknown id)", async () => {
+    reply(json(400, { error: 'You can have up to 20 tokens. Revoke one first.' }));
+    await expect(data.createAgentToken('x')).rejects.toMatchObject({ status: 400, message: 'You can have up to 20 tokens. Revoke one first.' });
+    reply(json(404, { error: 'Not found.' }));
+    await expect(data.revokeAgentToken('nope')).rejects.toBeInstanceOf(ServiceError);
+  });
+
+  it('checks an authorization request, passing every field on as is', async () => {
+    reply(json(200, { valid: true, client: { name: 'Claude', redirectHost: 'claude.ai' } }));
+    expect(await data.checkAuthorize(params)).toEqual({ valid: true, client: { name: 'Claude', redirectHost: 'claude.ai' } });
+    expect(call(0)).toMatchObject({ url: 'http://127.0.0.1:8100/oauth/authorize/request', method: 'POST' });
+    expect(call(0).headers.get('authorization')).toBe('Bearer tok-123');
+    expect(bodyOf(0)).toEqual(params);
+  });
+
+  it('keeps a refusal with its redirect, and one without as it is', async () => {
+    reply(json(400, { error: 'This agent asked for a kind of sign-in this service doesn’t offer.', code: 'unsupported_response_type', redirect: 'https://claude.ai/cb?error=x' }));
+    expect(await data.checkAuthorize(params)).toEqual({
+      valid: false, error: 'This agent asked for a kind of sign-in this service doesn’t offer.', redirect: 'https://claude.ai/cb?error=x',
+    });
+    reply(json(400, { error: "This agent isn't registered here.", code: 'invalid_client' }));
+    expect(await data.checkAuthorize(params)).toEqual({ valid: false, error: "This agent isn't registered here." });
+    // A field over the service's length limit (its 422) is a request that isn't valid, never a redirect.
+    reply(json(422, { detail: [] }));
+    expect(await data.checkAuthorize(params)).toEqual({ valid: false, error: "This agent's request isn't valid. Start connecting again from the agent." });
+    // A redirect that is not an http(s) URL is never kept.
+    reply(json(400, { error: 'No.', redirect: 'javascript:alert(1)' }));
+    expect(await data.checkAuthorize(params)).toEqual({ valid: false, error: 'No.' });
+  });
+
+  it('allows or denies, answering where the browser goes', async () => {
+    reply(json(200, { redirect: 'https://claude.ai/cb?code=c&state=s' }));
+    expect(await data.decideAuthorize(params, 'allow')).toEqual({ ok: true, redirect: 'https://claude.ai/cb?code=c&state=s' });
+    expect(call(0)).toMatchObject({ url: 'http://127.0.0.1:8100/oauth/authorize/approve', method: 'POST' });
+    expect(bodyOf(0)).toEqual({ ...params, decision: 'allow' });
+
+    reply(json(400, { error: 'You can connect up to 20 agents. Disconnect one in Agent access first.', code: 'access_denied' }));
+    expect(await data.decideAuthorize(params, 'allow')).toEqual({ ok: false, error: 'You can connect up to 20 agents. Disconnect one in Agent access first.' });
+
+    // An answer without a usable redirect is the service failing, not somewhere to go.
+    reply(json(200, { redirect: 'javascript:alert(1)' }));
+    await expect(data.decideAuthorize(params, 'deny')).rejects.toBeInstanceOf(YunguUnavailable);
+  });
+
+  it('ends the session on a 401 and is unavailable on a 5xx', async () => {
+    reply(json(401, { error: 'Sign in again.' }));
+    await expect(data.checkAuthorize(params)).rejects.toBeInstanceOf(SessionEnded);
+    reply(json(502, { error: 'x' }));
+    await expect(data.decideAuthorize(params, 'allow')).rejects.toBeInstanceOf(YunguUnavailable);
+  });
+});

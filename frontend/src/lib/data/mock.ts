@@ -9,6 +9,14 @@ import { AssignmentNotFound, CommentNotFound, DocumentHandedIn, DocumentTooLong,
 import { BLANK_CREDENTIALS_ERROR, NOTIFICATION_PAGE_SIZE } from './messages';
 import { TODOIST_LINK_EXPIRED } from '../todoist';
 import {
+  mockAgentAccess,
+  mockCheckAuthorize,
+  mockCreateToken,
+  mockDecideAuthorize,
+  mockDisconnect,
+  mockRevokeToken,
+} from './mock-agents';
+import {
   findOnlineDoc,
   mockTodoist,
   getDetail,
@@ -180,6 +188,24 @@ export const mockData: YunguData = {
   },
   async disconnectTodoist() {
     Object.assign(mockTodoist(), { connected: false, pendingState: null, syncEndsAt: null });
+  },
+  async getAgentAccess() {
+    return mockAgentAccess();
+  },
+  async createAgentToken(name) {
+    return mockCreateToken(name, Date.now());
+  },
+  async revokeAgentToken(id) {
+    mockRevokeToken(id);
+  },
+  async disconnectAgent(id) {
+    mockDisconnect(id);
+  },
+  async checkAuthorize(params) {
+    return mockCheckAuthorize(params);
+  },
+  async decideAuthorize(params, decision) {
+    return mockDecideAuthorize(params, decision, Date.now());
   },
   async signIn(loginId, password) {
     if (!loginId.trim() || !password.trim()) return { ok: false, error: BLANK_CREDENTIALS_ERROR };

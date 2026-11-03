@@ -11,9 +11,10 @@ const GENERIC_ERROR = 'Sign-in failed. Try again.';
 
 /**
  * Student ID + password form; the server sets the session cookie. `notice` says why the last session
- * ended (the service signed it out); it gives way to the outcome of the next attempt.
+ * ended (the service signed it out); it gives way to the outcome of the next attempt. `next` is where to
+ * go once signed in (a path the page has already checked with `safeNext`); Assignments otherwise.
  */
-export default function LoginForm({ notice }: { notice?: string }) {
+export default function LoginForm({ notice, next }: { notice?: string; next?: string }) {
   const router = useRouter();
   const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
@@ -33,7 +34,7 @@ export default function LoginForm({ notice }: { notice?: string }) {
         body: JSON.stringify({ loginId, password }),
       });
       if (res.ok) {
-        router.replace('/assignments');
+        router.replace(next ?? '/assignments');
         return; // stay "Signing in…" until the page changes
       }
       const body: unknown = await res.json().catch(() => null);

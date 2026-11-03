@@ -77,9 +77,13 @@ export function endSession(response: NextResponse, request: Request, message: st
   response.cookies.set(SIGN_IN_NOTICE_COOKIE, reasonFor(message), sessionCookieOptions(request, NOTICE_MAX_AGE));
 }
 
-/** Where a page sends the browser when the service ended the session: clears the cookie, then signs in. */
-export function endedSessionPath(message: string): string {
-  return `/api/session/ended?reason=${reasonFor(message)}`;
+/**
+ * Where a page sends the browser when the service ended the session: clears the cookie, then signs in
+ * (coming back to `next` afterwards, when the ended route finds it safe).
+ */
+export function endedSessionPath(message: string, next?: string): string {
+  const back = next ? `&next=${encodeURIComponent(next)}` : '';
+  return `/api/session/ended?reason=${reasonFor(message)}${back}`;
 }
 
 /** The ended-session route: the message for a `reason` query value, the plain one for anything else. */

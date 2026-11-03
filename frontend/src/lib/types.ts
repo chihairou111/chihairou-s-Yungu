@@ -193,3 +193,45 @@ export interface TodoistStatus {
   lastSyncAt?: number;
   error?: { code: TodoistErrorCode; message: string };
 }
+
+/** A personal agent token as Agent access lists it (never the token itself). Times are epoch ms. */
+export interface AgentToken {
+  id: string;
+  name: string;
+  createdAt: number;
+  /** Null until an agent first uses it. */
+  lastUsedAt: number | null;
+}
+
+/** An agent connected through OAuth (the consent page): one per agent, by the name it registered. */
+export interface AgentClient {
+  id: string;
+  name: string;
+  connectedAt: number;
+  lastUsedAt: number | null;
+}
+
+/** The service's `GET /agent/tokens`: this account's personal tokens and connected agents. */
+export interface AgentAccess {
+  personal: AgentToken[];
+  clients: AgentClient[];
+}
+
+/** A new personal token: the only time `token` is ever seen. */
+export interface NewAgentToken {
+  id: string;
+  name: string;
+  token: string;
+}
+
+/**
+ * The service's check of an agent's authorization request. Valid: who is asking, and the host the
+ * browser goes back to. Refused: the sentence to show, and — only when the client and its registered
+ * return address could be trusted — `redirect`, the error answer to send the browser back with.
+ */
+export type AuthorizeCheck =
+  | { valid: true; client: { name: string; redirectHost: string } }
+  | { valid: false; error: string; redirect?: string };
+
+/** Allow or Deny: where the browser goes (the client's own redirect with a code or the denial), or why not. */
+export type AuthorizeOutcome = { ok: true; redirect: string } | { ok: false; error: string; redirect?: string };
