@@ -2,8 +2,11 @@
 
 JSON everywhere; `Authorization: Bearer <token>` on everything except POST /session; errors are
 `{"error": str}`. /mcp is the agents' (mcp_server.py): it takes agent tokens only, and every other route
-dashboard tokens only. Any Yungu student account can sign in; a token belongs to one account, and everything a
-request does (Yungu calls, the read cache, the hand-in record, locks) is that account's alone.
+dashboard tokens only. The OAuth endpoints for agents (oauth_server.py: metadata, /oauth/register, /oauth/token,
+/oauth/revoke) answer in OAuth's own shapes ({error, error_description}); the consent API behind the dashboard's
+/oauth/authorize page (/oauth/authorize/request, /approve) is a dashboard route like the others.
+Any Yungu student account can sign in; a token belongs to one account, and everything a request does
+(Yungu calls, the read cache, the hand-in record, locks) is that account's alone.
 Reads are cached 60 s per account + endpoint + params (`X-Refresh: 1` bypasses); any write (draft,
 submit, comment, online document, notification read) or POST /refresh clears that account's cache; an
 upload changes no read and leaves it. Run: `uvicorn service.app:app --host 127.0.0.1 --port 8100`
@@ -35,11 +38,13 @@ from starlette.routing import Route
 import mapping
 from yungu_task import ACHIEVEMENT_NOT_SUBMITTED, CST, ONLINE_DOC_MAX_BYTES, SUBMITTED, TODO, YunguError, YunguTask
 
-from .agent_tokens import (MAX_NAME_CHARS, AgentAuth, PersonalTokens, PersonalTokenVerifier, TooManyTokens,
-                           has_agent_access)
+from .agent_tokens import (MAX_NAME_CHARS, AgentAuth, AgentFiles, PersonalTokens, PersonalTokenVerifier,
+                           TooManyTokens, has_agent_access)
 from .auth import Auth
 from .cache import ReadCache
 from .mcp_server import AgentMcp
+from .oauth_server import (AuthorizeRefused, OAuthError, OAuthServer, authorization_server_metadata,
+                           protected_resource_metadata)
 from .state import StateDir, SubmittedFiles
 from .todoist_service import NotConnected, NotSetUp, TodoistApi, TodoistService, keeps_session as todoist_keeps_session
 from .yungu import (UNREACHABLE, ServiceError, SignInAgain, SignInRefused, Unavailable, Yungu, checked_redirect,
@@ -216,6 +221,22 @@ class OnlineDocBody(BaseModel):
 
 class AgentTokenBody(BaseModel):
     name: str = Field("", max_length=1024)
+
+
+class AuthorizeBody(BaseModel):
+    """The dashboard's /oauth/authorize page passes its query on as is; an empty field is an omitted one."""
+    response_type: str = Field("", max_length=64)
+    client_id: str = Field("", max_length=256)
+    redirect_uri: str = Field("", max_length=2000)
+    state: str = Field("", max_length=2048)
+    code_challenge: str = Field("", max_length=256)
+    code_challenge_method: str = Field("", max_length=32)
+    scope: str = Field("", max_length=1024)
+    resource: str = Field("", max_length=2000)
+
+
+class ApproveBody(AuthorizeBody):
+    decision: str = Field("", max_length=16)
 
 
 class TodoistCallbackBody(BaseModel):
@@ -492,7 +513,7 @@ class Service:
         # Kept from the idle sweep while Todoist syncs or an agent has access (its calls count as use).
         self.yungu = Yungu(self.auth, client_factory, clock=monotonic, on_end=self._ended,
                            keep=lambda uid: todoist_keeps_session(self._state, uid)
-                           or has_agent_access(self._state, uid))
+                           or has_agent_access(self._state, uid, self._now))
         self.on_sign_in: Callable[[int], object] = lambda uid: None      # Todoist: resume the account's sync
         self._now, self._monotonic = now, monotonic
         self._lock = threading.Lock()          # guards _accounts only
@@ -901,6 +922,56 @@ class Student:
             self.cache.clear()
 
 
+# --------------------------------------------------------------------- OAuth for agents
+NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache"}
+
+
+def oauth_routes(app: FastAPI, oauth: OAuthServer) -> None:
+    """The agents' side of OAuth (oauth_server.py): metadata, registration, token, revocation. No dashboard
+    token; OAuth's own answers ({error, error_description}); nothing about a request is logged here."""
+    def metadata(document: dict) -> JSONResponse:
+        return JSONResponse(document, headers={"Cache-Control": "public, max-age=300"})
+
+    @app.get("/.well-known/oauth-protected-resource")
+    @app.get("/.well-known/oauth-protected-resource/mcp")
+    def protected_resource():
+        return metadata(protected_resource_metadata())
+
+    @app.get("/.well-known/oauth-authorization-server")
+    def authorization_server():
+        return metadata(authorization_server_metadata())
+
+    async def answer(request: Request, work, status: int = 200) -> Response:
+        try:
+            raw = await request.body()
+            result = await run_in_threadpool(work, raw)
+        except OAuthError as e:
+            return JSONResponse(e.body(), status_code=e.status, headers={**NO_STORE, **e.headers})
+        except ClientDisconnect:
+            return Response(status_code=400)
+        if result is None:
+            return Response(status_code=status, headers=NO_STORE)
+        return JSONResponse(result, status_code=status, headers=NO_STORE)
+
+    def address(request: Request) -> str:
+        forwarded = request.headers.get("x-real-ip", "").strip()       # nginx's; the service listens on 127.0.0.1
+        return (forwarded or (request.client.host if request.client else ""))[:64]
+
+    @app.post("/oauth/register", status_code=201)
+    async def register(request: Request):
+        return await answer(request, lambda raw: oauth.register(raw, address(request)), status=201)
+
+    @app.post("/oauth/token")
+    async def token(request: Request):
+        return await answer(request, lambda raw: oauth.token(raw, request.headers.get("content-type", ""),
+                                                             request.headers.get("authorization", "")))
+
+    @app.post("/oauth/revoke")
+    async def revoke(request: Request):
+        return await answer(request, lambda raw: oauth.revoke(raw, request.headers.get("content-type", ""),
+                                                              request.headers.get("authorization", "")))
+
+
 # --------------------------------------------------------------------- app
 def create_app(state_dir: Optional[str] = None, client_factory=yungu_client,
                now: Callable[[], float] = time.time, monotonic: Callable[[], float] = time.monotonic,
@@ -911,8 +982,10 @@ def create_app(state_dir: Optional[str] = None, client_factory=yungu_client,
     todoist = TodoistService(service._state, todoist_api or TodoistApi.from_env(), service.todo_for_sync,
                              now, monotonic, can_sync=service.can_sync)
     service.on_sign_in = todoist.trigger
-    # Agent tokens resolve to one account each; Task 2 registers OAuth access tokens here too.
-    agent_auth = AgentAuth([PersonalTokenVerifier(service._state, now)])
+    # Agent tokens (personal and OAuth access tokens) resolve to one account each.
+    agent_files = AgentFiles(service._state)
+    oauth = OAuthServer(service._state, now, agent_files)
+    agent_auth = AgentAuth([PersonalTokenVerifier(service._state, now, agent_files), oauth.verifier])
     agents = AgentMcp(agent_auth, service.agent_student, monotonic)
 
     @asynccontextmanager
@@ -929,9 +1002,11 @@ def create_app(state_dir: Optional[str] = None, client_factory=yungu_client,
     app.state.todoist = todoist
     app.state.agent_auth = agent_auth
     app.state.agents = agents
+    app.state.oauth = oauth
     app.add_middleware(CatchAll)
     # Agents only (MCP, Streamable HTTP): agent tokens, never dashboard ones; every other route is the reverse.
     app.router.routes.append(Route("/mcp", endpoint=agents.endpoint, methods=["GET", "POST", "DELETE"]))
+    oauth_routes(app, oauth)
 
     @app.exception_handler(ServiceError)
     async def service_error(request, exc: ServiceError):
@@ -1023,7 +1098,7 @@ def create_app(state_dir: Optional[str] = None, client_factory=yungu_client,
 
     @app.get("/agent/tokens")
     def agent_tokens(me: Student = Me):
-        return {"personal": personal_tokens(me).list(), "clients": []}
+        return {"personal": personal_tokens(me).list(), "clients": oauth.clients_of(me.user_id)}
 
     @app.post("/agent/tokens")
     def create_agent_token(body: AgentTokenBody, me: Student = Me):
@@ -1043,6 +1118,27 @@ def create_app(state_dir: Optional[str] = None, client_factory=yungu_client,
         if not personal_tokens(me).revoke(token_id):
             raise NotFound()
         return Response(status_code=204)
+
+    @app.delete("/agent/clients/{grant_id}", status_code=204)
+    def disconnect_agent(grant_id: str, me: Student = Me):
+        if not oauth.disconnect(me.user_id, grant_id):
+            raise NotFound()
+        return Response(status_code=204)
+
+    # The consent API behind the dashboard's /oauth/authorize page (a dashboard token, never an agent's).
+    @app.post("/oauth/authorize/request")
+    def oauth_authorize_request(body: AuthorizeBody, me: Student = Me):
+        try:
+            return oauth.check(body.model_dump())
+        except AuthorizeRefused as e:
+            return JSONResponse(e.body(), status_code=400)
+
+    @app.post("/oauth/authorize/approve")
+    def oauth_authorize_approve(body: ApproveBody, me: Student = Me):
+        try:
+            return {"redirect": oauth.approve(body.model_dump(), me.user_id, body.decision)}
+        except AuthorizeRefused as e:
+            return JSONResponse(e.body(), status_code=400)
 
     # -------------------------------------------------------------- reads
     @app.get("/todo")

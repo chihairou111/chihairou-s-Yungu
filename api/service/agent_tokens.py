@@ -7,10 +7,17 @@ checks every kind of agent token the same way. Agent tokens are never dashboard 
 keep their own check (auth.py), which knows nothing of these.
 
 Personal tokens (`ylp_…`): made, listed and revoked only from a signed-in dashboard (routes in app.py);
-shown once; at most MAX_PERSONAL_TOKENS per account; no expiry until revoked. Stored hashed (sha256),
-per account, in users/<userId>/agent-tokens.json (0600, state.py):
+shown once; at most MAX_PERSONAL_TOKENS per account; no expiry until revoked. OAuth grants (oauth_server.py)
+sit next to them. Everything is stored hashed (sha256), per account, in users/<userId>/agent-tokens.json
+(0600, state.py):
 
-    {"personal": [{"id", "name", "hash", "createdAt", "lastUsedAt"}]}       (times: epoch ms, or null)
+    {"personal": [{"id", "name", "hash", "createdAt", "lastUsedAt"}],
+     "oauth":    [{"id", "clientId", "clientName", "resource", "scope", "createdAt", "lastUsedAt",
+                   "refreshHash", "refreshExpiresAt", "usedRefresh": [hash], "access": [{"hash", "expiresAt"}],
+                   "codeHash"}]}                                             (times: epoch ms, or null)
+
+`AgentFiles` finds a token's hash across every account's file (each re-read only when it changed on disk);
+one account's unreadable file is skipped (logged by exception type), never a failure for the others.
 
 They survive restarts and the dashboard's sign-out (agent access is managed in "Agent access", like
 Todoist); tools still need the account's live Yungu session (mcp_server.py).
@@ -38,8 +45,8 @@ _write_lock = threading.Lock()   # every agent-tokens.json read-modify-write, ac
 
 @dataclass(frozen=True)
 class AccountRef:
-    """The one account an agent token belongs to. `kind`: "personal" (or "oauth", Task 2); `credential`:
-    the token's (or grant's) id, never the token itself."""
+    """The one account an agent token belongs to. `kind`: "personal" or "oauth"; `credential`: the token's
+    (or grant's) id, never the token itself."""
     user_id: int
     kind: str
     credential: str
@@ -76,8 +83,11 @@ class AgentAuth:
         return None
 
 
-def _hash(token: str) -> str:
+def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+_hash = token_hash
 
 
 def _state(state_dir) -> StateDir:
@@ -92,6 +102,36 @@ def _entries(data) -> List[dict]:
     rows = data.get("personal") if isinstance(data, dict) else None
     return [r for r in rows or [] if isinstance(r, dict) and isinstance(r.get("id"), str)
             and isinstance(r.get("hash"), str)]
+
+
+def grants(data) -> List[dict]:
+    """The well-formed OAuth grants of an agent-tokens.json."""
+    rows = data.get("oauth") if isinstance(data, dict) else None
+    return [g for g in rows or [] if isinstance(g, dict) and isinstance(g.get("id"), str)
+            and isinstance(g.get("clientId"), str) and isinstance(g.get("refreshHash"), str)
+            and isinstance(g.get("refreshExpiresAt"), int)]
+
+
+def live_grants(data, now_ms: int) -> List[dict]:
+    """Grants whose refresh token has not lapsed: the ones still connected."""
+    return [g for g in grants(data) if g["refreshExpiresAt"] > now_ms]
+
+
+def read_account(state_dir, user_id: int) -> dict:
+    data = _user_dir(_state(state_dir), user_id).read(FILE)
+    return data if isinstance(data, dict) else {}
+
+
+def update_account(state_dir, user_id: int, change: Callable[[dict], Tuple[object, Optional[dict]]]):
+    """One read-modify-write of an account's agent-tokens.json under the shared lock: `change(data)` answers
+    (result, new data or None to leave the file as it is); keys it does not know stay as they were."""
+    folder = _user_dir(_state(state_dir), user_id)
+    with _write_lock:
+        data = folder.read(FILE)
+        result, new = change(data if isinstance(data, dict) else {})
+        if new is not None:
+            folder.write(FILE, new)
+    return result
 
 
 class TooManyTokens(Exception):
@@ -157,24 +197,50 @@ class PersonalTokens:
             self._save({**data, "personal": rows})
 
 
-def has_agent_access(state_dir, user_id: int) -> bool:
-    """For the idle sweep: the account has an active personal token (Task 2: or OAuth grant). Takes no
-    lock; False when the file cannot be read."""
+def has_agent_access(state_dir, user_id: int, now: Callable[[], float] = time.time) -> bool:
+    """For the idle sweep: the account has a personal token or a connected OAuth grant. Takes no lock;
+    False when the file cannot be read."""
     try:
-        return bool(_entries(_user_dir(_state(state_dir), user_id).read(FILE)))
+        data = _user_dir(_state(state_dir), user_id).read(FILE)
     except OSError:
         return False
+    return bool(_entries(data)) or bool(live_grants(data, int(now() * 1000)))
 
 
-class PersonalTokenVerifier:
-    """Finds a personal token's account by its hash. Each account's file is read again whenever it changed
-    on disk (every write is an atomic replace: a new inode), so a revocation counts from the next call on."""
+@dataclass(frozen=True)
+class Hit:
+    """What a token hash is in one account's file. kind: "personal" (id: the token's), "access", "refresh"
+    or "used_refresh" (a rotated-out refresh token; id: the grant's). expires_at: epoch ms."""
+    user_id: int
+    kind: str
+    id: str
+    expires_at: Optional[int] = None
+    resource: Optional[str] = None
 
-    def __init__(self, state_dir, now: Callable[[], float] = time.time):
+
+def _index(user_id: int, data) -> Dict[str, Hit]:
+    found: Dict[str, Hit] = {}
+    for r in _entries(data):
+        found[r["hash"]] = Hit(user_id, "personal", r["id"])
+    for g in grants(data):
+        for h in g.get("usedRefresh") or []:
+            if isinstance(h, str):
+                found[h] = Hit(user_id, "used_refresh", g["id"])
+        found[g["refreshHash"]] = Hit(user_id, "refresh", g["id"], g["refreshExpiresAt"])
+        for a in g.get("access") or []:
+            if isinstance(a, dict) and isinstance(a.get("hash"), str) and isinstance(a.get("expiresAt"), int):
+                found[a["hash"]] = Hit(user_id, "access", g["id"], a["expiresAt"], g.get("resource"))
+    return found
+
+
+class AgentFiles:
+    """Every account's agent-tokens.json, as a hash -> Hit index. Each file is read again whenever it changed
+    on disk (every write is an atomic replace: a new inode), so a revocation counts from the next lookup on."""
+
+    def __init__(self, state_dir):
         self._state = _state(state_dir)
-        self._now = now
         self._lock = threading.Lock()
-        self._seen: Dict[int, Tuple[tuple, Dict[str, str]]] = {}     # userId -> (file stamp, hash -> token id)
+        self._seen: Dict[int, Tuple[tuple, Dict[str, Hit]]] = {}     # userId -> (file stamp, index)
 
     def _accounts(self):
         users = self._state.path / "users"
@@ -187,7 +253,7 @@ class PersonalTokenVerifier:
             if name.isascii() and name.isdigit():
                 yield int(name), users / name / FILE
 
-    def _hashes(self, user_id: int, path) -> Dict[str, str]:
+    def _account_index(self, user_id: int, path) -> Dict[str, Hit]:
         try:
             st = os.stat(path)
         except FileNotFoundError:
@@ -197,21 +263,41 @@ class PersonalTokenVerifier:
         cached = self._seen.get(user_id)
         if cached is not None and cached[0] == stamp:
             return cached[1]
-        rows = _entries(_user_dir(self._state, user_id).read(FILE))
-        hashes = {r["hash"]: r["id"] for r in rows}
-        self._seen[user_id] = (stamp, hashes)
-        return hashes
+        index = _index(user_id, _user_dir(self._state, user_id).read(FILE))
+        self._seen[user_id] = (stamp, index)
+        return index
+
+    def lookup(self, digest: str) -> Optional[Hit]:
+        with self._lock:
+            for user_id, path in self._accounts():
+                try:
+                    hit = self._account_index(user_id, path).get(digest)
+                except Exception as e:          # one account's file: skipped, never the others' failure
+                    self._seen.pop(user_id, None)
+                    log.warning("skipped an unreadable agent token file: %s", type(e).__name__)
+                    continue
+                if hit is not None:
+                    return hit
+        return None
+
+
+class PersonalTokenVerifier:
+    """A personal token's account, by its hash (AgentFiles). Noting the use (lastUsedAt) is best effort: a
+    failed write never refuses the token."""
+
+    def __init__(self, state_dir, now: Callable[[], float] = time.time, files: Optional[AgentFiles] = None):
+        self._state = _state(state_dir)
+        self._now = now
+        self._files = files or AgentFiles(self._state)
 
     def verify(self, token: str) -> Optional[AccountRef]:
         if not token.startswith(PERSONAL_PREFIX):
             return None
-        digest = _hash(token)
-        found = None
-        with self._lock:
-            for user_id, path in self._accounts():
-                for stored, token_id in self._hashes(user_id, path).items():
-                    if secrets.compare_digest(stored, digest):
-                        found = AccountRef(user_id, "personal", token_id)
-        if found is not None:
-            PersonalTokens(self._state, found.user_id, self._now).touch(found.credential)
-        return found
+        hit = self._files.lookup(token_hash(token))
+        if hit is None or hit.kind != "personal":
+            return None
+        try:
+            PersonalTokens(self._state, hit.user_id, self._now).touch(hit.id)
+        except Exception as e:
+            log.warning("could not note a personal token's use: %s", type(e).__name__)
+        return AccountRef(hit.user_id, "personal", hit.id)

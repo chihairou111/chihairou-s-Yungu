@@ -3,15 +3,18 @@ transport, stateless with JSON responses (every POST stands alone: no session to
 each one is authenticated afresh, so a revoked token stops the very next call).
 
 `McpEndpoint` (raw ASGI, mounted at /mcp by app.py) checks `Authorization: Bearer` through `AgentAuth`
-before the SDK sees the request: no or an unknown token is a 401 with
-`WWW-Authenticate: Bearer resource_metadata="<PUBLIC_URL>/.well-known/oauth-protected-resource"` (MCP
-authorization spec / RFC 9728). The token's `AccountRef` rides in the ASGI scope; the tool handler reads
-it from the request the SDK hands it, never from anything the agent sends.
+(personal tokens and OAuth access tokens) before the SDK sees the request: no token is a 401 with
+`WWW-Authenticate: Bearer resource_metadata="<PUBLIC_URL>/.well-known/oauth-protected-resource", scope="read"`
+(MCP authorization spec / RFC 9728 / RFC 6750 §3), a refused Bearer token the same plus
+`error="invalid_token"`. GET (and DELETE) are 405: stateless, the server never streams to the client nor
+keeps a session to end. The token's `AccountRef` rides in the ASGI scope; the tool handler reads it from the
+request the SDK hands it, never from anything the agent sends.
 
 Tools (mcp_tools.py) run in a worker thread for that one account: its own Yungu session and read cache,
-60 calls a minute at most (RATE_LIMIT), and for an account other than the owner only while its Yungu session
-is on (no login is ever attempted for it). Logs: tool name, hashed account id, status, duration; never
-arguments, results or tokens.
+60 calls a minute at most (RATE_LIMIT), at most MAX_CONCURRENT_CALLS at once (the rest wait without holding
+a thread, so one account cannot take the shared pool), and for an account other than the owner only while
+its Yungu session is on (no login is ever attempted for it). Logs: tool name, hashed account id, status,
+duration; never arguments, results or tokens.
 """
 import hashlib
 import json
@@ -34,10 +37,13 @@ from .mcp_tools import PUBLIC_URL, SIGN_IN_TO_DASHBOARD, SOMETHING_WRONG, ToolFa
 from .yungu import SignInAgain
 
 log = logging.getLogger("yungu_lms.mcp")
+RESOURCE = f"{PUBLIC_URL}/mcp"                  # the canonical URI agents' tokens are bound to (RFC 8707)
 RESOURCE_METADATA = f"{PUBLIC_URL}/.well-known/oauth-protected-resource"
+SCOPE = "read"                                  # the one scope: everything here is read-only
 PUBLIC_HOST = PUBLIC_URL.split("://", 1)[1]
 ACCOUNT = "yungu_lms.agent"                     # the ASGI scope key McpEndpoint sets
 RATE_LIMIT, RATE_WINDOW_SECONDS = 60, 60.0
+MAX_CONCURRENT_CALLS = 4
 RATE_LIMITED = "Too many requests: at most 60 tool calls a minute for this account. Try again in a minute."
 NOT_RUNNING = "The agent endpoint is starting. Try again in a moment."
 INSTRUCTIONS = ("Read-only access to one student's Yungu (task.yungu.org) data: assignments to do and handed in, "
@@ -101,6 +107,7 @@ class AgentMcp:
         self._student = student
         self._monotonic = monotonic
         self._limit = RateLimit(monotonic)
+        self._busy: Dict[int, anyio.Semaphore] = {}          # per account: at most MAX_CONCURRENT_CALLS
         self._manager: Optional[StreamableHTTPSessionManager] = None
         self.server = Server("yungu-lms", version="1", title="Yungu LMS (read-only)", instructions=INSTRUCTIONS,
                              get_tool_input_schema=lambda name: (mcp_tools.TOOLS.get(name) or {}).get("schema"),
@@ -118,6 +125,7 @@ class AgentMcp:
                                                security_settings=self._security)
         async with manager.run():
             self._manager = manager
+            self._busy = {}                                   # semaphores belong to this event loop
             try:
                 yield
             finally:
@@ -135,7 +143,13 @@ class AgentMcp:
             return _error(SIGN_IN_TO_DASHBOARD)
         status, result = "ok", None
         try:
-            summary, data = await anyio.to_thread.run_sync(self._run, ref.user_id, params.name, params.arguments)
+            if not self._limit.allow(ref.user_id):           # before any wait: refused calls take no slot
+                raise ToolFailure(RATE_LIMITED, "rate_limited")
+            busy = self._busy.get(ref.user_id)
+            if busy is None:
+                busy = self._busy[ref.user_id] = anyio.Semaphore(MAX_CONCURRENT_CALLS)
+            async with busy:
+                summary, data = await anyio.to_thread.run_sync(self._run, ref.user_id, params.name, params.arguments)
             result = _result(summary, data)
         except ToolFailure as e:
             status, result = e.status, _error(e.message)
@@ -146,8 +160,6 @@ class AgentMcp:
         return result
 
     def _run(self, user_id: int, name: str, arguments):
-        if not self._limit.allow(user_id):
-            raise ToolFailure(RATE_LIMITED, "rate_limited")
         try:
             me = self._student(user_id)
         except SignInAgain:
@@ -163,12 +175,14 @@ class McpEndpoint:
         self._manager = manager
 
     async def __call__(self, scope, receive, send):
+        if scope.get("method") != "POST":                     # stateless: no stream to open, no session to end
+            return await _json(send, 405, {"error": "Method Not Allowed"}, headers=[(b"allow", b"POST")])
         value = next((v.decode("latin-1") for k, v in scope.get("headers") or [] if k == b"authorization"), "")
-        scheme, _, bearer = value.partition(" ")
+        scheme, _, bearer = value.strip().partition(" ")
         bearer = bearer.strip() if scheme.lower() == "bearer" else ""
         ref = await anyio.to_thread.run_sync(self._auth.resolve, bearer) if bearer else None
         if ref is None:
-            return await _challenge(send, invalid=bool(value))
+            return await _challenge(send, invalid=bool(bearer))
         manager = self._manager()
         if manager is None:
             return await _json(send, 503, {"error": NOT_RUNNING})
@@ -184,8 +198,10 @@ async def _json(send, status: int, body: dict, headers=()) -> None:
 
 
 async def _challenge(send, invalid: bool) -> None:
-    """401 per RFC 6750 / RFC 9728: where to find how to get a token (and, for a token we refused, why)."""
-    params = ('error="invalid_token", ' if invalid else "") + f'resource_metadata="{RESOURCE_METADATA}"'
+    """401 per RFC 6750 §3 / RFC 9728: where to find how to get a token, the scope to ask for, and an error
+    code only when a Bearer token came and was refused (none for no credential or another scheme)."""
+    params = ('error="invalid_token", ' if invalid else "") + \
+        f'resource_metadata="{RESOURCE_METADATA}", scope="{SCOPE}"'
     await _json(send, 401, {"error": "invalid_token" if invalid else "unauthorized",
                             "error_description": "A valid agent token is required."},
                 headers=[(b"www-authenticate", f"Bearer {params}".encode())])

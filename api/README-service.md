@@ -12,8 +12,11 @@ FastAPI app in `service/`, listening on `127.0.0.1:8100` only. State lives in `Y
                                           pairings, last sync, last error (kept when the account signs out
                                           or is forgotten; Disconnect drops the token, keeps the pairings)
     users/<userId>/agent-tokens.json      each account's agent access: personal tokens {id, name, hash,
-                                          createdAt, lastUsedAt} (sha256 only; kept across restarts and
-                                          dashboard sign-out, gone when revoked)
+                                          createdAt, lastUsedAt} and OAuth grants (client, resource, hashed
+                                          refresh/access tokens, rotated-out refresh hashes); sha256 only;
+                                          kept across restarts and dashboard sign-out, gone when revoked
+    oauth-clients.json                    agents registered by OAuth dynamic client registration (public
+                                          clients: id, name, redirect URIs, created, last active; no secrets)
 
 ## Accounts
 Any Yungu student account can sign in. The **owner** (owner.json) keeps today's behaviour: password saved,
@@ -85,19 +88,53 @@ A read-only MCP server for AI agents at `/mcp` (public `https://yungu.chihairou.
 responses** (every POST stands alone; legacy `initialize` clients and 2026-07-28 clients both work). The
 manager runs inside the app's lifespan. Host/Origin checked (DNS rebinding): `yungu.chihairou.dev` and loopback.
 Code: `service/mcp_server.py` (endpoint, auth check, rate limit, logs), `service/mcp_tools.py` (the tools over
-`Student`), `service/agent_tokens.py` (`AgentAuth`, personal tokens).
+`Student`), `service/agent_tokens.py` (`AgentAuth`, `AgentFiles`, personal tokens), `service/oauth_server.py`
+(OAuth 2.1). `GET`/`DELETE /mcp` → 405 `Allow: POST` (stateless: nothing to stream, no session to end).
 
 - **Auth:** `Authorization: Bearer <agent token>` on every request, checked before the SDK sees it by
-  `AgentAuth.resolve` (a list of verifiers; OAuth access tokens join it next to personal tokens). None, or one
-  that resolves to nothing (a dashboard token included) → 401 with
-  `WWW-Authenticate: Bearer resource_metadata="https://yungu.chihairou.dev/.well-known/oauth-protected-resource"`
-  (plus `error="invalid_token"` when a token was sent). Agent tokens open nothing but `/mcp`: every other route
-  keeps the dashboard token check, which knows nothing of them. Revoking stops the next request.
+  `AgentAuth.resolve` (personal tokens and OAuth access tokens, one `AgentFiles` index over every account's
+  agent-tokens.json; one account's unreadable file is skipped and logged by type, never the others' failure).
+  No Bearer credential (none, or another scheme) → 401
+  `WWW-Authenticate: Bearer resource_metadata="https://yungu.chihairou.dev/.well-known/oauth-protected-resource", scope="read"`;
+  a Bearer token that resolves to nothing (a dashboard token included) → the same with `error="invalid_token", `
+  first. Agent tokens open nothing but `/mcp`: every other route keeps the dashboard token check, which knows
+  nothing of them. Revoking stops the next request.
 - **Personal tokens** (dashboard Bearer only): `POST /agent/tokens {name}` → `{id, name, token}` (`ylp_…`,
   shown once; name 1–64 characters; at most 20 per account → 400 "You can have up to 20 tokens. Revoke one
-  first."), `GET /agent/tokens` → `{personal: [{id, name, createdAt, lastUsedAt}], clients: []}`,
-  `DELETE /agent/tokens/{id}` → 204 (404 for another account's or an unknown id). No expiry until revoked;
-  dashboard sign-out does not revoke them.
+  first."), `GET /agent/tokens` → `{personal: [{id, name, createdAt, lastUsedAt}], clients: [{id, name,
+  connectedAt, lastUsedAt}]}` (clients: connected OAuth agents, one per client), `DELETE /agent/tokens/{id}`,
+  `DELETE /agent/clients/{id}` → 204 (404 for another account's or an unknown id). No expiry until revoked;
+  dashboard sign-out does not revoke them (nor OAuth grants).
+- **OAuth 2.1** (MCP authorization spec 2026-07-28), issuer `https://yungu.chihairou.dev`, scope `read`:
+  - `GET /.well-known/oauth-protected-resource` (also `…/oauth-protected-resource/mcp`): `{resource:
+    "https://yungu.chihairou.dev/mcp", authorization_servers: ["https://yungu.chihairou.dev"], scopes_supported:
+    ["read"], bearer_methods_supported: ["header"], resource_name}`. `GET /.well-known/oauth-authorization-server`:
+    authorization_endpoint `/oauth/authorize` (the dashboard's Next page), token `/oauth/token`, registration
+    `/oauth/register`, revocation `/oauth/revoke`; code + S256 only; grants authorization_code + refresh_token;
+    auth method `none`; `authorization_response_iss_parameter_supported: true` (redirects carry `iss`).
+  - `POST /oauth/register` (RFC 7591, JSON) → 201 `{client_id (ylc_…), client_id_issued_at, client_name,
+    redirect_uris, grant_types, response_types: ["code"], token_endpoint_auth_method: "none", scope: "read"}`:
+    public clients only (no secret, whatever was asked); redirect URIs https or http loopback (no fragment,
+    ≤ 10); name ≤ 64 (missing → "Unnamed agent"); errors 400 `invalid_redirect_uri` / `invalid_client_metadata`.
+    At most 500 clients (at the cap one never approved for an hour makes room, else 503); 20 per address per
+    10 min (429); a client unused for 30 days goes.
+  - Consent API (dashboard Bearer): `POST /oauth/authorize/request {response_type?, client_id, redirect_uri,
+    state?, code_challenge, code_challenge_method, scope?, resource?}` → `{valid: true, client: {name,
+    redirectHost}}`; `POST /oauth/authorize/approve {…same, decision: "allow"|"deny"}` → `{redirect}` (allow:
+    `<redirect_uri>?code=…&state=…&iss=…`; deny: `?error=access_denied&state=…&iss=…`). Refusals: 400 `{error:
+    <message for the person>, code: <OAuth error>, redirect?}`: no `redirect` when the client is unknown or the
+    redirect URI isn't registered (never send the browser there); otherwise `redirect` returns the error to the
+    client. Loopback redirect URIs match on any port; others exactly. At most 20 connected agents per account
+    (approve → 400 "You can connect up to 20 agents. Disconnect one in Agent access first.").
+  - `POST /oauth/token` (form): `authorization_code` (code, code_verifier, redirect_uri, client_id, resource?)
+    or `refresh_token` (refresh_token, client_id, resource?) → `{access_token (yla_…), token_type: "Bearer",
+    expires_in: 3600, refresh_token (ylr_…), scope: "read"}`, `Cache-Control: no-store`. Codes: 5 min, single
+    use (any presentation spends one; a second presentation revokes what it bought), bound to client, redirect
+    URI, PKCE challenge, account and resource. Refresh tokens rotate on every use and lapse 30 days after
+    issue; a rotated-out one presented again revokes the grant. `client_id` may come as HTTP Basic user name.
+    Errors per RFC 6749 §5.2 (+ `invalid_target`, RFC 8707).
+  - `POST /oauth/revoke` (RFC 7009, form `token`, `client_id?`) → 200: an access token ends alone, a refresh
+    token ends the grant.
 - **Tools** (all `readOnlyHint: true`): `list_todo`, `list_submitted(course?, limit?)`, `get_assignment(id)`,
   `get_schedule(date?, week?)`, `list_courses`, `get_behaviour(month?)`, `list_notifications(unread_only?,
   limit?)`. Each answers a short text summary plus the same data as compact JSON (text and
@@ -108,11 +145,14 @@ Code: `service/mcp_server.py` (endpoint, auth check, rate limit, logs), `service
   Yungu session is on, else the tool error "Sign in to the dashboard again to keep agent access working." with
   no login attempt (also the owner's answer after its sign-out deleted the saved password). Yungu down →
   "Can't reach Yungu right now. Try again."; anything unexpected → "Something went wrong reading Yungu. Try
-  again." (no trace). An account with a personal token is not signed out by the 12 h idle sweep.
+  again." (no trace). An account with a personal token or a connected OAuth agent is not signed out by the 12 h
+  idle sweep.
 - **Rate limit:** 60 tool calls per minute per account (sliding) → tool error "Too many requests: at most 60
-  tool calls a minute for this account. Try again in a minute.", no Yungu call.
+  tool calls a minute for this account. Try again in a minute.", no Yungu call; at most 4 of an account's
+  calls run at once (the rest wait without holding a worker thread).
 - **Logs:** `tool=<name> account=<sha256 of the userId, 12 hex> status=<ok|sign_in|unavailable|not_found|
-  bad_arguments|rate_limited|...> ms=<n>`; never arguments, results or tokens.
+  bad_arguments|rate_limited|...> ms=<n>`; never arguments, results or tokens. OAuth (`yungu_lms.oauth`):
+  registrations, connections and reuse revocations, by hashed account only; never tokens, codes, verifiers.
 
 ## Run by hand
     cd /root/yungu-lms/api

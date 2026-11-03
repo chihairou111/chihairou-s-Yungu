@@ -4,17 +4,22 @@ import hashlib
 import json
 import logging
 
+import os
+import threading
+from types import SimpleNamespace
+
 import anyio
 import httpx2
 import pytest
 import requests
 from fastapi.testclient import TestClient
-from mcp import Client
+from mcp import Client, types
 from mcp.client.streamable_http import streamable_http_client
+from mcp.shared.exceptions import MCPError
 
 from service import mcp_tools
-from service.agent_tokens import MAX_PERSONAL_TOKENS, AgentAuth, PersonalTokens
-from service.mcp_server import RATE_LIMIT, RATE_LIMITED
+from service.agent_tokens import MAX_PERSONAL_TOKENS, AccountRef, AgentAuth, PersonalTokens
+from service.mcp_server import ACCOUNT, MAX_CONCURRENT_CALLS, RATE_LIMIT, RATE_LIMITED
 from service.mcp_tools import SIGN_IN_TO_DASHBOARD, SOMETHING_WRONG
 from service.yungu import IDLE_SECONDS
 from test_service import (B_PW, ENDPOINTS, ME, OTHER, SIGN_IN_AGAIN, UNREACHABLE, api, auth, b_auth,  # noqa: F401
@@ -22,7 +27,8 @@ from test_service import (B_PW, ENDPOINTS, ME, OTHER, SIGN_IN_AGAIN, UNREACHABLE
 
 BASE = "http://127.0.0.1:8100"
 METADATA = "https://yungu.chihairou.dev/.well-known/oauth-protected-resource"
-CHALLENGE = f'Bearer resource_metadata="{METADATA}"'
+CHALLENGE = f'Bearer resource_metadata="{METADATA}", scope="read"'
+INVALID = f'Bearer error="invalid_token", resource_metadata="{METADATA}", scope="read"'
 TOOL_NAMES = {"list_todo", "list_submitted", "get_assignment", "get_schedule", "list_courses", "get_behaviour",
               "list_notifications"}
 WRITES = {"save_draft", "submit", "add_comment", "delete_comment", "create_online_doc", "update_online_doc",
@@ -84,13 +90,15 @@ def text_of(result):
     return "\n".join(c.text for c in result.content)
 
 
-def rpc(api, bearer, method="tools/call", params=None, host=None):
+def rpc(api, bearer, method="tools/call", params=None, host=None, origin=None):
     """A bare JSON-RPC POST (stateless: no initialize needed) through a TestClient with the lifespan on."""
     headers = dict(RPC_HEADERS)
     if bearer is not None:
         headers["Authorization"] = bearer
     if host:
         headers["Host"] = host
+    if origin:
+        headers["Origin"] = origin
     body = {"jsonrpc": "2.0", "id": 1, "method": method,
             "params": params if params is not None else {"name": "list_courses", "arguments": {}}}
     with TestClient(api.app, base_url=BASE) as client:
@@ -129,18 +137,35 @@ def test_every_tool_answers_through_the_endpoint(api, token, world):
         assert result.is_error is False and result.structured_content is not None
 
 
-@pytest.mark.parametrize("header", [None, "Bearer wrong-token", "Basic abc", "Bearer ", "Bearer ylp_nope", "dashboard"])
-def test_no_or_an_unknown_token_is_a_401_with_the_resource_metadata(api, auth, world, header):
+@pytest.mark.parametrize("header,expected", [(None, CHALLENGE), ("Basic abc", CHALLENGE), ("Bearer ", CHALLENGE),
+                                             ("Bearer wrong-token", INVALID), ("Bearer ylp_nope", INVALID),
+                                             ("Bearer yla_nope", INVALID), ("dashboard", INVALID)])
+def test_no_or_an_unknown_token_is_a_401_with_the_resource_metadata(api, auth, world, header, expected):
+    """RFC 6750 §3.1: no error code when no Bearer credential came (none, or another scheme); invalid_token
+    for a Bearer token we refuse."""
     if header == "dashboard":
         header = auth["Authorization"]                   # a dashboard token is no agent token
     before = len(world.calls)
     r = rpc(api, header)
     assert r.status_code == 401
-    challenge = r.headers["www-authenticate"]
-    assert f'resource_metadata="{METADATA}"' in challenge and challenge.startswith("Bearer ")
-    if header is None:
-        assert challenge == CHALLENGE
+    assert r.headers["www-authenticate"] == expected
     assert len(world.calls) == before
+
+
+@pytest.mark.parametrize("bearer", [None, "token"])
+def test_get_and_delete_are_405_stateless_mode_never_streams(api, token, bearer):
+    headers = {"Accept": "text/event-stream"}
+    if bearer:
+        headers["Authorization"] = f"Bearer {token}"
+    with TestClient(api.app, base_url=BASE) as client:
+        for method in ("GET", "DELETE"):
+            r = client.request(method, "/mcp", headers=headers)
+            assert r.status_code == 405 and r.headers["allow"] == "POST"
+
+
+def test_a_foreign_origin_is_a_403(api, token, world):
+    assert rpc(api, f"Bearer {token}", origin="https://evil.example").status_code == 403
+    assert rpc(api, f"Bearer {token}", origin="https://yungu.chihairou.dev").status_code == 200
 
 
 def test_a_foreign_host_is_refused_and_the_public_host_accepted(api, token, world):
@@ -192,6 +217,18 @@ def test_each_token_reads_only_its_own_accounts_data(api, world, token, b_token)
     assert b_todo and all(a["title"].startswith("B ") for a in b_todo)
 
 
+def test_an_id_only_the_other_account_has_is_not_found_for_this_one(api, world, token, b_token):
+    peer = world.peer
+    peer.mixed[99001] = json.loads(json.dumps(peer.mixed[93251]))
+    peer.mixed[99001]["taskTitle"] = "B only-theirs"
+    peer.ach[99001] = json.loads(json.dumps(peer.ach[93251]))
+    peer.comments[99001] = []
+    mine = call(api, token, "get_assignment", {"id": 99001})
+    assert mine.is_error is True and text_of(mine) == "No assignment with that id."
+    theirs = call(api, b_token, "get_assignment", {"id": 99001})
+    assert theirs.is_error is False and theirs.structured_content["title"] == "B only-theirs"
+
+
 # ------------------------------------------------------- Review Focus 4: revocation
 def test_revoking_a_personal_token_stops_the_next_call(api, auth, world):
     made = new_token(api, auth)
@@ -203,14 +240,24 @@ def test_revoking_a_personal_token_stops_the_next_call(api, auth, world):
 
 def test_revoking_mid_session_stops_the_next_call_in_that_session(api, auth, world):
     made = new_token(api, auth)
+    app, statuses = api.app, []
 
-    async def go(client):
-        first = await client.call_tool("list_courses", {})
-        PersonalTokens(api.app.state.service._state, ME).revoke(made["id"])
-        with pytest.raises(Exception):
-            await client.call_tool("list_courses", {})
-        return first
-    assert session(api, made["token"], go).is_error is False
+    async def record(response):
+        statuses.append(response.status_code)
+
+    async def main():
+        async with app.router.lifespan_context(app):
+            async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url=BASE,
+                                          headers={"Authorization": f"Bearer {made['token']}"},
+                                          event_hooks={"response": [record]}) as http:
+                async with Client(streamable_http_client(f"{BASE}/mcp", http_client=http)) as client:
+                    first = await client.call_tool("list_courses", {})
+                    PersonalTokens(app.state.service._state, ME).revoke(made["id"])
+                    with pytest.raises(MCPError):
+                        await client.call_tool("list_courses", {})
+                    return first
+    assert anyio.run(main).is_error is False
+    assert statuses[-1] == 401 and 401 not in statuses[:-1]
 
 
 # ------------------------------------------- Review Focus 5: no live session, Yungu down
@@ -357,6 +404,72 @@ def test_the_resolver_takes_more_kinds_of_token(api, token):
     assert resolver.resolve(token).kind == "personal" and resolver.resolve(token).user_id == ME
     assert resolver.resolve("nope") is None and resolver.resolve("") is None
     assert rpc(api, "Bearer yla_fake").status_code == 200
+
+
+def test_one_accounts_unreadable_token_file_does_not_fail_the_others(api, token, state_dir, caplog):
+    for broken in ("998", "999"):                            # before and after ME in any scan order
+        os.makedirs(state_dir / "users" / broken / "agent-tokens.json")       # a directory: reading it fails
+    ref = api.app.state.agent_auth.resolve(token)
+    assert ref is not None and ref.user_id == ME and ref.kind == "personal"
+    assert "IsADirectoryError" in caplog.text and token not in caplog.text
+    assert rpc(api, f"Bearer {token}").status_code == 200
+
+
+def test_a_failing_last_used_write_does_not_refuse_the_token(api, token, monkeypatch, caplog):
+    def full(self, data):
+        raise OSError("disk full")
+    monkeypatch.setattr(PersonalTokens, "_save", full)
+    ref = api.app.state.agent_auth.resolve(token)
+    assert ref is not None and ref.user_id == ME
+    assert "OSError" in caplog.text and token not in caplog.text
+
+
+def test_one_account_runs_at_most_four_tool_calls_at_once(api, world, auth, b_auth, monkeypatch):
+    from service.app import Student
+    agents = api.app.state.agents
+    gate, lock = threading.Event(), threading.Lock()
+    running, peak = {ME: 0, OTHER: 0}, {ME: 0, OTHER: 0}
+
+    def slow(self, refresh=False):
+        with lock:
+            running[self.user_id] += 1
+            peak[self.user_id] = max(peak[self.user_id], running[self.user_id])
+        try:
+            if self.user_id == ME:
+                assert gate.wait(10)
+            return []
+        finally:
+            with lock:
+                running[self.user_id] -= 1
+    monkeypatch.setattr(Student, "courses", slow)
+
+    def ctx(user_id):
+        return SimpleNamespace(request=SimpleNamespace(scope={ACCOUNT: AccountRef(user_id, "personal", "t")}))
+    params = types.CallToolRequestParams(name="list_courses", arguments={})
+
+    async def main():
+        results = []
+
+        async def one(user_id):
+            results.append(await agents._call_tool(ctx(user_id), params))
+        async with anyio.create_task_group() as tg:
+            for _ in range(MAX_CONCURRENT_CALLS + 3):
+                tg.start_soon(one, ME)
+            try:
+                with anyio.fail_after(10):
+                    while running[ME] < MAX_CONCURRENT_CALLS:
+                        await anyio.sleep(0.01)
+                await anyio.sleep(0.1)
+                assert running[ME] == MAX_CONCURRENT_CALLS          # the rest wait without a thread
+                with anyio.fail_after(10):
+                    other = await agents._call_tool(ctx(OTHER), params)    # another account is not held up
+                assert other.is_error is False
+            finally:
+                gate.set()
+        return results
+    results = anyio.run(main)
+    assert len(results) == MAX_CONCURRENT_CALLS + 3 and all(r.is_error is False for r in results)
+    assert peak[ME] == MAX_CONCURRENT_CALLS == 4
 
 
 # ------------------------------------------------------------------ idle sweep
