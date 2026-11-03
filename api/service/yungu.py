@@ -370,7 +370,8 @@ class Yungu:
         self._factory = client_factory
         self._clock = clock
         self._on_end = on_end           # an account other than the owner ended (expiry or sign-out)
-        self._keep = keep               # never idle out (Todoist connected: its sync counts as use); no locks
+        self._keep = keep               # never idle out (Todoist connected, or agent access: their calls count
+                                        # as use); no locks
         self._lock = threading.Lock()
         self._sessions: Dict[int, object] = {}
         self._swept = clock()
@@ -394,8 +395,8 @@ class Yungu:
 
     def sweep(self) -> None:
         """At most every SWEEP_SECONDS: sign out and forget every account other than the owner that has
-        not been used for IDLE_SECONDS, unless `keep` says so (Todoist connected: it stays until Yungu ends
-        its session). The owner's session is never swept."""
+        not been used for IDLE_SECONDS, unless `keep` says so (Todoist connected, or a personal agent token /
+        OAuth grant: it stays until Yungu ends its session). The owner's session is never swept."""
         now = self._clock()
         with self._lock:
             if now - self._swept < SWEEP_SECONDS:

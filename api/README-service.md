@@ -11,6 +11,9 @@ FastAPI app in `service/`, listening on `127.0.0.1:8100` only. State lives in `Y
     users/<userId>/todoist.json           each account's Todoist link: token, refresh token, Todoist user,
                                           pairings, last sync, last error (kept when the account signs out
                                           or is forgotten; Disconnect drops the token, keeps the pairings)
+    users/<userId>/agent-tokens.json      each account's agent access: personal tokens {id, name, hash,
+                                          createdAt, lastUsedAt} (sha256 only; kept across restarts and
+                                          dashboard sign-out, gone when revoked)
 
 ## Accounts
 Any Yungu student account can sign in. The **owner** (owner.json) keeps today's behaviour: password saved,
@@ -33,7 +36,7 @@ service (with `submitted-files.json` at the top) is moved into `users/<owner>/` 
   after a restart, opening the assignment again makes its files usable.
 - **Bounds:** each account's read cache drops expired entries and holds at most 300; an account other than
   the owner unused for 12 h is signed out and forgotten (the owner never, nor an account with Todoist
-  connected); such an account keeps its 10 newest tokens.
+  connected or a personal agent token); such an account keeps its 10 newest tokens.
 - **Sign-in throttling:** login id over 64 or password over 256 characters → 400 before anything else.
   Before any Yungu call: a login id with 5 refused sign-ins in 15 min, or a client address with 10 refused
   sign-ins across all ids in 15 min, gets 429 "Too many attempts. Try again in a few minutes."; past 3
@@ -75,6 +78,41 @@ holds every trigger; `reauth` holds automatic triggers until Reconnect (Try agai
 Todoist refuses outright (another 4xx) is skipped and tried again next sync; the rest still syncs, the menu shows
 `todoist_unreachable`, and nothing is held back. An account with Todoist connected (and not in `reauth`) is not
 signed out by the 12 h idle sweep (it stays until Yungu ends its session). Tokens, codes, states and the client secret are never logged or answered.
+
+## Agent access (MCP)
+A read-only MCP server for AI agents at `/mcp` (public `https://yungu.chihairou.dev/mcp`), built on the official
+`mcp` SDK (2.x): its low-level `Server` behind its Streamable HTTP session manager, **stateless with JSON
+responses** (every POST stands alone; legacy `initialize` clients and 2026-07-28 clients both work). The
+manager runs inside the app's lifespan. Host/Origin checked (DNS rebinding): `yungu.chihairou.dev` and loopback.
+Code: `service/mcp_server.py` (endpoint, auth check, rate limit, logs), `service/mcp_tools.py` (the tools over
+`Student`), `service/agent_tokens.py` (`AgentAuth`, personal tokens).
+
+- **Auth:** `Authorization: Bearer <agent token>` on every request, checked before the SDK sees it by
+  `AgentAuth.resolve` (a list of verifiers; OAuth access tokens join it next to personal tokens). None, or one
+  that resolves to nothing (a dashboard token included) → 401 with
+  `WWW-Authenticate: Bearer resource_metadata="https://yungu.chihairou.dev/.well-known/oauth-protected-resource"`
+  (plus `error="invalid_token"` when a token was sent). Agent tokens open nothing but `/mcp`: every other route
+  keeps the dashboard token check, which knows nothing of them. Revoking stops the next request.
+- **Personal tokens** (dashboard Bearer only): `POST /agent/tokens {name}` → `{id, name, token}` (`ylp_…`,
+  shown once; name 1–64 characters; at most 20 per account → 400 "You can have up to 20 tokens. Revoke one
+  first."), `GET /agent/tokens` → `{personal: [{id, name, createdAt, lastUsedAt}], clients: []}`,
+  `DELETE /agent/tokens/{id}` → 204 (404 for another account's or an unknown id). No expiry until revoked;
+  dashboard sign-out does not revoke them.
+- **Tools** (all `readOnlyHint: true`): `list_todo`, `list_submitted(course?, limit?)`, `get_assignment(id)`,
+  `get_schedule(date?, week?)`, `list_courses`, `get_behaviour(month?)`, `list_notifications(unread_only?,
+  limit?)`. Each answers a short text summary plus the same data as compact JSON (text and
+  `structuredContent`); times are China time ISO 8601; instructions are plain text; attachments are dashboard
+  links (`/api/files/<id>`, online documents → the assignment page); never file bytes, never a write (reading
+  notifications does not mark them read). They use the account's own session and 60 s read cache.
+- **Which account:** the token's. The owner always (automatic re-login); any other account only while its
+  Yungu session is on, else the tool error "Sign in to the dashboard again to keep agent access working." with
+  no login attempt (also the owner's answer after its sign-out deleted the saved password). Yungu down →
+  "Can't reach Yungu right now. Try again."; anything unexpected → "Something went wrong reading Yungu. Try
+  again." (no trace). An account with a personal token is not signed out by the 12 h idle sweep.
+- **Rate limit:** 60 tool calls per minute per account (sliding) → tool error "Too many requests: at most 60
+  tool calls a minute for this account. Try again in a minute.", no Yungu call.
+- **Logs:** `tool=<name> account=<sha256 of the userId, 12 hex> status=<ok|sign_in|unavailable|not_found|
+  bad_arguments|rate_limited|...> ms=<n>`; never arguments, results or tokens.
 
 ## Run by hand
     cd /root/yungu-lms/api

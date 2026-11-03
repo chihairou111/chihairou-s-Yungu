@@ -1,7 +1,8 @@
 """HTTP routes mirroring the dashboard's data seam (frontend/src/lib/data/index.ts, YunguData).
 
 JSON everywhere; `Authorization: Bearer <token>` on everything except POST /session; errors are
-`{"error": str}`. Any Yungu student account can sign in; a token belongs to one account, and everything a
+`{"error": str}`. /mcp is the agents' (mcp_server.py): it takes agent tokens only, and every other route
+dashboard tokens only. Any Yungu student account can sign in; a token belongs to one account, and everything a
 request does (Yungu calls, the read cache, the hand-in record, locks) is that account's alone.
 Reads are cached 60 s per account + endpoint + params (`X-Refresh: 1` bypasses); any write (draft,
 submit, comment, online document, notification read) or POST /refresh clears that account's cache; an
@@ -29,12 +30,16 @@ from pydantic import BaseModel, Field
 from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException
 from starlette.requests import ClientDisconnect
+from starlette.routing import Route
 
 import mapping
 from yungu_task import ACHIEVEMENT_NOT_SUBMITTED, CST, ONLINE_DOC_MAX_BYTES, SUBMITTED, TODO, YunguError, YunguTask
 
+from .agent_tokens import (MAX_NAME_CHARS, AgentAuth, PersonalTokens, PersonalTokenVerifier, TooManyTokens,
+                           has_agent_access)
 from .auth import Auth
 from .cache import ReadCache
+from .mcp_server import AgentMcp
 from .state import StateDir, SubmittedFiles
 from .todoist_service import NotConnected, NotSetUp, TodoistApi, TodoistService, keeps_session as todoist_keeps_session
 from .yungu import (UNREACHABLE, ServiceError, SignInAgain, SignInRefused, Unavailable, Yungu, checked_redirect,
@@ -82,6 +87,9 @@ BEHAVIOUR_PAGE_SIZE = 50             # allStu/behavior honours 50 (research beha
 BEHAVIOUR_MAX_PAGES = 40             # 2000 records in one month is far past any real one: stop there
 EARLIEST_MONTH = "2000-01"
 NOTIFICATION_PAGE_MAX = 100          # Yungu's v2/page honours 100 (research notifications-and-feedback.md)
+NO_TOKEN_NAME = "Give the token a name."
+TOKEN_NAME_TOO_LONG = f"Use a name of up to {MAX_NAME_CHARS} characters."
+TOO_MANY_TOKENS = "You can have up to 20 tokens. Revoke one first."
 
 
 class NotFound(ServiceError):
@@ -204,6 +212,10 @@ class TextBody(BaseModel):
 class OnlineDocBody(BaseModel):
     title: str
     content: str          # the Quill delta JSON string, stored by Yungu as is
+
+
+class AgentTokenBody(BaseModel):
+    name: str = Field("", max_length=1024)
 
 
 class TodoistCallbackBody(BaseModel):
@@ -477,8 +489,10 @@ class Service:
     def __init__(self, state_dir: str, client_factory, now: Callable[[], float], monotonic: Callable[[], float]):
         self._state = StateDir(state_dir)
         self.auth = Auth(self._state)
+        # Kept from the idle sweep while Todoist syncs or an agent has access (its calls count as use).
         self.yungu = Yungu(self.auth, client_factory, clock=monotonic, on_end=self._ended,
-                           keep=lambda uid: todoist_keeps_session(self._state, uid))
+                           keep=lambda uid: todoist_keeps_session(self._state, uid)
+                           or has_agent_access(self._state, uid))
         self.on_sign_in: Callable[[int], object] = lambda uid: None      # Todoist: resume the account's sync
         self._now, self._monotonic = now, monotonic
         self._lock = threading.Lock()          # guards _accounts only
@@ -535,6 +549,14 @@ class Service:
     def can_sync(self, user_id: int) -> bool:
         """The owner (re-login with the saved password), or an account whose memory session is on."""
         return user_id == self.auth.owner() or self.yungu.is_on(user_id)
+
+    def agent_student(self, user_id: int) -> "Student":
+        """The account an agent token belongs to (mcp_server.py): the owner (re-login with the saved password),
+        any other account only while its memory session is on; else SignInAgain, with no login attempt."""
+        self.yungu.sweep()
+        if not self.can_sync(user_id):
+            raise SignInAgain()
+        return Student(self, user_id)
 
     def todo_for_sync(self, user_id: int) -> List[dict]:
         """The account's To-do list for its Todoist sync: the owner through its session (re-login with the saved
@@ -889,19 +911,27 @@ def create_app(state_dir: Optional[str] = None, client_factory=yungu_client,
     todoist = TodoistService(service._state, todoist_api or TodoistApi.from_env(), service.todo_for_sync,
                              now, monotonic, can_sync=service.can_sync)
     service.on_sign_in = todoist.trigger
+    # Agent tokens resolve to one account each; Task 2 registers OAuth access tokens here too.
+    agent_auth = AgentAuth([PersonalTokenVerifier(service._state, now)])
+    agents = AgentMcp(agent_auth, service.agent_student, monotonic)
 
     @asynccontextmanager
     async def lifespan(app):
-        todoist.start()                  # the 15-minute schedule
-        try:
-            yield
-        finally:
-            todoist.stop()
+        async with agents.run():         # the MCP SDK's session manager (/mcp)
+            todoist.start()              # the 15-minute schedule
+            try:
+                yield
+            finally:
+                todoist.stop()
 
     app = FastAPI(title="Yungu LMS service", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.service = service
     app.state.todoist = todoist
+    app.state.agent_auth = agent_auth
+    app.state.agents = agents
     app.add_middleware(CatchAll)
+    # Agents only (MCP, Streamable HTTP): agent tokens, never dashboard ones; every other route is the reverse.
+    app.router.routes.append(Route("/mcp", endpoint=agents.endpoint, methods=["GET", "POST", "DELETE"]))
 
     @app.exception_handler(ServiceError)
     async def service_error(request, exc: ServiceError):
@@ -984,6 +1014,34 @@ def create_app(state_dir: Optional[str] = None, client_factory=yungu_client,
     @app.delete("/todoist", status_code=204)
     def todoist_disconnect(me: Student = Me):
         todoist.disconnect(me.user_id)
+        return Response(status_code=204)
+
+    # ------------------------------------------------------- agent access
+    # Dashboard tokens only (Me): an agent token can never make, see or revoke one.
+    def personal_tokens(me: Student) -> PersonalTokens:
+        return PersonalTokens(service._state, me.user_id, now)
+
+    @app.get("/agent/tokens")
+    def agent_tokens(me: Student = Me):
+        return {"personal": personal_tokens(me).list(), "clients": []}
+
+    @app.post("/agent/tokens")
+    def create_agent_token(body: AgentTokenBody, me: Student = Me):
+        name = body.name.strip()
+        if not name:
+            raise BadRequest(NO_TOKEN_NAME)
+        if len(name) > MAX_NAME_CHARS:
+            raise BadRequest(TOKEN_NAME_TOO_LONG)
+        try:
+            token_id, token = personal_tokens(me).create(name)
+        except TooManyTokens:
+            raise BadRequest(TOO_MANY_TOKENS) from None
+        return {"id": token_id, "name": name, "token": token}
+
+    @app.delete("/agent/tokens/{token_id}", status_code=204)
+    def revoke_agent_token(token_id: str, me: Student = Me):
+        if not personal_tokens(me).revoke(token_id):
+            raise NotFound()
         return Response(status_code=204)
 
     # -------------------------------------------------------------- reads
