@@ -16,13 +16,65 @@ beforeEach(() => {
 import { POST } from './route';
 import { ServiceError, data } from '@/lib/data';
 
-const upload = (file: File | null) => {
+/** What a browser sends with the dashboard's own upload (a same-origin fetch). */
+const OWN = { host: 'localhost', origin: 'http://localhost', 'sec-fetch-site': 'same-origin' };
+
+const upload = (file: File | null, headers: Record<string, string> = OWN) => {
   const form = new FormData();
   if (file) form.set('file', file);
-  return new Request('http://localhost/api/files', { method: 'POST', body: form });
+  return new Request('http://localhost/api/files', { method: 'POST', body: form, headers });
 };
 
 describe('POST /api/files', () => {
+  it.each([
+    ['another origin', { ...OWN, origin: 'https://evil.example' }],
+    ['a cross-site fetch', { ...OWN, 'sec-fetch-site': 'cross-site' }],
+    ['a browser that does not vouch for it (no Sec-Fetch-Site)', { host: 'localhost', origin: 'http://localhost' }],
+    ['no Origin', { host: 'localhost', 'sec-fetch-site': 'same-origin' }],
+  ])('refuses a multipart post from %s before reading anything', async (_case, headers) => {
+    const spy = vi.spyOn(data, 'uploadFile');
+    const res = await POST(upload(new File(['x'], 'a.txt'), headers));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'Forbidden.' });
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it('refuses a text/plain post', async () => {
+    const res = await POST(new Request('http://localhost/api/files', { method: 'POST', headers: { ...OWN, 'content-type': 'text/plain' }, body: 'x' }));
+    expect(res.status).toBe(403);
+  });
+
+  it('takes a 12 MB file streamed in, byte for byte (past the proxy\'s 10 MB body clone, which this route is outside)', async () => {
+    const bytes = new Uint8Array(12 * 1024 * 1024);
+    for (let i = 0; i < bytes.length; i += 4096) bytes[i] = (i / 4096) % 251;
+    const real = upload(new File([bytes], 'big.bin', { type: 'application/octet-stream' }));
+    const raw = new Uint8Array(await real.arrayBuffer());
+    // Arrives in 64 KiB pieces, as a socket would deliver it.
+    let at = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (at >= raw.length) return controller.close();
+        controller.enqueue(raw.slice(at, at + 65536));
+        at += 65536;
+      },
+    });
+    const spy = vi.spyOn(data, 'uploadFile');
+    const request = new Request('http://localhost/api/files', {
+      method: 'POST',
+      headers: { ...OWN, 'content-type': real.headers.get('content-type')! },
+      body,
+      duplex: 'half',
+    } as RequestInit);
+    const res = await POST(request);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ name: 'big.bin', size: bytes.length });
+    const sent = spy.mock.calls[0][2];
+    expect(sent.length).toBe(bytes.length);
+    expect(Buffer.compare(Buffer.from(sent), Buffer.from(bytes))).toBe(0);
+    spy.mockRestore();
+  });
+
   it('401s without a session', async () => {
     signedOut();
     const res = await POST(upload(new File(['x'], 'a.txt')));
@@ -44,7 +96,7 @@ describe('POST /api/files', () => {
   });
   it('413s on a declared body over the limit without reading it', async () => {
     const formData = vi.fn();
-    const request = { headers: new Headers({ 'content-length': String(50 * 1024 * 1024 + 64 * 1024 + 1) }), formData } as unknown as Request;
+    const request = { headers: new Headers({ ...OWN, 'content-type': 'multipart/form-data; boundary=b', 'content-length': String(50 * 1024 * 1024 + 64 * 1024 + 1) }), formData } as unknown as Request;
     const res = await POST(request);
     expect(res.status).toBe(413);
     expect(await res.json()).toEqual({ error: 'Files up to 50 MB.' });
@@ -53,7 +105,7 @@ describe('POST /api/files', () => {
   it('reads a declared body within the multipart slack', async () => {
     const real = upload(new File(['x'], 'a.txt', { type: 'text/plain' }));
     const request = {
-      headers: new Headers({ 'content-length': String(50 * 1024 * 1024 + 64 * 1024), 'content-type': real.headers.get('content-type')! }),
+      headers: new Headers({ ...OWN, 'content-length': String(50 * 1024 * 1024 + 64 * 1024), 'content-type': real.headers.get('content-type')! }),
       body: real.body,
     } as unknown as Request;
     const res = await POST(request);
@@ -89,7 +141,7 @@ describe('POST /api/files', () => {
     ['with a Content-Length that understates it', { 'content-length': '1000' }],
   ])('413s a body over the limit sent %s, without buffering all of it', async (_case, extra) => {
     const { body, seen } = streamedBody(200 * 1024 * 1024);
-    const request = { headers: new Headers({ 'content-type': 'multipart/form-data; boundary=b', ...extra }), body } as unknown as Request;
+    const request = { headers: new Headers({ ...OWN, 'content-type': 'multipart/form-data; boundary=b', ...extra }), body } as unknown as Request;
     const res = await POST(request);
     expect(res.status).toBe(413);
     expect(await res.json()).toEqual({ error: 'Files up to 50 MB.' });

@@ -20,6 +20,12 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Security notes
+
+- **Writes come only from this site's own pages.** Every non-GET `/api/*` request passes `isSameOriginWrite` (`src/lib/same-origin.ts`): the proxy runs it for all Route Handlers except the upload route `/api/files`, which runs it itself (the proxy copies a request body and cuts it at 10 MB, under the 50 MB upload limit). `Sec-Fetch-Site` must be `same-origin` when sent, `Origin` must match the host when sent, and the body must be JSON or none.
+- **Uploads need a browser that sends `Sec-Fetch-Site`** (Chrome/Edge 76+, Firefox 90+, Safari 16.4+). Multipart is accepted only with `Sec-Fetch-Site: same-origin` and a matching `Origin`; older browsers fail closed with "Forbidden.".
+- No page may be framed (`X-Frame-Options: DENY`, `frame-ancestors 'none'`), except `/api/files/*`, which the PDF viewer frames from our own pages (`SAMEORIGIN`).
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

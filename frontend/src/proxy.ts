@@ -52,6 +52,8 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Pages (not assets), and every Route Handler, dotted paths included, for the write check.
-  matcher: ['/((?!_next|api|favicon\\.ico|.*\\..*).*)', '/api/:path*'],
+  // Pages (not assets), and every Route Handler, dotted paths included, for the write check — except the
+  // upload route `/api/files` itself: the proxy would copy its body and cut it at 10 MB, so that route
+  // runs the same check on its own (`/api/files/<id>` is still covered).
+  matcher: ['/((?!_next|api|favicon\\.ico|.*\\..*).*)', '/api/((?!files$).*)'],
 };

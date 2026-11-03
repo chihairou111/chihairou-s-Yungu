@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { encodeSession } from '@/lib/session-cookie';
 import { NextRequest } from 'next/server';
+import { unstable_doesMiddlewareMatch } from 'next/experimental/testing/server';
 import { config, proxy, routeFor } from './proxy';
 
 const valid = encodeSession('Bruce Zheng', 'tok');
@@ -76,7 +77,13 @@ describe('proxy on Route Handlers', () => {
     expect(ok.headers.get('x-middleware-next')).toBe('1');
   });
 
-  it('covers every Route Handler, dotted paths included', () => {
-    expect(config.matcher).toContain('/api/:path*');
+  it('covers every Route Handler, dotted paths included, but the upload route (which checks for itself)', () => {
+    const matches = (url: string) => unstable_doesMiddlewareMatch({ config, url });
+    for (const url of ['/api/agent/tokens', '/api/agent/tokens/a.b', '/api/notifications/x.y/read', '/api/files/abc', '/api/session', '/api/oauth/approve']) {
+      expect(matches(url), url).toBe(true);
+    }
+    expect(matches('/api/files')).toBe(false);
+    expect(matches('/api/files?x=1')).toBe(false);
+    expect(matches('/assignments')).toBe(true);
   });
 });

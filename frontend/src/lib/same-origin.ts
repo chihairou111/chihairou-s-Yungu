@@ -31,7 +31,7 @@ function originMatches(origin: string, request: Request): boolean {
 
 /** True when the request may go ahead: a read, or a write from this site's own pages. */
 export function isSameOriginWrite(request: Request, { jsonOnly = false }: WriteCheck = {}): boolean {
-  if (SAFE_METHODS.has(request.method.toUpperCase())) return true;
+  if (SAFE_METHODS.has((request.method ?? 'POST').toUpperCase())) return true;
   const site = request.headers.get('sec-fetch-site');
   if (site !== null && site !== 'same-origin') return false;
   const origin = request.headers.get('origin');

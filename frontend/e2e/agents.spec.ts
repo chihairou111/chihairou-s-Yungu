@@ -191,3 +191,29 @@ test('no page can be framed; writes come only from this site', async ({ page }) 
   const list = await (await page.request.get('/api/agent/tokens')).json();
   expect(list.personal).toEqual([]);
 });
+
+test('a 12 MB upload arrives whole; a forged multipart post to /api/files is refused', async ({ page }) => {
+  await page.goto('/login');
+  await signInHere(page);
+  await expect(page).toHaveURL(/\/assignments$/);
+  // The dashboard's own way: a same-origin fetch with FormData (Sec-Fetch-Site and Origin from the browser).
+  const result = await page.evaluate(async () => {
+    const bytes = new Uint8Array(12 * 1024 * 1024);
+    for (let i = 0; i < bytes.length; i += 1) bytes[i] = (i * 31 + (i >> 12)) & 0xff;
+    const digest = async (b: ArrayBuffer | Uint8Array<ArrayBuffer>) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', b))).join(',');
+    const form = new FormData();
+    form.set('file', new File([bytes], 'big.bin', { type: 'application/octet-stream' }));
+    const res = await fetch('/api/files', { method: 'POST', body: form });
+    const ref = await res.json();
+    const back = await (await fetch(`/api/files/${ref.id}`)).arrayBuffer();
+    return { status: res.status, size: ref.size, same: (await digest(bytes)) === (await digest(back)), backSize: back.byteLength };
+  });
+  expect(result).toEqual({ status: 200, size: 12 * 1024 * 1024, same: true, backSize: 12 * 1024 * 1024 });
+
+  const file = { name: 'x.txt', mimeType: 'text/plain', buffer: Buffer.from('x') };
+  const foreign = await page.request.post('/api/files', { multipart: { file }, headers: { origin: 'https://evil.example' } });
+  expect(foreign.status()).toBe(403);
+  // A client that doesn't vouch for the request (no Sec-Fetch-Site) can't upload either.
+  const unvouched = await page.request.post('/api/files', { multipart: { file } });
+  expect(unvouched.status()).toBe(403);
+});
