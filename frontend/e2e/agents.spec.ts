@@ -166,3 +166,28 @@ test('Agent access fits a phone: full screen, no sideways scroll', async ({ page
   const overflow = await page.locator('.MuiDialog-paper').evaluate((el) => el.scrollWidth - el.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
 });
+
+test('no page can be framed; writes come only from this site', async ({ page }) => {
+  await page.goto('/login');
+  await signInHere(page);
+  await expect(page).toHaveURL(/\/assignments$/);
+  for (const path of ['/login', '/assignments', '/api/todoist']) {
+    const res = await page.request.get(path);
+    expect(res.headers()['x-frame-options'], path).toBe('DENY');
+    expect(res.headers()['content-security-policy'], path).toContain("frame-ancestors 'none'");
+  }
+  // The pop-up's own PDF viewer frames the files route: same origin only.
+  const file = await page.request.get('/api/files/none');
+  expect(file.headers()['x-frame-options']).toBe('SAMEORIGIN');
+
+  // A form-style post (no CORS preflight) with the session cookie is refused before the handler runs.
+  const forged = await page.request.post('/api/agent/tokens', { headers: { 'content-type': 'text/plain' }, data: '{"name":"forged"}' });
+  expect(forged.status()).toBe(403);
+  const crossSite = await page.request.post('/api/agent/tokens', {
+    headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+    data: { name: 'forged' },
+  });
+  expect(crossSite.status()).toBe(403);
+  const list = await (await page.request.get('/api/agent/tokens')).json();
+  expect(list.personal).toEqual([]);
+});

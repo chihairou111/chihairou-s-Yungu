@@ -2,29 +2,10 @@ import { NextResponse } from 'next/server';
 import { requireSession, withServiceErrors } from '@/lib/api-auth';
 import { data } from '@/lib/data';
 import { BAD_AUTHORIZE_REQUEST, authorizeParams, isWebRedirect } from '@/lib/oauth';
+import { isSameOriginWrite } from '@/lib/same-origin';
 
 const NO_STORE = { 'Cache-Control': 'no-store' };
 const CHOOSE = 'Choose Allow or Deny.';
-
-/**
- * Only the consent page itself may answer for the person: a same-origin JSON fetch. A form or a
- * text/plain post from another site (which needs no CORS preflight) or a fetch the browser marks as
- * cross-site is refused, on top of the session cookie being SameSite=Lax.
- */
-function fromConsentPage(request: Request): boolean {
-  const type = request.headers.get('content-type')?.split(';')[0].trim().toLowerCase();
-  if (type !== 'application/json') return false;
-  const site = request.headers.get('sec-fetch-site');
-  if (site !== null && site !== 'same-origin') return false;
-  const origin = request.headers.get('origin');
-  if (origin === null) return true;
-  const host = request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? new URL(request.url).host;
-  try {
-    return new URL(origin).host === host;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Allow or Deny on the consent page (`/oauth/authorize`): the agent's request, field for field as the
@@ -35,7 +16,8 @@ function fromConsentPage(request: Request): boolean {
 export const POST = withServiceErrors(async (request: Request) => {
   const denied = await requireSession();
   if (denied) return denied;
-  if (!fromConsentPage(request)) return NextResponse.json({ error: 'Forbidden.' }, { status: 403 });
+  // The proxy checks every write already; here JSON only, from the consent page itself (never a form).
+  if (!isSameOriginWrite(request, { jsonOnly: true })) return NextResponse.json({ error: 'Forbidden.' }, { status: 403 });
   let body: unknown;
   try {
     body = await request.json();

@@ -5,6 +5,7 @@ import Alert from '@mui/material/Alert';
 import Button from '@mui/material/Button';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
+import { assignLocation } from '@/lib/assign-location';
 
 const NETWORK_ERROR = "Couldn't reach the server. Check your connection and try again.";
 const GENERIC_ERROR = 'Sign-in failed. Try again.';
@@ -34,7 +35,9 @@ export default function LoginForm({ notice, next }: { notice?: string; next?: st
         body: JSON.stringify({ loginId, password }),
       });
       if (res.ok) {
-        router.replace(next ?? '/assignments');
+        // Back to the page that sent us here as a full navigation, so its own headers apply.
+        if (next) assignLocation(next);
+        else router.replace('/assignments');
         return; // stay "Signing in…" until the page changes
       }
       const body: unknown = await res.json().catch(() => null);

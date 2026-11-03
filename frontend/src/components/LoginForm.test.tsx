@@ -5,6 +5,8 @@ import LoginForm from './LoginForm';
 
 const nav = vi.hoisted(() => ({ replace: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: nav.replace }) }));
+const page = vi.hoisted(() => ({ assign: vi.fn() }));
+vi.mock('@/lib/assign-location', () => ({ assignLocation: page.assign }));
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -45,7 +47,9 @@ describe('LoginForm', () => {
     await userEvent.type(screen.getByLabelText('Student ID'), 's123');
     await userEvent.type(screen.getByLabelText('Password'), 'pw');
     await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
-    await vi.waitFor(() => expect(nav.replace).toHaveBeenCalledWith('/oauth/authorize?client_id=ylc_1'));
+    // A full navigation, so the consent page's own headers (no framing) apply.
+    await vi.waitFor(() => expect(page.assign).toHaveBeenCalledWith('/oauth/authorize?client_id=ylc_1'));
+    expect(nav.replace).not.toHaveBeenCalled();
   });
 
   it('explains a network failure', async () => {

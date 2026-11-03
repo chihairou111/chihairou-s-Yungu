@@ -3,7 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 const jar = vi.hoisted(() => ({ notice: undefined as string | undefined }));
-const nav = vi.hoisted(() => ({ replace: vi.fn() }));
+const nav = vi.hoisted(() => ({ replace: vi.fn(), assign: vi.fn() }));
+vi.mock('@/lib/assign-location', () => ({ assignLocation: nav.assign }));
 vi.mock('next/headers', () => ({
   cookies: async () => ({ get: (name: string) => (name === 'yl_signin_notice' && jar.notice ? { name, value: jar.notice } : undefined) }),
 }));
@@ -65,7 +66,7 @@ describe('coming back after signing in', () => {
     jar.notice = undefined;
     render(await LoginPage(page({ next: '/oauth/authorize?client_id=ylc_1&state=s' })));
     await signIn();
-    await vi.waitFor(() => expect(nav.replace).toHaveBeenCalledWith('/oauth/authorize?client_id=ylc_1&state=s'));
+    await vi.waitFor(() => expect(nav.assign).toHaveBeenCalledWith('/oauth/authorize?client_id=ylc_1&state=s'));
     vi.unstubAllGlobals();
   });
 

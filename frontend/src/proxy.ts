@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { SESSION_COOKIE, decodeSession } from '@/lib/session-cookie';
 import { loginPath, safeNext } from '@/lib/next-path';
+import { isSameOriginWrite } from '@/lib/same-origin';
 
 export interface RouteDecision {
   /** A same-origin path (with any query) to send the browser to, or null to go ahead. */
@@ -32,7 +33,14 @@ export function routeFor(pathname: string, cookieValue: string | undefined, sear
   return { redirect: null, clearCookie };
 }
 
+/** Route Handlers: every write must come from this site's own pages (see `isSameOriginWrite`). */
+function guardApi(request: NextRequest): NextResponse {
+  return isSameOriginWrite(request) ? NextResponse.next() : NextResponse.json({ error: 'Forbidden.' }, { status: 403 });
+}
+
 export function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  if (pathname === '/api' || pathname.startsWith('/api/')) return guardApi(request);
   const { redirect, clearCookie } = routeFor(
     request.nextUrl.pathname,
     request.cookies.get(SESSION_COOKIE)?.value,
@@ -44,5 +52,6 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next|api|favicon\\.ico|.*\\..*).*)'],
+  // Pages (not assets), and every Route Handler, dotted paths included, for the write check.
+  matcher: ['/((?!_next|api|favicon\\.ico|.*\\..*).*)', '/api/:path*'],
 };

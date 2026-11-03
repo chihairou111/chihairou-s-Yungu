@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { encodeSession } from '@/lib/session-cookie';
-import { routeFor } from './proxy';
+import { NextRequest } from 'next/server';
+import { config, proxy, routeFor } from './proxy';
 
 const valid = encodeSession('Bruce Zheng', 'tok');
 
@@ -50,5 +51,32 @@ describe('coming back after signing in', () => {
 
   it('keeps the plain redirect for the other pages', () => {
     expect(routeFor('/calendar', undefined, '?x=1')).toEqual({ redirect: '/login', clearCookie: false });
+  });
+});
+
+describe('proxy on Route Handlers', () => {
+  const call = (path: string, init: { method?: string; headers?: Record<string, string>; body?: string }) => proxy(new NextRequest(`http://localhost${path}`, init));
+
+  it('refuses a write from another site before any handler runs, dotted paths included', async () => {
+    for (const path of ['/api/agent/tokens', '/api/notifications/a.b/read', '/api/assignments/1/submit']) {
+      const res = call(path, { method: 'POST', headers: { host: 'localhost', 'content-type': 'text/plain' }, body: '{}' });
+      expect(res.status, path).toBe(403);
+      expect(await res.json()).toEqual({ error: 'Forbidden.' });
+    }
+    expect(call('/api/session', { method: 'DELETE', headers: { host: 'localhost', 'sec-fetch-site': 'cross-site' } }).status).toBe(403);
+  });
+
+  it('lets reads and same-origin writes on to the handler', () => {
+    expect(call('/api/todoist/callback?code=x', { headers: { 'sec-fetch-site': 'cross-site' } }).headers.get('x-middleware-next')).toBe('1');
+    const ok = call('/api/agent/tokens', {
+      method: 'POST',
+      headers: { host: 'localhost', origin: 'http://localhost', 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' },
+      body: '{}',
+    });
+    expect(ok.headers.get('x-middleware-next')).toBe('1');
+  });
+
+  it('covers every Route Handler, dotted paths included', () => {
+    expect(config.matcher).toContain('/api/:path*');
   });
 });
