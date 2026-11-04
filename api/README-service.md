@@ -155,7 +155,9 @@ Code: `service/mcp_server.py` (endpoint, auth check, rate limit, logs), `service
   as an embedded resource (`application/pdf`, base64); password-protected/damaged → metadata, link and a note.
   PNG/JPEG/GIF/WebP: image content, downscaled (Pillow) past 2048 px or 3.5 MB; text files: UTF-8, else
   GB18030; online documents: text from the Quill delta (headings `# `, lists `- `/`1. `). Video, audio, other
-  kinds and anything over 10 MB: metadata + link + note. The extracted text is its own text block (not in
+  kinds and anything over 10 MB: metadata + link + note ("Too large to read here (over 10 MB) — open it on the
+  dashboard."). At most 2 downloads/extractions at once in the whole server (on top of the per-account 4); a
+  call that waits 30 s for one gets "Busy, try again in a moment." The extracted text is its own text block (not in
   `structuredContent`, which holds the metadata).
 - **Which account:** the token's. The owner always (automatic re-login); any other account only while its
   Yungu session is on, else the tool error "Sign in to the dashboard again to keep agent access working." with

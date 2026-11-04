@@ -27,6 +27,7 @@ NO_SUCH_ASSIGNMENT = "No assignment with that id."
 SOMETHING_WRONG = "Something went wrong reading Yungu. Try again."
 NOT_FOUND = "Not found."
 TOO_SLOW = "Yungu took too long to send the file. Try again."
+BUSY = "Busy, try again in a moment."
 NO_STORED_FILE = 422                           # app.NoStoredFile: Yungu keeps no bytes behind the id
 NEARLY_OVERDUE_MS = 24 * 3600 * 1000           # the dashboard's "nearly overdue" (frontend/src/lib/priority.ts)
 DEFAULT_LIMIT, MAX_LIMIT = 20, 100
@@ -421,40 +422,46 @@ def read_attachment(me, args) -> Tuple[str, dict, list]:
         if getattr(e, "status", None) == NO_STORED_FILE:
             return note("Yungu keeps no file behind this id. Open it in the dashboard.")
         raise
-    deadline = mcp_files.deadline_from_now()
     try:
-        data = mcp_files.download(url, deadline)
-    except mcp_files.TooLarge:
-        return note(mcp_files.TOO_LARGE_NOTE)
-    except mcp_files.TooSlow:
-        raise ToolFailure(TOO_SLOW, "timeout") from None
-    except mcp_files.DownloadFailed:
-        raise ToolFailure(UNREACHABLE, "unavailable") from None
+        with mcp_files.read_slot():             # server-wide: at most MAX_CONCURRENT_READS at once
+            deadline = mcp_files.deadline_from_now()
+            try:
+                data = mcp_files.download(url, deadline)
+            except mcp_files.TooLarge:
+                return note(mcp_files.TOO_LARGE_NOTE)
+            except mcp_files.TooSlow:
+                raise ToolFailure(TOO_SLOW, "timeout") from None
+            except mcp_files.DownloadFailed:
+                raise ToolFailure(UNREACHABLE, "unavailable") from None
 
-    try:
-        if kind in ("pdf", "office"):
-            if preview and not mcp_files.looks_like_pdf(data):
-                return note("Yungu has no PDF preview of this file. Open it in the dashboard.")
-            text, pages, truncated = mcp_files.pdf_text(data, deadline)
-            meta["pages"] = pages
-            blocks: list = [with_text(text, truncated)] if text else []
-            blocks.append(PdfBlock(data, meta["link"] + ("?preview=1" if preview else "")))
-            meta["included"] = meta["included"] + ["pdf"]
-            via = "Yungu's PDF preview, " if preview else "PDF, "
-            if not text:
-                meta["note"] = "No text found in this PDF (it may be scanned): the PDF itself is attached."
-                return f"{name} ({via}{_count(pages, 'page')}): no text found; the PDF is attached.", meta, blocks
-            return f"{name} ({via}{_count(pages, 'page')}): its text ({chars()}) and the PDF.", meta, blocks
-        if kind == "image":
-            out, mime, width, height, downscaled = mcp_files.image(data)
-            meta.update(included=["image"], mime=mime, width=width, height=height, downscaled=downscaled)
-            scaled = f", downscaled to at most {mcp_files.MAX_IMAGE_SIDE} px" if downscaled else ""
-            return f"{name}: the image ({width}×{height}{scaled}).", meta, [ImageBlock(out, mime)]
-        text, truncated = mcp_files.plain_text(data)
-        block = with_text(text, truncated)
-        return f"{name}: its text ({chars()}).", meta, [block]
-    except mcp_files.Unreadable as e:
-        return note(str(e))
+            try:
+                if kind in ("pdf", "office"):
+                    if preview and not mcp_files.looks_like_pdf(data):
+                        return note("Yungu has no PDF preview of this file. Open it in the dashboard.")
+                    text, pages, truncated = mcp_files.pdf_text(data, deadline)
+                    meta["pages"] = pages
+                    blocks: list = [with_text(text, truncated)] if text else []
+                    blocks.append(PdfBlock(data, meta["link"] + ("?preview=1" if preview else "")))
+                    meta["included"] = meta["included"] + ["pdf"]
+                    via = "Yungu's PDF preview, " if preview else "PDF, "
+                    if not text:
+                        meta["note"] = "No text found in this PDF (it may be scanned): the PDF itself is attached."
+                        return f"{name} ({via}{_count(pages, 'page')}): no text found; the PDF is attached.", \
+                            meta, blocks
+                    return f"{name} ({via}{_count(pages, 'page')}): its text ({chars()}) and the PDF.", \
+                        meta, blocks
+                if kind == "image":
+                    out, mime, width, height, downscaled = mcp_files.image(data)
+                    meta.update(included=["image"], mime=mime, width=width, height=height, downscaled=downscaled)
+                    scaled = f", downscaled to at most {mcp_files.MAX_IMAGE_SIDE} px" if downscaled else ""
+                    return f"{name}: the image ({width}×{height}{scaled}).", meta, [ImageBlock(out, mime)]
+                text, truncated = mcp_files.plain_text(data)
+                block = with_text(text, truncated)
+                return f"{name}: its text ({chars()}).", meta, [block]
+            except mcp_files.Unreadable as e:
+                return note(str(e))
+    except mcp_files.Busy:
+        raise ToolFailure(BUSY, "busy") from None
 
 
 # --------------------------------------------------------------- the list

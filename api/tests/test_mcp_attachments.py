@@ -438,3 +438,79 @@ def test_yungu_down_and_ended_sessions(api, world, auth, b_auth, oss):
         read(api, 22220001, user_id=OTHER)
     assert e.value.message == SIGN_IN_TO_DASHBOARD and world.peer.logins == ["S207"]
     assert len(oss.calls) == 0
+
+
+# ------------------------------------------------- server-wide read slots
+def test_the_too_large_note_is_the_agreed_sentence(api, auth, world, oss):
+    attach(world, entry(35, "big.pdf", 11 * MB))
+    _, data, _ = read(api, 35)
+    assert data["note"] == "Too large to read here (over 10 MB) — open it on the dashboard."
+    assert mcp_files.MAX_CONCURRENT_READS == 2 and mcp_files.READ_WAIT_SECONDS == 30
+
+
+@pytest.fixture
+def slots(monkeypatch):
+    """Fresh server-wide read slots, with a short wait."""
+    import threading
+    monkeypatch.setattr(mcp_files, "_reads", threading.BoundedSemaphore(mcp_files.MAX_CONCURRENT_READS))
+    monkeypatch.setattr(mcp_files, "READ_WAIT_SECONDS", 0.3)
+    return mcp_files._reads
+
+
+def test_when_every_read_slot_is_taken_a_caller_is_told_busy_after_the_wait(api, auth, world, oss, slots):
+    pdf = make_pdf(["x"])
+    attach(world, entry(36, "a.pdf", len(pdf)))
+    oss.add(responses.GET, OSS, body=pdf)
+    slots.acquire()
+    slots.acquire()                                                   # two reads in progress elsewhere
+    with pytest.raises(ToolFailure) as e:
+        read(api, 36)
+    assert e.value.message == "Busy, try again in a moment." and e.value.status == "busy"
+    assert len(oss.calls) == 0
+    slots.release()
+    _, data, _ = read(api, 36)                                        # a slot is free again
+    assert data["included"] == ["text", "pdf"]
+    slots.release()
+
+
+def test_at_most_two_reads_run_at_once_across_accounts(api, world, auth, b_auth, oss, slots, monkeypatch):
+    import threading
+    monkeypatch.setattr(mcp_files, "READ_WAIT_SECONDS", 10)
+    pdf = make_pdf(["x"])
+    attach(world, entry(37, "a.pdf", len(pdf)))
+    attach(world.peer, entry(37, "a.pdf", len(pdf)))
+    lock, state, gate = threading.Lock(), {"now": 0, "max": 0}, threading.Event()
+
+    class Held:
+        status_code, headers = 200, {}
+
+        def __enter__(self):
+            with lock:
+                state["now"] += 1
+                state["max"] = max(state["max"], state["now"])
+            return self
+
+        def __exit__(self, *exc):
+            with lock:
+                state["now"] -= 1
+
+        def iter_content(self, size):
+            gate.wait(5)
+            yield pdf
+
+    monkeypatch.setattr(mcp_files, "_get", lambda url: Held())
+    results, threads = [], []
+    for user in (ME, ME, OTHER, OTHER, ME):
+        t = threading.Thread(target=lambda u=user: results.append(read(api, 37, user_id=u)[1]["included"]))
+        threads.append(t)
+        t.start()
+    for _ in range(100):
+        if state["now"] == 2:
+            break
+        threading.Event().wait(0.02)
+    threading.Event().wait(0.2)
+    assert state["now"] == 2                                          # the other three wait for a slot
+    gate.set()
+    for t in threads:
+        t.join(10)
+    assert state["max"] == 2 and results == [["text", "pdf"]] * 5

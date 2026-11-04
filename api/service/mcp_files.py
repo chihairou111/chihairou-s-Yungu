@@ -9,13 +9,15 @@ agent can read of it.
   * Yungu online documents: the text of their Quill delta (no download).
 
 Downloads stream into memory, never more than MAX_BYTES (no disk), and stop at DOWNLOAD_TIMEOUT_SECONDS for
-the whole call. The signed URL never leaves `download` and nothing here logs: failures are plain exceptions
-without the URL in their text.
+the whole call; at most MAX_CONCURRENT_READS run at once in the whole server (read_slot). The signed URL
+never leaves `download` and nothing here logs: failures are plain exceptions without the URL in their text.
 """
 import io
 import json
 import logging
+import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import List, Tuple
 
@@ -32,7 +34,10 @@ MAX_TEXT_CHARS = 200_000
 MAX_IMAGE_SIDE = 2048
 MAX_IMAGE_BYTES = 3_500_000              # as sent: base64 of this is just under 5 MB
 MAX_IMAGE_PIXELS = 50_000_000            # refused before decoding (decompression bombs)
+MAX_CONCURRENT_READS = 2                 # downloads + extractions at once, whatever the account (memory)
+READ_WAIT_SECONDS = 30                   # how long a call waits for one before it is told Busy
 clock = time.monotonic
+_reads = threading.BoundedSemaphore(MAX_CONCURRENT_READS)
 
 IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 IMAGE_FORMATS = {"PNG": "image/png", "JPEG": "image/jpeg", "GIF": "image/gif", "WEBP": "image/webp"}
@@ -45,7 +50,7 @@ TEXT_EXTENSIONS = {
 Image.MAX_IMAGE_PIXELS = None            # PIL's own check only warns below 2x; ours (MAX_IMAGE_PIXELS) refuses
 logging.getLogger("pypdf").setLevel(logging.CRITICAL)        # its warnings about odd files are not ours to log
 
-TOO_LARGE_NOTE = "This file is over 10 MB, too large to read here. Open it in the dashboard."
+TOO_LARGE_NOTE = "Too large to read here (over 10 MB) — open it on the dashboard."
 
 
 @dataclass
@@ -75,6 +80,10 @@ class TooSlow(Exception):
 
 class DownloadFailed(Exception):
     pass
+
+
+class Busy(Exception):
+    """Every read slot stayed taken for READ_WAIT_SECONDS."""
 
 
 class Unreadable(Exception):
@@ -108,6 +117,20 @@ def readable(ref: dict) -> bool:
 
 
 # --------------------------------------------------------------- download
+@contextmanager
+def read_slot():
+    """One of the MAX_CONCURRENT_READS server-wide slots for a download and what is made of it: a 10 MB
+    file costs over 100 MB while it is read (bytes, pypdf, base64, JSON). Busy after READ_WAIT_SECONDS.
+    Runs in the tool's worker thread, which waits; the per-account cap (mcp_server) bounds how many do."""
+    slots = _reads
+    if not slots.acquire(timeout=READ_WAIT_SECONDS):
+        raise Busy()
+    try:
+        yield
+    finally:
+        slots.release()
+
+
 def _get(url: str):
     return requests.get(url, stream=True, timeout=SOCKET_TIMEOUT, allow_redirects=True,
                         headers={"Accept-Encoding": "identity"})        # what we count is what arrives
