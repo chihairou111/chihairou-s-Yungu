@@ -55,8 +55,17 @@ describe('mock fixtures', () => {
       expect(chinaDay(items.get(105)!.dueAt)).toBe(chinaDay(now) + 4);
       const groups = groupTodo(buildTodo(now), now);
       expect(groups.overdue.map((a) => a.id)).toEqual([101]);
-      expect(groups.nearly.map((a) => a.id)).toEqual([102]);
+      expect(groups.nearly.map((a) => a.id)).toEqual([106, 102]);
       expect(groups.upcoming.map((a) => a.id).sort()).toEqual([103, 104, 105]);
+    }
+  });
+
+  it('has one item returned for revision, its original deadline days past, filed under nearly', () => {
+    for (const now of NOWS) {
+      const returned = buildTodo(now).filter((a) => a.revision);
+      expect(returned.map((a) => a.id)).toEqual([106]);
+      expect(chinaDay(returned[0].dueAt)).toBe(chinaDay(now) - 8);
+      expect(priorityOf(returned[0], now)).toBe('nearly');
     }
   });
 

@@ -1,3 +1,4 @@
+import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import Chip from '@mui/material/Chip';
 import Stack from '@mui/material/Stack';
@@ -6,6 +7,7 @@ import { dueLabel } from '@/lib/due';
 import { relativeDue } from '@/lib/priority';
 import type { Assignment, Priority } from '@/lib/types';
 import CardOpener, { openerHostSx } from './CardOpener';
+import { VISUALLY_HIDDEN } from './visually-hidden';
 
 /** Palette used for each priority wherever it is shown (chip, column header). */
 export const PRIORITY_TONE: Record<Priority, 'error' | 'warning' | 'primary'> = {
@@ -22,7 +24,11 @@ interface AssignmentCardProps {
   headingLevel?: 3 | 4;
 }
 
-/** One to-do assignment, opening its detail when clicked: course, title (two lines at most), due day and time (China time) and a relative-time chip. */
+/**
+ * One to-do assignment, opening its detail when clicked: course, title (two lines at most), due day and
+ * time (China time) and a relative-time chip; work returned for revision says "Returned" there instead,
+ * since its deadline is the original one.
+ */
 export default function AssignmentCard({ assignment, now, variant, headingLevel = 3 }: AssignmentCardProps) {
   const tone = PRIORITY_TONE[variant];
 
@@ -53,7 +59,18 @@ export default function AssignmentCard({ assignment, now, variant, headingLevel 
         </Typography>
         <Chip
           size="small"
-          label={relativeDue(assignment.dueAt, now)}
+          label={
+            assignment.revision ? (
+              <>
+                Returned
+                <Box component="span" sx={VISUALLY_HIDDEN}>
+                  {' '}for revision
+                </Box>
+              </>
+            ) : (
+              relativeDue(assignment.dueAt, now)
+            )
+          }
           sx={{ fontWeight: 600, bgcolor: `${tone}.light`, color: `${tone}.dark` }}
         />
       </Stack>

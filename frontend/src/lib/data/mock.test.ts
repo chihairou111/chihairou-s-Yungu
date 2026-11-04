@@ -6,7 +6,7 @@ import { chinaMonth } from '../behaviour';
 import { AssignmentNotFound, CommentNotFound, ServiceError } from './errors';
 import { BLANK_CREDENTIALS_ERROR, data } from './index';
 import { MOCK_DISPLAY_NAME, MOCK_SYNC_MS, mockData } from './mock';
-import { resetMockStore } from './store';
+import { resetMockStore, storeFile } from './store';
 
 const DAY = 24 * 3600_000;
 
@@ -22,6 +22,16 @@ describe('mock data', () => {
     expect(groups.overdue.length).toBeGreaterThanOrEqual(1);
     expect(groups.nearly.length).toBeGreaterThanOrEqual(1);
     expect(groups.upcoming.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('the returned-for-revision item has a detail, and handing it in again clears revision', async () => {
+    expect(await data.getAssignmentDetail(106)).toMatchObject({ revision: true, submitted: false, status: 'To submit' });
+    const file = storeFile('v2.txt', 'text/plain', new Uint8Array([1]), Date.now());
+    await mockData.submit(106, [file.id]);
+    expect(await data.getAssignmentDetail(106)).toMatchObject({ revision: false, submitted: true });
+    expect((await data.getSubmitted()).find((a) => a.id === 106)).toMatchObject({ revision: false });
+    expect((await data.getTodo()).some((a) => a.id === 106)).toBe(false);
+    resetMockStore();
   });
 
   it('one submitted fixture carries a teacher grade; the rest have none', async () => {

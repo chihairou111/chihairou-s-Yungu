@@ -193,6 +193,19 @@ export function buildTodo(now: number): Assignment[] {
       estimatedMinutes: 20,
       schoolGroup: null,
     },
+    {
+      // Returned by the teacher: Yungu keeps the original deadline, long past, but it is not late.
+      id: 106,
+      title: 'Lab Report: Pendulum Period',
+      course: 'H Physics I',
+      courseId: COURSES.physics.id,
+      dueAt: at22(now, -8),
+      assignedAt: now - 15 * DAY,
+      status: 'To submit',
+      estimatedMinutes: 30,
+      schoolGroup: null,
+      revision: true,
+    },
   ];
 }
 
@@ -360,6 +373,19 @@ export function buildDetailSeed(id: number, now: number): DetailSeed | undefined
         myFiles: [],
         needsFiles: false,
         comments: [],
+      };
+    case 106:
+      return {
+        teacher: 'Wei Zhang',
+        instructionsHtml:
+          '<h2>Lab Report: Pendulum Period</h2>' +
+          '<p>Write up the pendulum lab: method, a table of periods for each length, a graph of T² against L and your value of <em>g</em>.</p>',
+        attachments: [sampleFile('fx-106-1', 'Pendulum lab sheet.pdf', 'pdf', now - 15 * DAY)],
+        myFiles: [],
+        needsFiles: true,
+        comments: [
+          comment('c-106-1', 'Wei Zhang', false, now - 2 * DAY, 'Please redo the graph with error bars and hand it in again.'),
+        ],
       };
     case 201:
       return submittedSeed('Priya Raman', '第二单元复习卷', 'Review the attached practice paper and answer every question.', 'Unit 2 review.pdf', now);

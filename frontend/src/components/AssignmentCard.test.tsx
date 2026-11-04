@@ -21,6 +21,21 @@ describe('AssignmentCard', () => {
     expect(screen.getByText('in 5 h')).toBeInTheDocument();
   });
 
+  it('work returned for revision shows a "Returned" chip, never how late its old deadline is', () => {
+    const a = todo('Revise your essay', -10 * DAY, { revision: true });
+    render(<AssignmentCard assignment={a} now={NOW} variant="nearly" />);
+    const chip = screen.getByText('Returned').closest('.MuiChip-root')!;
+    expect(chip).toHaveTextContent('Returned for revision');               // the rest for screen readers
+    expect(screen.queryByText(/late/)).not.toBeInTheDocument();
+    expect(screen.getByText('Due Thu, Oct 8')).toBeInTheDocument();
+  });
+
+  it('a returned card whose deadline is still ahead also reads "Returned"', () => {
+    render(<AssignmentCard assignment={todo('Fix the lab', 3 * DAY, { revision: true })} now={NOW} variant="nearly" />);
+    expect(screen.getByText('Returned')).toBeInTheDocument();
+    expect(screen.queryByText('in 3 days')).not.toBeInTheDocument();
+  });
+
   it('renders a long CJK title in full and offers it as a tooltip when clamped', () => {
     const title = '课后任务'.repeat(20);
     expect(title).toHaveLength(80);

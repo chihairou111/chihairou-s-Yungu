@@ -299,6 +299,19 @@ describe('YourWork', () => {
     expect(await screen.findByText('Submitted late')).toBeInTheDocument();
   });
 
+  it('work returned for revision reads "Returned for revision" until handed in again, then "Submitted"', async () => {
+    const d = detail({ myFiles: [ref('a', 'one.txt')], dueAt: NOW - 10 * HOUR, revision: true });
+    api.submit.mockResolvedValue({ submittedAt: NOW });
+    const user = userEvent.setup();
+    setup(d);
+    expect(screen.getByText('Returned for revision')).toBeInTheDocument();
+    expect(screen.queryByText('Not submitted')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    expect(await screen.findByRole('button', { name: 'Update' })).toBeInTheDocument();
+    expect(screen.getByText('Submitted')).toBeInTheDocument();                // past the old deadline, not late
+    expect(screen.queryByText('Submitted late')).not.toBeInTheDocument();
+  });
+
   it('already submitted work with nothing changed: Update is unavailable and says why', async () => {
     const user = userEvent.setup();
     setup(detail({ myFiles: [ref('a', 'one.txt')], submittedFileIds: ['a'], submitted: true, submittedAt: NOW }));

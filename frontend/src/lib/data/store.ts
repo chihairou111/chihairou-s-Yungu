@@ -112,7 +112,7 @@ function stateFor(id: number, now: number): AssignmentState | undefined {
 function withSubmission(a: Assignment): Assignment {
   const submittedAt = store().assignments.get(a.id)?.submittedAt;
   if (submittedAt === undefined) return a;
-  return { ...a, status: 'Submitted', submittedAt, schoolGroup: null };
+  return { ...a, status: 'Submitted', submittedAt, schoolGroup: null, revision: false };
 }
 
 export function listTodo(now: number): Assignment[] {

@@ -40,6 +40,24 @@ describe('priorityOf', () => {
   });
 });
 
+describe('priorityOf: work returned for revision', () => {
+  it('is nearly overdue, not overdue, though its original deadline is long past', () => {
+    expect(priorityOf(make({ revision: true, dueAt: now - 10 * D }), now)).toBe('nearly');
+  });
+  it('is nearly overdue whatever the deadline or school group says', () => {
+    expect(priorityOf(make({ revision: true, dueAt: now + 5 * D }), now)).toBe('nearly');
+    expect(priorityOf(make({ revision: true, schoolGroup: 'Delayed', dueAt: now - D }), now)).toBe('nearly');
+  });
+  it('an explicit revision: false keeps the usual rules', () => {
+    expect(priorityOf(make({ revision: false, dueAt: now - D }), now)).toBe('overdue');
+  });
+  it('groupTodo files it under nearly', () => {
+    const g = groupTodo([make({ id: 7, revision: true, dueAt: now - 10 * D })], now);
+    expect(g.overdue).toEqual([]);
+    expect(g.nearly.map((x) => x.id)).toEqual([7]);
+  });
+});
+
 describe('groupTodo', () => {
   it('excludes Submitted items', () => {
     const g = groupTodo([make({ status: 'Submitted', dueAt: now - D })], now);

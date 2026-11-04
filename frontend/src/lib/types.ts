@@ -12,6 +12,11 @@ export interface Assignment {
   status: AssignmentStatus;
   estimatedMinutes: number | null;
   schoolGroup: SchoolGroup;
+  /**
+   * The teacher sent the work back to edit. Yungu keeps the original deadline on it (often long past)
+   * but does not count it late, so neither does the dashboard: never overdue, always nearly overdue.
+   */
+  revision?: boolean;
   submittedAt?: number;
 }
 

@@ -75,9 +75,19 @@ def relative(due: int, now: int) -> Optional[str]:
     return f"{text} late" if diff < 0 else f"in {text}"
 
 
+REVISION = "returned for revision"
+
+
+def due_relative(a: dict, now: int) -> Optional[str]:
+    """relative(), except for work returned for revision: its deadline is the original one, never "late"."""
+    return REVISION if a.get("revision") else relative(a["dueAt"], now)
+
+
 def priority(a: dict, now: int) -> str:
-    """As the dashboard's priorityOf: overdue (past due, or Yungu's Delayed), nearly overdue (due within
-    24 h), upcoming."""
+    """As the dashboard's priorityOf: work returned for revision is nearly overdue whatever its (original)
+    deadline; else overdue (past due, or Yungu's Delayed), nearly overdue (due within 24 h), upcoming."""
+    if a.get("revision"):
+        return "nearly overdue"
     if a["dueAt"] < now or a.get("schoolGroup") == "Delayed":
         return "overdue"
     if a["dueAt"] - now <= NEARLY_OVERDUE_MS:
@@ -221,8 +231,9 @@ def list_todo(me, args) -> Tuple[str, dict]:
     todo = [a for a in me.todo() if a.get("status") != "Submitted"]
     todo.sort(key=lambda a: (order.index(priority(a, now)), a["dueAt"]))      # as the dashboard groups them
     rows = [{"id": a["id"], "title": a["title"], "course": a["course"], "due": iso(a["dueAt"]),
-             "dueRelative": relative(a["dueAt"], now), "priority": priority(a, now),
-             "estimatedMinutes": a.get("estimatedMinutes"), "link": assignment_link(a["id"])} for a in todo]
+             "dueRelative": due_relative(a, now), "priority": priority(a, now),
+             "estimatedMinutes": a.get("estimatedMinutes"), "link": assignment_link(a["id"]),
+             **({"revision": True} if a.get("revision") else {})} for a in todo]
     if not rows:
         return "Nothing to do: every assignment is handed in.", {"count": 0, "assignments": []}
     parts = [f"{n} {p}" for p in order if (n := sum(r["priority"] == p for r in rows))]
@@ -266,8 +277,9 @@ def get_assignment(me, args) -> Tuple[str, dict]:
     submitted_at = d.get("submittedAt")
     data = {
         "id": d["id"], "title": d["title"], "course": d["course"], "teacher": d.get("teacher") or None,
-        "due": iso(d["dueAt"]), "dueRelative": None if d["submitted"] else relative(d["dueAt"], now),
+        "due": iso(d["dueAt"]), "dueRelative": None if d["submitted"] else due_relative(d, now),
         "status": "submitted" if d["submitted"] else "to submit",
+        "revision": bool(d.get("revision")),
         "submittedAt": iso(submitted_at),
         "late": isinstance(submitted_at, int) and submitted_at > d["dueAt"],
         "estimatedMinutes": d.get("estimatedMinutes"),
@@ -281,7 +293,8 @@ def get_assignment(me, args) -> Tuple[str, dict]:
                      for c in d.get("comments") or []],
         "link": assignment_link(d["id"]),
     }
-    state = "handed in" if d["submitted"] else (f"due {data['dueRelative']}" if data["dueRelative"] else "no deadline")
+    state = ("handed in" if d["submitted"] else REVISION if data["revision"]
+             else f"due {data['dueRelative']}" if data["dueRelative"] else "no deadline")
     graded = f", feedback: {data['feedback']['score']}" if data["feedback"] and data["feedback"]["score"] else (
         ", has feedback" if data["feedback"] else "")
     return f"{d['title']} ({d['course']}): {state}{graded}.", data
@@ -471,7 +484,8 @@ TOOLS: Dict[str, dict] = {
         "fn": list_todo, "title": "To-do assignments",
         "description": ("The student's assignments not yet handed in, most urgent first: id, title, course, due "
                         "(China time, ISO 8601) and how far off, priority (overdue / nearly overdue = due within "
-                        "24 h / upcoming) and estimated minutes."),
+                        "24 h / upcoming) and estimated minutes. Work the teacher returned for revision has "
+                        "revision: true and is nearly overdue, never overdue (its due date is the original one)."),
         "schema": _NO_ARGS},
     "list_submitted": {
         "fn": list_submitted, "title": "Handed-in assignments",

@@ -10,6 +10,9 @@ Field decisions (chosen from recorded fixtures, tests/fixtures/):
   * Assignment.status: 'Submitted' when doTaskStatus is 'Submitted' (doTaskStatusId 4), else 'To submit'.
   * Assignment.schoolGroup: only the three To-do group names survive; the Submitted/Archived
     group is literally "list" and maps to null.
+  * Assignment.revision: the teacher sent the work back to edit (live 2026-11-04, 94616): Yungu lists it in
+    To-do as doTaskStatus "To edit" / doTaskStatusId 3 under the group "Due update", with ifTimeout false and
+    the ORIGINAL deadline, which may be long past. Yungu does not count it late, so neither does the dashboard.
   * AssignmentDetail.submitted: achievementStatus == 4 (the mixed detail's doTaskStatusId only if that is absent).
   * No deadline (`deadlineTimeMillis` / `endTime` null; the dashboard's dueAt is always a number): a
     Submitted item is due at its hand-in time (never late, filed under the week it was handed in); a
@@ -36,6 +39,7 @@ SCHOOL_GROUPS = ("Due today", "Due recently", "Delayed")
 PALETTE = ["Tomato", "Flamingo", "Tangerine", "Banana", "Sage", "Basil", "Peacock", "Blueberry",
            "Lavender", "Grape", "Graphite"]
 ACHIEVEMENT_SUBMITTED = 4
+TO_EDIT_STATUS_ID, TO_EDIT_STATUS, REVISION_GROUP = 3, "To edit", "Due update"   # returned for revision
 ONLINE_DOCUMENT_TYPE = "onlineDocument"     # a Yungu online document: its text lives in Yungu, no stored file
 
 _IMAGE = {"png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic"}
@@ -66,6 +70,12 @@ def _status(submitted: bool) -> str:
     return "Submitted" if submitted else "To submit"
 
 
+def is_revision(raw: dict, group: Optional[str]) -> bool:
+    """A To-do row the teacher returned for revision (see Assignment.revision above)."""
+    return (raw.get("doTaskStatusId") == TO_EDIT_STATUS_ID or raw.get("doTaskStatus") == TO_EDIT_STATUS
+            or group == REVISION_GROUP)
+
+
 def assignment(raw: dict, group: Optional[str], now_ms: int) -> dict:
     """One getAllTasks task item -> Assignment. `group` is the item's groupName."""
     submitted = raw.get("doTaskStatus") == "Submitted" or raw.get("doTaskStatusId") == ACHIEVEMENT_SUBMITTED
@@ -86,6 +96,7 @@ def assignment(raw: dict, group: Optional[str], now_ms: int) -> dict:
         "status": _status(submitted),
         "estimatedMinutes": minutes if minutes and minutes > 0 else None,
         "schoolGroup": group if group in SCHOOL_GROUPS else None,
+        "revision": not submitted and is_revision(raw, group),
     }
     if submitted:
         at = handed_in
@@ -306,8 +317,8 @@ def detail(mixed: dict, achievement: dict, comments: List[dict], me: int,
 
     `submitted_ids`: the kept hand-in list (the last hand-in the service saw), or None when unknown;
     Yungu's own list wins whenever no draft is open (see handed_in_ids). `listed`: the mapped list
-    Assignment for the same task, if the caller has it, which supplies schoolGroup and submittedAt
-    (the detail endpoints carry neither). `instructionsHtml` is raw; Next sanitises it."""
+    Assignment for the same task, if the caller has it, which supplies schoolGroup, revision and submittedAt
+    (the detail endpoints carry none of them). `instructionsHtml` is raw; Next sanitises it."""
     submitted = is_submitted(mixed, achievement)
     my_files = [file_ref(f) for f in achievement.get("fileModelList") or []]
     handed_in = handed_in_ids(mixed, achievement, submitted_ids)
@@ -323,6 +334,7 @@ def detail(mixed: dict, achievement: dict, comments: List[dict], me: int,
         "status": _status(submitted),
         "estimatedMinutes": minutes if minutes and minutes > 0 else None,
         "schoolGroup": (listed or {}).get("schoolGroup"),
+        "revision": not submitted and (listed or {}).get("revision") is True,
         "teacher": ", ".join(t["userName"] for t in mixed.get("mainTeachers") or [] if t.get("userName")),
         "instructionsHtml": mixed.get("taskContent") or mixed.get("taskDescription") or "",
         # type 'link' entries are embedded players (an <iframe> in `url`), not files /api/files can serve.

@@ -27,10 +27,11 @@ interface DetailHeaderProps {
 
 /**
  * Course · teacher, the title, then the facts in one wrapping row: due (error tone while the work is
- * still to hand in and is late or due today), assigned date, estimated time.
+ * still to hand in and is late or due today), assigned date, estimated time. Work returned for revision
+ * keeps its original deadline, which is never late.
  */
 export default function DetailHeader({ detail, now, titleId }: DetailHeaderProps) {
-  const late = detail.dueAt < now;
+  const late = !detail.revision && detail.dueAt < now;
   const urgent = !detail.submitted && (late || chinaDayNumber(detail.dueAt) === chinaDayNumber(now));
   const due = !detail.submitted && late ? `${dueLabel(detail.dueAt, now)} · ${relativeDue(detail.dueAt, now)}` : dueLabel(detail.dueAt, now);
 

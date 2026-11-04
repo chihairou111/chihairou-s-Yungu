@@ -24,6 +24,8 @@ export interface Work {
   files: FileRef[];
   uploads: PendingUpload[];
   status: WorkStatus;
+  /** Not submitted because the teacher returned it for revision. */
+  returned: boolean;
   /** When the work was last handed in (undefined before the first submit). */
   submittedAt: number | undefined;
   /** After a submit: the draft differs from what was handed in, so Update has something to hand in. */
@@ -103,6 +105,9 @@ export function useWork(detail: AssignmentDetail): Work {
   const [source, setSource] = useState(detail);
   const [files, setFiles] = useState(detail.myFiles);
   const [handedIn, setHandedIn] = useState<number | undefined>(undefined);
+  // A hand-in of work returned for revision: past its original deadline, but not late (Yungu does not count it).
+  const [revisedHandIn, setRevisedHandIn] = useState(false);
+  const returnedRef = useRef(false);
   const [handedInIds, setHandedInIds] = useState(detail.submittedFileIds);
   if (source !== detail) {
     setSource(detail);
@@ -111,7 +116,10 @@ export function useWork(detail: AssignmentDetail): Work {
     const idle = saving === 0 && uploads.length === 0 && !submitting;
     if (idle) setFiles(detail.myFiles);
     if (idle || source.id !== detail.id) setHandedInIds(detail.submittedFileIds);
-    if (source.id !== detail.id) setHandedIn(undefined);
+    if (source.id !== detail.id) {
+      setHandedIn(undefined);
+      setRevisedHandIn(false);
+    }
   }
 
   // The list as the actions last left it: parallel uploads each append to the latest, not to a stale render.
@@ -241,6 +249,7 @@ export function useWork(detail: AssignmentDetail): Work {
       await saves.current;
       const { submittedAt } = await submitWork(id, ids);
       setHandedIn(submittedAt);
+      setRevisedHandIn(returnedRef.current);
       setHandedInIds(ids);
       router.refresh();
       // The status already reads "Submitted"; a failed refetch only leaves the older detail in place
@@ -260,18 +269,21 @@ export function useWork(detail: AssignmentDetail): Work {
   const submittedAt =
     fromDetail === undefined ? handedIn : handedIn === undefined ? fromDetail : Math.max(fromDetail, handedIn);
   const status: WorkStatus =
-    submittedAt === undefined ? 'not-submitted' : submittedAt > detail.dueAt ? 'late' : 'submitted';
+    submittedAt === undefined ? 'not-submitted' : submittedAt > detail.dueAt && !revisedHandIn ? 'late' : 'submitted';
+  const returned = status === 'not-submitted' && detail.revision === true;
 
   const changed = status !== 'not-submitted' && !sameIds(files, handedInIds);
   const canMarkSubmitted = status === 'not-submitted' && !detail.needsFiles && files.length === 0 && uploads.length === 0;
   useLayoutEffect(() => {
     markable.current = canMarkSubmitted;
-  }, [canMarkSubmitted]);
+    returnedRef.current = returned;
+  }, [canMarkSubmitted, returned]);
 
   return {
     files,
     uploads,
     status,
+    returned,
     submittedAt: submittedAt || undefined,
     changed,
     submittedFileIds: handedInIds,

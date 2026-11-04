@@ -64,6 +64,36 @@ def test_list_todo_orders_by_priority_then_due(api, auth, world, clock):
     assert summary == "5 assignments to do: 2 overdue, 1 nearly overdue, 2 upcoming."
 
 
+def test_list_todo_work_returned_for_revision_is_nearly_overdue_never_overdue(api, auth, world, clock):
+    base = world.lists[TODO][0]
+    returned = {"doTaskStatus": "To edit", "doTaskStatusId": 3, "ifTimeout": False, "group": "Due update"}
+    world.lists[TODO] = [
+        {**base, "taskPublishId": 1, "title": "returned, old deadline", **returned,
+         "deadlineTimeMillis": int(NOW * 1000) - 10 * 86400_000},
+        {**base, "taskPublishId": 2, "title": "returned, deadline ahead", **returned,
+         "deadlineTimeMillis": int(NOW * 1000) + 3 * 86400_000},
+        {**base, "taskPublishId": 3, "title": "late", "deadlineTimeMillis": int(NOW * 1000) - 60_000},
+    ]
+    summary, data = run(api, "list_todo")
+    rows = data["assignments"]
+    assert [r["title"] for r in rows] == ["late", "returned, old deadline", "returned, deadline ahead"]
+    assert [r["priority"] for r in rows] == ["overdue", "nearly overdue", "nearly overdue"]
+    assert [r.get("revision") for r in rows] == [None, True, True]
+    assert rows[1]["dueRelative"] == "returned for revision" and "late" not in rows[1]["dueRelative"]
+    assert rows[2]["dueRelative"] == "returned for revision"
+    assert summary == "3 assignments to do: 1 overdue, 2 nearly overdue."
+
+
+def test_get_assignment_returned_for_revision_is_not_late(api, auth, world):
+    base = world.lists[TODO][0]
+    world.lists[TODO] = [{**base, "doTaskStatus": "To edit", "doTaskStatusId": 3, "ifTimeout": False,
+                          "group": "Due update"}]
+    summary, d = run(api, "get_assignment", {"id": base["taskPublishId"]})
+    assert d["revision"] is True and d["status"] == "to submit" and d["late"] is False
+    assert d["dueRelative"] == "returned for revision"
+    assert "late" not in summary and "returned for revision" in summary
+
+
 def test_list_submitted_newest_first_with_course_and_limit(api, auth, world):
     summary, data = run(api, "list_submitted")
     rows = data["assignments"]

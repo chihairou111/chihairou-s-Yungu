@@ -14,7 +14,7 @@ NOW = 1792800000000
 ME = 106
 
 ASSIGNMENT_KEYS = {"id", "title", "course", "courseId", "dueAt", "assignedAt", "status", "estimatedMinutes",
-                   "schoolGroup"}
+                   "schoolGroup", "revision"}
 DETAIL_KEYS = ASSIGNMENT_KEYS | {"teacher", "instructionsHtml", "attachments", "myFiles", "submittedFileIds",
                                  "submitted", "comments", "needsFiles", "feedback"}
 FILE_KEYS = {"id", "name", "kind", "mime", "size", "url", "createdAt"}
@@ -45,9 +45,30 @@ def test_todo_assignment_maps_every_ts_field(load):
     assert a == {
         "id": 94929, "title": "课后任务：做出你的第一版 MVP", "course": "EL-AI Create the Future",
         "courseId": 3325, "dueAt": raw["deadlineTimeMillis"], "assignedAt": raw["publishTimeMillis"],
-        "status": "To submit", "estimatedMinutes": 60, "schoolGroup": "Due recently",
+        "status": "To submit", "estimatedMinutes": 60, "schoolGroup": "Due recently", "revision": False,
     }
     assert a["dueAt"] == ms(2026, 10, 23, 22)
+
+
+# Live 2026-11-04 (taskPublishId 94616): a teacher sent the work back. Yungu lists it in To-do under
+# "Due update" with doTaskStatus "To edit" (id 3), ifTimeout false and the original, past deadline.
+@pytest.mark.parametrize("change,group", [
+    ({"doTaskStatus": "To edit", "doTaskStatusId": 3}, "Due update"),
+    ({"doTaskStatus": "To edit"}, "Due recently"),
+    ({"doTaskStatusId": 3}, None),
+    ({}, "Due update"),
+])
+def test_work_returned_for_revision_is_marked_revision(load, change, group):
+    raw = {**tasks(load("todo_page.json"))[0], **change, "ifTimeout": False}
+    a = mapping.assignment(raw, group, NOW)
+    assert a["revision"] is True
+    assert a["status"] == "To submit" and "submittedAt" not in a
+    assert a["schoolGroup"] == (group if group in mapping.SCHOOL_GROUPS else None)
+
+
+def test_ordinary_todo_and_submitted_work_is_not_revision(load):
+    assert all(mapping.assignment(t, t["group"], NOW)["revision"] is False
+               for page in ("todo_page.json", "submitted_page1.json") for t in tasks(load(page)))
 
 
 @pytest.mark.parametrize("group,expected", [
@@ -328,6 +349,16 @@ def test_detail_takes_group_and_submitted_at_from_the_listing(load):
     listed = {"schoolGroup": "Delayed", "submittedAt": 123}
     d = mapping.detail(load("mixed_93251.json"), load("achievement_93251.json"), [], ME, None, listed=listed)
     assert d["schoolGroup"] == "Delayed" and d["submittedAt"] == 123
+
+
+def test_detail_takes_revision_from_the_to_do_listing(load):
+    mixed, achievement = load("mixed_todo.json"), load("achievement_todo.json")
+    assert mapping.detail(mixed, achievement, [], ME, None)["revision"] is False
+    assert mapping.detail(mixed, achievement, [], ME, None, listed={"revision": True})["revision"] is True
+    # Handed in again: no longer waiting on a revision, whatever a stale list row says.
+    submitted = mapping.detail(load("mixed_93251.json"), load("achievement_93251.json"), [], ME, None,
+                               listed={"revision": True})
+    assert submitted["revision"] is False
 
 
 # ------------------------------------------------------------- no deadline

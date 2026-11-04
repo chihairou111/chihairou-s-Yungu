@@ -143,7 +143,7 @@ export default function YourWork({ onWrite, focusOnMount = null }: YourWorkProps
           Your work
         </Typography>
         <Box aria-live="polite">
-          <StatusChip status={work.status} />
+          <StatusChip status={work.returned ? 'returned' : work.status} />
         </Box>
       </Stack>
       {work.submittedAt !== undefined && (
@@ -307,10 +307,17 @@ export default function YourWork({ onWrite, focusOnMount = null }: YourWorkProps
   );
 }
 
-const STATUS: Record<WorkStatus, { label: string; icon?: ReactElement; sx: (theme: Theme) => object }> = {
+type ChipStatus = WorkStatus | 'returned';
+
+const STATUS: Record<ChipStatus, { label: string; icon?: ReactElement; sx: (theme: Theme) => object }> = {
   'not-submitted': {
     label: 'Not submitted',
     sx: (theme) => ({ bgcolor: alpha(theme.palette.text.primary, 0.07), color: theme.yungu.color.onSurfaceVariant }),
+  },
+  // Still to hand in, in the Nearly overdue tone the card shows it in.
+  returned: {
+    label: 'Returned for revision',
+    sx: (theme) => ({ bgcolor: theme.palette.warning.light, color: theme.palette.warning.dark }),
   },
   submitted: {
     label: 'Submitted',
@@ -324,7 +331,7 @@ const STATUS: Record<WorkStatus, { label: string; icon?: ReactElement; sx: (them
   },
 };
 
-function StatusChip({ status }: { status: WorkStatus }) {
+function StatusChip({ status }: { status: ChipStatus }) {
   const { label, icon, sx } = STATUS[status];
   return (
     <Chip

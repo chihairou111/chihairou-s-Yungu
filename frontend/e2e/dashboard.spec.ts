@@ -98,6 +98,24 @@ test('sign in, browse assignments and calendar, sign out', async ({ page }) => {
   await expect(page).toHaveURL(/\/login$/);
 });
 
+test('work returned for revision sits under Nearly overdue with a "Returned" chip, never Overdue', async ({ page }) => {
+  await signIn(page);
+  const nearly = page.getByRole('region', { name: 'Nearly overdue' });
+  const card = nearly.getByRole('article').filter({ hasText: 'Lab Report: Pendulum Period' });
+  await expect(card).toBeVisible();
+  // "Returned" on screen; " for revision" is there for screen readers.
+  const chip = card.locator('.MuiChip-root');
+  await expect(chip).toBeVisible();
+  await expect(chip).toHaveText('Returned for revision');
+  await expect(card).not.toContainText('late');
+  await expect(page.getByRole('region', { name: 'Overdue', exact: true }).getByText('Lab Report: Pendulum Period')).toHaveCount(0);
+
+  await card.getByRole('button', { name: 'Lab Report: Pendulum Period' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Lab Report: Pendulum Period' });
+  await expect(dialog.getByText('Returned for revision', { exact: true })).toBeVisible();
+  await expect(dialog.getByText(/days late/)).toHaveCount(0);
+});
+
 test.describe('phone width', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 

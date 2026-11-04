@@ -28,6 +28,12 @@ describe('PriorityBoard', () => {
     expect(within(screen.getByRole('region', { name: 'Nearly overdue' })).getByText('Nothing due soon')).toBeInTheDocument();
   });
 
+  it('puts work returned for revision under Nearly overdue, never Overdue', () => {
+    render(<PriorityBoard items={[todo('Returned essay', -10 * DAY, { revision: true })]} now={NOW} />);
+    expect(within(screen.getByRole('region', { name: 'Nearly overdue' })).getByText('Returned essay')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Overdue' })).getByText('Nothing overdue')).toBeInTheDocument();
+  });
+
   it('shows "Nothing overdue" when no work is late', () => {
     render(<PriorityBoard items={[todo('Later', 3 * DAY)]} now={NOW} />);
     expect(within(screen.getByRole('region', { name: 'Overdue' })).getByText('Nothing overdue')).toBeInTheDocument();

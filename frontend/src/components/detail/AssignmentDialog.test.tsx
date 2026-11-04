@@ -139,6 +139,15 @@ describe('AssignmentDialog', () => {
     expect((await screen.findByText('Due Wed, Oct 21 · 17:00')).closest('[data-tone]')).toHaveAttribute('data-tone', 'neutral');
   });
 
+  it('work returned for revision: its old due date is neither late nor in the error tone', async () => {
+    api.fetchDetail.mockResolvedValue(detail({ dueAt: NOW - 2 * DAY, revision: true }));
+    openTask(94616);
+    render(<AssignmentDialog now={NOW} />);
+    const due = await screen.findByText('Due Fri, Oct 16');
+    expect(due.closest('[data-tone]')).toHaveAttribute('data-tone', 'neutral');
+    expect(screen.queryByText(/late/)).not.toBeInTheDocument();
+  });
+
   it('closes with Esc and with the ✕ button', async () => {
     api.fetchDetail.mockResolvedValue(detail());
     openTask(94616);

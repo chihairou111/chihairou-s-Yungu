@@ -6,7 +6,9 @@ const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 
+/** Work returned for revision is nearly overdue whatever its (original) deadline says; it is never overdue. */
 export function priorityOf(a: Assignment, now: number): Priority {
+  if (a.revision) return 'nearly';
   if (a.dueAt < now || a.schoolGroup === 'Delayed') return 'overdue';
   if (a.dueAt - now <= NEARLY_OVERDUE_MS) return 'nearly';
   return 'upcoming';
