@@ -16,6 +16,7 @@ import io
 import ipaddress
 import json
 import logging
+import socket
 import threading
 import time
 from contextlib import contextmanager
@@ -154,6 +155,36 @@ def oss_url_ok(url: str) -> bool:
             and parts.username is None and parts.password is None)
 
 
+WATCHDOG_NAME = "read_attachment-watchdog"
+
+
+def _socket_of(r):
+    """The socket under a streaming requests Response (private attributes, so resolved defensively): urllib3's
+    connection while it holds one, else http.client's file object down to the socket."""
+    raw = getattr(r, "raw", None)
+    sock = getattr(getattr(raw, "_connection", None), "sock", None)
+    if sock is None:
+        fp = getattr(getattr(raw, "_fp", None), "fp", None)
+        sock = getattr(getattr(fp, "raw", None), "_sock", None)
+    return sock if isinstance(sock, socket.socket) else None
+
+
+def _cut_off(r) -> None:
+    """End a download from another thread. Closing alone is not enough: the reader holds the buffered file's
+    lock while it waits for a 64 KiB chunk to fill, and close() waits for that lock (at 1 byte/s, for hours).
+    Shutting the socket down makes the blocked read return at once; then close."""
+    try:
+        sock = _socket_of(r)
+        if sock is not None:
+            sock.shutdown(socket.SHUT_RDWR)
+    except Exception:
+        pass
+    try:
+        r.close()
+    except Exception:
+        pass
+
+
 def _get(url: str):
     return requests.get(url, stream=True, timeout=SOCKET_TIMEOUT, allow_redirects=False,
                         headers={"Accept-Encoding": "identity"})        # what we count is what arrives
@@ -162,8 +193,8 @@ def _get(url: str):
 def download(url: str, deadline: float) -> bytes:
     """The bytes behind a signed OSS URL, at most MAX_BYTES. TooLarge / TooSlow / DownloadFailed.
 
-    A watchdog closes the response at `deadline`, so a body that drips or stalls ends there (a blocked read
-    then fails at its next byte, or at the socket read timeout), not chunk by chunk later."""
+    A watchdog shuts the socket down and closes the response at `deadline`, so a body that drips or stalls
+    ends there (the blocked read returns at once), not when a chunk finally fills."""
     if not oss_url_ok(url):
         raise DownloadFailed("not an OSS URL")
     fired = threading.Event()
@@ -178,9 +209,9 @@ def download(url: str, deadline: float) -> bytes:
 
             def cut_off():
                 fired.set()
-                r.close()
+                _cut_off(r)
             watchdog = threading.Timer(max(0.0, deadline - clock()), cut_off)
-            watchdog.daemon = True
+            watchdog.name, watchdog.daemon = WATCHDOG_NAME, True
             watchdog.start()
             out = bytearray()
             try:

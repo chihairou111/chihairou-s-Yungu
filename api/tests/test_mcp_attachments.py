@@ -2,6 +2,9 @@
 download is mocked with `responses` (or a fake streaming response); no network."""
 import io
 import json
+import socket
+import threading
+import time
 
 import pytest
 import requests
@@ -21,6 +24,7 @@ WRITES = {"save_draft", "submit", "add_comment", "delete_comment", "create_onlin
 AID = 93251
 OSS = "https://yungu-common.oss-cn-hangzhou.aliyuncs.com/taskFile/f.bin?Expires=1&OSSAccessKeyId=k&Signature=SIGNED-xyz"
 MB = 1024 * 1024
+REAL_CONNECT = socket.socket.connect                                    # before no_network replaces it
 PDF_MIME = "application/pdf"
 ONLINE_DELTA = '{"ops":[{"insert":"Plan"},{"insert":"\\n","attributes":{"header":2}}]}'
 
@@ -451,7 +455,6 @@ def test_the_too_large_note_is_the_agreed_sentence(api, auth, world, oss):
 @pytest.fixture
 def slots(monkeypatch):
     """Fresh server-wide read slots, with a short wait."""
-    import threading
     monkeypatch.setattr(mcp_files, "_reads", threading.BoundedSemaphore(mcp_files.MAX_CONCURRENT_READS))
     monkeypatch.setattr(mcp_files, "READ_WAIT_SECONDS", 0.3)
     return mcp_files._reads
@@ -551,39 +554,57 @@ def test_both_known_oss_hosts_are_fetched(api, auth, world, oss):
     assert read(api, 42)[1]["included"] == ["text", "pdf"]
 
 
-class Stalled:
-    """A response whose body never comes until it is closed (a slow drip, or a stall)."""
+def drip_server(stop):
+    """A real HTTP server on 127.0.0.1 that announces 5 MB and sends one byte every 0.2 s."""
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    server.settimeout(5)
 
-    def __init__(self):
-        import threading
-        self.status_code, self.headers, self.closed = 200, {}, threading.Event()
+    def serve():
+        try:
+            conn, _ = server.accept()
+        except OSError:
+            return
+        with conn:
+            conn.recv(65536)
+            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/pdf\r\nContent-Length: 5000000\r\n\r\n%PDF-")
+            while not stop.is_set():
+                try:
+                    conn.sendall(b"x")
+                except OSError:
+                    return                                             # the client hung up
+                stop.wait(0.2)
+        server.close()
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    return f"http://127.0.0.1:{server.getsockname()[1]}/taskFile/a.pdf", thread
 
-    def iter_content(self, size):
-        yield b"%PDF-"
-        self.closed.wait(10)
-        raise requests.ConnectionError("read on a closed connection")
 
-    def close(self):
-        self.closed.set()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        self.close()
-
-
-def test_a_stalled_body_is_cut_off_at_the_deadline(api, auth, world, oss, monkeypatch):
-    import time
-    stalled = Stalled()
-    monkeypatch.setattr(mcp_files, "_get", lambda url: stalled)
-    monkeypatch.setattr(mcp_files, "DOWNLOAD_TIMEOUT_SECONDS", 0.3)
+def test_a_dripping_body_is_cut_off_at_the_deadline(api, auth, world, monkeypatch, slots):
+    monkeypatch.setattr(socket.socket, "connect", REAL_CONNECT)        # this one test talks to a local server
+    monkeypatch.setattr(mcp_files, "oss_url_ok", lambda url: True)
+    monkeypatch.setattr(mcp_files, "DOWNLOAD_TIMEOUT_SECONDS", 1)
+    stop = threading.Event()
+    url, server = drip_server(stop)
+    world.redirect = url
     attach(world, entry(43, "slow.pdf", 1000))
     started = time.monotonic()
-    with pytest.raises(ToolFailure) as e:
-        read(api, 43)
-    assert e.value.status == "timeout" and time.monotonic() - started < 3
-    assert stalled.closed.is_set()
+    try:
+        with pytest.raises(ToolFailure) as e:
+            read(api, 43)
+        took = time.monotonic() - started
+    finally:
+        stop.set()
+    assert e.value.status == "timeout" and took < 3
+    assert slots.acquire(blocking=False) and slots.acquire(blocking=False)      # both slots free again
+    slots.release()
+    slots.release()
+    server.join(3)
+    for t in threading.enumerate():
+        if t.name == mcp_files.WATCHDOG_NAME:
+            t.join(2)
+    assert not any(t.name == mcp_files.WATCHDOG_NAME and t.is_alive() for t in threading.enumerate())
 
 
 def test_the_50_megapixel_guard_refuses_before_decoding(api, auth, world, oss):

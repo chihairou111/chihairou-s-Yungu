@@ -154,8 +154,8 @@ Code: `service/mcp_server.py` (endpoint, auth check, rate limit, logs), `service
   literals) and never through a redirect (any 3xx → "Can't reach Yungu…"); streamed into memory, at most 10 MB
   (Content-Length and the running count; `Accept-Encoding: identity`), no disk. Timing: up to 30 s waiting for
   one of the 2 server-wide read slots (then "Busy, try again in a moment."), then 30 s for download and text
-  extraction together (a watchdog closes a dripping or stalled body at the deadline → "Yungu took too long to
-  send the file. Try again."; PDF text gets at least 5 s, so one call can take about a minute in the worst
+  extraction together (at the deadline a watchdog shuts the socket down and closes the response, so a dripping or
+  stalled body ends there → "Yungu took too long to send the file. Try again."; PDF text gets at least 5 s, so one call can take about a minute in the worst
   case). PDF/preview: page-separated text (pypdf, ≤ 200k characters) + the PDF
   as an embedded resource (`application/pdf`, base64); password-protected/damaged → metadata, link and a note.
   PNG/JPEG/GIF/WebP: image content, downscaled (Pillow) past 2048 px or 3.5 MB; text files: UTF-8, else
