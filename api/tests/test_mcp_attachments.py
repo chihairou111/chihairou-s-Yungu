@@ -514,3 +514,98 @@ def test_at_most_two_reads_run_at_once_across_accounts(api, world, auth, b_auth,
     for t in threads:
         t.join(10)
     assert state["max"] == 2 and results == [["text", "pdf"]] * 5
+
+
+# ------------------------------------------------------- fix round 1: hardening
+def test_a_redirect_from_oss_is_not_followed(api, auth, world, oss):
+    attach(world, entry(40, "x.pdf", 1000))
+    oss.add(responses.GET, OSS, status=302, headers={"Location": "http://127.0.0.1/latest/meta-data"})
+    oss.add(responses.GET, "http://127.0.0.1/latest/meta-data", body=b"%PDF-1.4 internal")
+    with pytest.raises(ToolFailure) as e:
+        read(api, 40)
+    assert e.value.message == UNREACHABLE and len(oss.calls) == 1
+
+
+@pytest.mark.parametrize("url", [
+    "https://evil.example.com/taskFile/a.pdf?Signature=x",
+    "https://yungu-common.oss-cn-hangzhou.aliyuncs.com.evil.example/a.pdf",
+    "https://other-bucket.oss-cn-hangzhou.aliyuncs.com/a.pdf",
+    "https://127.0.0.1/a.pdf", "https://[::1]/a.pdf", "https://169.254.169.254/a.pdf",
+    "https://yungu-common.oss-cn-hangzhou.aliyuncs.com:8443/a.pdf",
+    "https://user:pw@yungu-common.oss-cn-hangzhou.aliyuncs.com/a.pdf",
+    "ftp://yungu-common.oss-cn-hangzhou.aliyuncs.com/a.pdf"])
+def test_only_yungus_oss_hosts_are_fetched(api, auth, world, oss, url):
+    world.redirect = url
+    attach(world, entry(41, "x.pdf", 1000))
+    with pytest.raises(ToolFailure) as e:
+        read(api, 41)
+    assert e.value.message == UNREACHABLE and len(oss.calls) == 0
+
+
+def test_both_known_oss_hosts_are_fetched(api, auth, world, oss):
+    pdf = make_pdf(["ok"])
+    public = OSS.replace("yungu-common", "yungu-public")
+    world.redirect = public
+    attach(world, entry(42, "x.pdf", len(pdf)))
+    oss.add(responses.GET, public, body=pdf)
+    assert read(api, 42)[1]["included"] == ["text", "pdf"]
+
+
+class Stalled:
+    """A response whose body never comes until it is closed (a slow drip, or a stall)."""
+
+    def __init__(self):
+        import threading
+        self.status_code, self.headers, self.closed = 200, {}, threading.Event()
+
+    def iter_content(self, size):
+        yield b"%PDF-"
+        self.closed.wait(10)
+        raise requests.ConnectionError("read on a closed connection")
+
+    def close(self):
+        self.closed.set()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
+def test_a_stalled_body_is_cut_off_at_the_deadline(api, auth, world, oss, monkeypatch):
+    import time
+    stalled = Stalled()
+    monkeypatch.setattr(mcp_files, "_get", lambda url: stalled)
+    monkeypatch.setattr(mcp_files, "DOWNLOAD_TIMEOUT_SECONDS", 0.3)
+    attach(world, entry(43, "slow.pdf", 1000))
+    started = time.monotonic()
+    with pytest.raises(ToolFailure) as e:
+        read(api, 43)
+    assert e.value.status == "timeout" and time.monotonic() - started < 3
+    assert stalled.closed.is_set()
+
+
+def test_the_50_megapixel_guard_refuses_before_decoding(api, auth, world, oss):
+    buf = io.BytesIO()
+    Image.new("1", (8000, 7000)).save(buf, "PNG")                    # 56 MP, tiny on the wire
+    attach(world, entry(44, "huge.png", len(buf.getvalue()), "image"))
+    oss.add(responses.GET, OSS, body=buf.getvalue())
+    _, data, blocks = read(api, 44)
+    assert blocks == [] and "too large" in data["note"] and data["included"] == []
+
+
+def test_bmp_bytes_named_png_are_refused_gracefully(api, auth, world, oss):
+    bmp = image_bytes((20, 20), "BMP")
+    attach(world, entry(45, "pic.png", len(bmp), "image"))
+    oss.add(responses.GET, OSS, body=bmp)
+    _, data, blocks = read(api, 45)
+    assert blocks == [] and data["note"] and data["included"] == []
+
+
+def test_a_file_from_another_of_the_accounts_assignments_is_not_found(api, auth, world, oss):
+    attach(world, entry(46, "mine-elsewhere.pdf", 1000), aid=94929)    # a real assignment of this account
+    attach(world, entry(47, "here.pdf", 1000))
+    with pytest.raises(ToolFailure) as e:
+        read(api, 46, aid=AID)
+    assert e.value.message == "Not found." and redirects(world) == [] and len(oss.calls) == 0

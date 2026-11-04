@@ -13,6 +13,7 @@ the whole call; at most MAX_CONCURRENT_READS run at once in the whole server (re
 never leaves `download` and nothing here logs: failures are plain exceptions without the URL in their text.
 """
 import io
+import ipaddress
 import json
 import logging
 import threading
@@ -20,6 +21,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import List, Tuple
+from urllib.parse import urlsplit
 
 import requests
 from PIL import Image, ImageOps
@@ -39,6 +41,10 @@ READ_WAIT_SECONDS = 30                   # how long a call waits for one before 
 clock = time.monotonic
 _reads = threading.BoundedSemaphore(MAX_CONCURRENT_READS)
 
+# The hosts Yungu's file redirects (new_download_file, preview_file) answer with (NOTES.md §2, fixtures): the
+# only ones fetched, over https on the default port, and never a redirect from there (signed OSS URLs answer
+# 200 themselves; Yungu signs client-supplied bucket/fileUrl, so its Location is not trusted beyond this).
+OSS_HOSTS = {"yungu-common.oss-cn-hangzhou.aliyuncs.com", "yungu-public.oss-cn-hangzhou.aliyuncs.com"}
 IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 IMAGE_FORMATS = {"PNG": "image/png", "JPEG": "image/jpeg", "GIF": "image/gif", "WEBP": "image/webp"}
 TEXT_EXTENSIONS = {
@@ -131,34 +137,75 @@ def read_slot():
         slots.release()
 
 
+def oss_url_ok(url: str) -> bool:
+    """https, one of OSS_HOSTS (never an IP literal), the default port, no user info."""
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return False
+    host = (parts.hostname or "").rstrip(".")
+    try:
+        ipaddress.ip_address(host)
+        return False
+    except ValueError:
+        pass
+    return (parts.scheme == "https" and host in OSS_HOSTS and port is None
+            and parts.username is None and parts.password is None)
+
+
 def _get(url: str):
-    return requests.get(url, stream=True, timeout=SOCKET_TIMEOUT, allow_redirects=True,
+    return requests.get(url, stream=True, timeout=SOCKET_TIMEOUT, allow_redirects=False,
                         headers={"Accept-Encoding": "identity"})        # what we count is what arrives
 
 
 def download(url: str, deadline: float) -> bytes:
-    """The bytes behind a signed https URL, at most MAX_BYTES. TooLarge / TooSlow / DownloadFailed."""
-    if not url.startswith("https://"):
-        raise DownloadFailed("not https")
+    """The bytes behind a signed OSS URL, at most MAX_BYTES. TooLarge / TooSlow / DownloadFailed.
+
+    A watchdog closes the response at `deadline`, so a body that drips or stalls ends there (a blocked read
+    then fails at its next byte, or at the socket read timeout), not chunk by chunk later."""
+    if not oss_url_ok(url):
+        raise DownloadFailed("not an OSS URL")
+    fired = threading.Event()
+    watchdog = None
     try:
         with _get(url) as r:
-            if r.status_code != 200:
+            if r.status_code != 200:                     # a 3xx too: redirects are never followed
                 raise DownloadFailed(f"HTTP {r.status_code}")
             declared = str(r.headers.get("Content-Length") or "")
             if declared.isdigit() and int(declared) > MAX_BYTES:
                 raise TooLarge()
+
+            def cut_off():
+                fired.set()
+                r.close()
+            watchdog = threading.Timer(max(0.0, deadline - clock()), cut_off)
+            watchdog.daemon = True
+            watchdog.start()
             out = bytearray()
-            for chunk in r.iter_content(CHUNK_BYTES):
-                if clock() > deadline:
-                    raise TooSlow()
-                out += chunk
-                if len(out) > MAX_BYTES:
-                    raise TooLarge()
+            try:
+                for chunk in r.iter_content(CHUNK_BYTES):
+                    if fired.is_set() or clock() > deadline:
+                        raise TooSlow()
+                    out += chunk
+                    if len(out) > MAX_BYTES:
+                        raise TooLarge()
+            except (TooSlow, TooLarge):
+                raise
+            except Exception:
+                if fired.is_set():
+                    raise TooSlow() from None
+                raise
+            if fired.is_set():
+                raise TooSlow()
             return bytes(out)
     except requests.Timeout:
         raise TooSlow() from None
     except requests.RequestException as e:
         raise DownloadFailed(type(e).__name__) from None
+    finally:
+        if watchdog is not None:
+            watchdog.cancel()
 
 
 # ----------------------------------------------------------------- reading
@@ -216,10 +263,10 @@ def pdf_text(data: bytes, deadline: float) -> Tuple[str, int, bool]:
 def image(data: bytes) -> Tuple[bytes, str, int, int, bool]:
     """(bytes, mime, width, height, downscaled): as it is when small enough, else at most MAX_IMAGE_SIDE px."""
     try:
-        img = Image.open(io.BytesIO(data))
+        img = Image.open(io.BytesIO(data), formats=list(IMAGE_FORMATS))     # header only: no decoding yet
         fmt, (width, height) = img.format, img.size
     except Exception:
-        raise Unreadable("This file is not a readable image. Open it in the dashboard.") from None
+        raise Unreadable("Only PNG, JPEG, GIF and WebP images can be read here. Open it in the dashboard.") from None
     if fmt not in IMAGE_FORMATS:
         raise Unreadable("Only PNG, JPEG, GIF and WebP images can be read here. Open it in the dashboard.")
     if width * height > MAX_IMAGE_PIXELS:
@@ -228,8 +275,8 @@ def image(data: bytes) -> Tuple[bytes, str, int, int, bool]:
         return data, IMAGE_FORMATS[fmt], width, height, False
     try:
         img.seek(0)
+        img.thumbnail((MAX_IMAGE_SIDE, MAX_IMAGE_SIDE))         # first: JPEG decodes reduced (draft)
         img = ImageOps.exif_transpose(img)
-        img.thumbnail((MAX_IMAGE_SIDE, MAX_IMAGE_SIDE))
         alpha = img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info)
         out = _encode(img.convert("RGBA"), "PNG") if alpha else b""
         if not out or len(out) > MAX_IMAGE_BYTES:

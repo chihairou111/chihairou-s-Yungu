@@ -1,4 +1,5 @@
 requests>=2.31
+urllib3>=2.6        # bounded decompression (read_attachment relies on it besides Accept-Encoding: identity)
 cryptography>=42
 fastapi>=0.110
 uvicorn>=0.29

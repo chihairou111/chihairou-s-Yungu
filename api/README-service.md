@@ -149,9 +149,14 @@ Code: `service/mcp_server.py` (endpoint, auth check, rate limit, logs), `service
 - **`read_attachment`** (`service/mcp_files.py`): only a file listed in that assignment's detail for this
   account (teacher attachments + own files), else "Not found." (no Yungu file call). Bytes come through the
   account's file redirect (download for PDF/image/text, Yungu's PDF preview for Office/iWork) from the signed
-  OSS URL, which never leaves the server nor reaches a log: streamed into memory, at most 10 MB (Content-Length
-  and the running count; `Accept-Encoding: identity`), 30 s for the whole call (then "Yungu took too long to
-  send the file. Try again."), no disk. PDF/preview: page-separated text (pypdf, ≤ 200k characters) + the PDF
+  OSS URL, which never leaves the server nor reaches a log. Fetched only from Yungu's OSS hosts
+  (`yungu-common` / `yungu-public` `.oss-cn-hangzhou.aliyuncs.com`: https, default port, no user info, no IP
+  literals) and never through a redirect (any 3xx → "Can't reach Yungu…"); streamed into memory, at most 10 MB
+  (Content-Length and the running count; `Accept-Encoding: identity`), no disk. Timing: up to 30 s waiting for
+  one of the 2 server-wide read slots (then "Busy, try again in a moment."), then 30 s for download and text
+  extraction together (a watchdog closes a dripping or stalled body at the deadline → "Yungu took too long to
+  send the file. Try again."; PDF text gets at least 5 s, so one call can take about a minute in the worst
+  case). PDF/preview: page-separated text (pypdf, ≤ 200k characters) + the PDF
   as an embedded resource (`application/pdf`, base64); password-protected/damaged → metadata, link and a note.
   PNG/JPEG/GIF/WebP: image content, downscaled (Pillow) past 2048 px or 3.5 MB; text files: UTF-8, else
   GB18030; online documents: text from the Quill delta (headings `# `, lists `- `/`1. `). Video, audio, other
@@ -169,7 +174,7 @@ Code: `service/mcp_server.py` (endpoint, auth check, rate limit, logs), `service
   tool calls a minute for this account. Try again in a minute.", no Yungu call; at most 4 of an account's
   calls run at once (the rest wait without holding a worker thread).
 - **Logs:** `tool=<name> account=<sha256 of the userId, 12 hex> status=<ok|sign_in|unavailable|not_found|
-  bad_arguments|rate_limited|...> ms=<n>`; never arguments, results or tokens. OAuth (`yungu_lms.oauth`):
+  bad_arguments|rate_limited|busy|timeout|...> ms=<n>`; never arguments, results or tokens. OAuth (`yungu_lms.oauth`):
   registrations, connections and reuse revocations, by hashed account only; never tokens, codes, verifiers.
 
 ## Run by hand
