@@ -854,7 +854,7 @@ def test_the_sdk_client_discovers_registers_authorizes_calls_and_refreshes(api, 
                         after = provider.context.current_tokens
                         return tools, first, second, before, after
     tools, first, second, before, after = anyio.run(main)
-    assert len(tools) == 7 and first.is_error is False and second.is_error is False
+    assert len(tools) == 8 and first.is_error is False and second.is_error is False
     assert seen["client"] == {"name": "SDK agent", "redirectHost": "127.0.0.1"}
     assert seen["authorize"]["resource"] == RESOURCE and seen["authorize"]["scope"] == "read"
     assert seen["authorize"]["code_challenge_method"] == "S256"

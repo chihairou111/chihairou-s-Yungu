@@ -1,4 +1,4 @@
-"""The seven read-only MCP tools (api/service/mcp_tools.py) over the fake Yungu world; no network."""
+"""The eight read-only MCP tools (api/service/mcp_tools.py) over the fake Yungu world; no network."""
 import json
 
 import pytest
@@ -14,6 +14,9 @@ from yungu_task import TODO
 
 WRITES = {"save_draft", "submit", "add_comment", "delete_comment", "create_online_doc", "update_online_doc",
           "mark_notification_read", "mark_submitted", "upload_bytes", "file_redirect"}
+
+
+ARGS = {"get_assignment": {"id": 93251}, "read_attachment": {"assignment_id": 93251, "file_id": 11128687}}
 
 
 def student(api, user_id=ME):
@@ -89,10 +92,11 @@ def test_get_assignment_plain_text_instructions_links_files_feedback_comments(ap
     assert d["instructions"] == "Read chapter 2 & answer:\n\n- one\n\n- two\n\nSee this (https://example.org/x) — end."
     assert "<" not in d["instructions"] and "alert" not in d["instructions"]
     assert d["attachments"][0] == {"name": "PA student booklet 城市发展与人文摄影学生任务书2026.pages", "kind": "office",
+                                   "file_id": 11028518, "size": 161917, "readable": True,
                                    "link": "https://yungu.chihairou.dev/api/files/11028518"}
-    assert all(set(a) == {"name", "kind", "link"} and a["link"].startswith("https://yungu.chihairou.dev/")
-               for a in d["attachments"])
-    assert d["myFiles"] == [{"name": "wrap_3.txt"}]
+    assert all(set(a) == {"name", "file_id", "kind", "size", "readable", "link"}
+               and a["link"].startswith("https://yungu.chihairou.dev/") for a in d["attachments"])
+    assert [f["name"] for f in d["myFiles"]] == ["wrap_3.txt"]
     assert d["comments"] and set(d["comments"][0]) == {"author", "mine", "at", "text"}
     assert d["link"] == "https://yungu.chihairou.dev/assignments?task=93251"
     assert summary.startswith("我的产品，为谁解决什么问题？ (EL-AI Create the Future): handed in")
@@ -112,8 +116,8 @@ def test_get_assignment_feedback(api, auth, world, load):
 def test_get_assignment_online_document_links_to_the_assignment(api, auth, world):
     world.mixed[93251]["fileList"] = [{"fileId": 5, "fileName": "Notes", "type": "onlineDocument", "storeMeta": "{}"}]
     _, d = run(api, "get_assignment", {"id": 93251})
-    assert d["attachments"] == [{"name": "Notes", "kind": "online document",
-                                 "link": "https://yungu.chihairou.dev/assignments?task=93251"}]
+    assert d["attachments"] == [{"name": "Notes", "file_id": 5, "kind": "online document", "size": None,
+                                 "readable": False, "link": "https://yungu.chihairou.dev/assignments?task=93251"}]
 
 
 def test_get_assignment_unknown_id_and_bad_ids(api, auth, world):
@@ -199,7 +203,7 @@ def test_unknown_tool_and_non_object_arguments(api, auth):
 def test_yungu_down_is_the_friendly_unreachable_message(api, auth, world):
     world.fail = requests.ConnectionError("down at http://secret.example/?ticket=abc")
     for name in mcp_tools.TOOLS:
-        args = {"id": 93251} if name == "get_assignment" else {}
+        args = ARGS.get(name, {})
         with pytest.raises(ToolFailure) as e:
             run(api, name, args)
         assert e.value.message == UNREACHABLE and e.value.status == "unavailable"
@@ -208,7 +212,7 @@ def test_yungu_down_is_the_friendly_unreachable_message(api, auth, world):
 def test_a_non_owner_without_a_live_session_gets_the_sign_in_message_and_no_login(make, world, auth, b_auth):
     restarted = make()                                   # S207's memory session is gone with the restart
     for name in mcp_tools.TOOLS:
-        args = {"id": 93251} if name == "get_assignment" else {}
+        args = ARGS.get(name, {})
         with pytest.raises(ToolFailure) as e:
             run(restarted, name, args, user_id=OTHER)
         assert e.value.message == SIGN_IN_TO_DASHBOARD and e.value.status == "sign_in"
@@ -219,6 +223,6 @@ def test_tools_read_only_their_own_accounts_data(api, world, auth, b_auth):
     _, mine = run(api, "get_assignment", {"id": 93251})
     _, theirs = run(api, "get_assignment", {"id": 93251}, user_id=OTHER)
     assert theirs["title"].startswith("B ") and not mine["title"].startswith("B ")
-    assert theirs["myFiles"] == [{"name": "b.txt"}]
+    assert [f["name"] for f in theirs["myFiles"]] == ["b.txt"]
     _, courses = run(api, "list_courses", user_id=OTHER)
     assert all(c["name"].startswith("B ") for c in courses["courses"])

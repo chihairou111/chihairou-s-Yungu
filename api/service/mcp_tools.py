@@ -1,10 +1,12 @@
-"""The seven read-only MCP tools, over one account's `Student` (app.py): the same read paths, session and
-60 s read cache as the dashboard. Nothing here writes to Yungu or Todoist or hands out file bytes: files are
-dashboard links only.
+"""The eight read-only MCP tools, over one account's `Student` (app.py): the same read paths, session and
+60 s read cache as the dashboard. Nothing here writes to Yungu or Todoist. File bytes only through
+read_attachment, for a file on an assignment this account can see (mcp_files.py reads it); every other tool
+gives dashboard links.
 
-Each tool answers `(summary, data)`: a short sentence for the agent and compact JSON-able data. Times are
-China time ISO 8601 ("2026-10-23T22:00:00+08:00"); "no deadline" is null. `run` turns every failure into a
-`ToolFailure` with a message fit for the agent (never a stack trace) and a short status for the log.
+Each tool answers `(summary, data)`: a short sentence for the agent and compact JSON-able data;
+read_attachment adds a third item, the content blocks (mcp_files TextBlock / PdfBlock / ImageBlock). Times
+are China time ISO 8601 ("2026-10-23T22:00:00+08:00"); "no deadline" is null. `run` turns every failure into
+a `ToolFailure` with a message fit for the agent (never a stack trace) and a short status for the log.
 """
 import html
 import re
@@ -15,12 +17,17 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import mapping
 from yungu_task import CST
 
+from . import mcp_files
+from .mcp_files import ImageBlock, PdfBlock, TextBlock
 from .yungu import UNREACHABLE, ServiceError, SignInAgain, Unavailable
 
 PUBLIC_URL = "https://yungu.chihairou.dev"
 SIGN_IN_TO_DASHBOARD = "Sign in to the dashboard again to keep agent access working."
 NO_SUCH_ASSIGNMENT = "No assignment with that id."
 SOMETHING_WRONG = "Something went wrong reading Yungu. Try again."
+NOT_FOUND = "Not found."
+TOO_SLOW = "Yungu took too long to send the file. Try again."
+NO_STORED_FILE = 422                           # app.NoStoredFile: Yungu keeps no bytes behind the id
 NEARLY_OVERDUE_MS = 24 * 3600 * 1000           # the dashboard's "nearly overdue" (frontend/src/lib/priority.ts)
 DEFAULT_LIMIT, MAX_LIMIT = 20, 100
 MAX_NOTIFICATIONS = 50
@@ -134,11 +141,25 @@ def plain_text(markup: str) -> str:
     return out if len(out) <= MAX_INSTRUCTIONS_CHARS else out[:MAX_INSTRUCTIONS_CHARS].rstrip() + " …"
 
 
-def _file_link(ref: dict, aid) -> dict:
-    """A FileRef -> {name, kind, link}: the dashboard opens it (with the student's own dashboard session)."""
-    if ref.get("online"):
-        return {"name": ref["name"], "kind": "online document", "link": assignment_link(aid)}
-    return {"name": ref["name"], "kind": ref["kind"], "link": f"{PUBLIC_URL}/api/files/{ref['id']}"}
+def _file_id(ref: dict):
+    fid = str(ref.get("id"))
+    return int(fid) if fid.isascii() and fid.isdigit() else fid
+
+
+def _link(ref: dict, aid) -> str:
+    """Where the dashboard opens it (with the student's own dashboard session)."""
+    return assignment_link(aid) if ref.get("online") else f"{PUBLIC_URL}/api/files/{ref['id']}"
+
+
+def _size(ref: dict) -> Optional[int]:
+    """Bytes; None when unknown, and for online documents (no stored file)."""
+    return None if ref.get("online") else (ref.get("size") or None)
+
+
+def _file_row(ref: dict, aid) -> dict:
+    """A FileRef -> {name, file_id, kind, size, readable, link}; `readable`: read_attachment gives content."""
+    return {"name": ref["name"], "file_id": _file_id(ref), "kind": mcp_files.kind_of(ref),
+            "size": _size(ref), "readable": mcp_files.readable(ref), "link": _link(ref, aid)}
 
 
 def _count(n: int, one: str, many: Optional[str] = None) -> str:
@@ -250,8 +271,8 @@ def get_assignment(me, args) -> Tuple[str, dict]:
         "late": isinstance(submitted_at, int) and submitted_at > d["dueAt"],
         "estimatedMinutes": d.get("estimatedMinutes"),
         "instructions": plain_text(d.get("instructionsHtml") or ""),
-        "attachments": [_file_link(f, d["id"]) for f in d.get("attachments") or []],
-        "myFiles": [{"name": f["name"]} for f in d.get("myFiles") or []],
+        "attachments": [_file_row(f, d["id"]) for f in d.get("attachments") or []],
+        "myFiles": [_file_row(f, d["id"]) for f in d.get("myFiles") or []],
         "feedback": None if not feedback else {
             "score": feedback.get("score") or None, "comment": feedback.get("comment"),
             "criteria": feedback.get("criteria") or [], "updatedAt": iso(feedback.get("updatedAt"))},
@@ -345,6 +366,97 @@ def list_notifications(me, args) -> Tuple[str, dict]:
     return f"{_count(len(items), what)}{tail}, newest first.", {"notifications": items}
 
 
+UNREADABLE = {"video": "Videos can't be read here.", "audio": "Audio can't be read here.",
+              "image": "Only PNG, JPEG, GIF and WebP images can be read here."}
+
+
+def read_attachment(me, args) -> Tuple[str, dict, list]:
+    _check_keys(args, ("assignment_id", "file_id"))
+    for key in ("assignment_id", "file_id"):
+        if args.get(key) is None:
+            raise _bad(f"{key} is required: from get_assignment (its id, and a file's file_id).")
+    aid = _int(args, "assignment_id", None, 1, 10**12)
+    fid = _int(args, "file_id", None, 1, 10**15)
+    try:
+        d = me.detail(aid)                      # this account's own view: the only files it may read
+    except ServiceError as e:
+        if getattr(e, "status", None) == 404:
+            raise ToolFailure(NOT_FOUND, "not_found") from None
+        raise
+    ref = next((f for f in [*(d.get("attachments") or []), *(d.get("myFiles") or [])]
+                if str(f.get("id")) == str(fid)), None)
+    if ref is None:
+        raise ToolFailure(NOT_FOUND, "not_found")
+    kind, name = mcp_files.kind_of(ref), ref["name"]
+    meta = {"assignmentId": d["id"], "fileId": fid, "name": name, "kind": kind, "size": _size(ref),
+            "link": _link(ref, d["id"]), "included": [], "note": None}
+
+    def note(text: str) -> Tuple[str, dict, list]:
+        meta["note"] = text
+        return f"{name}: {text}", meta, []
+
+    def with_text(text: str, truncated: bool) -> TextBlock:
+        meta.update(included=meta["included"] + ["text"], textChars=len(text), truncated=truncated)
+        return TextBlock(text)
+
+    def chars() -> str:
+        cut = ", cut short" if meta.get("truncated") else ""
+        return f"{meta['textChars']:,} characters{cut}"
+
+    if kind == "online document":
+        text, truncated = mcp_files.online_text(ref.get("content") or "")
+        if not text:
+            return note("This online document is empty.")
+        block = with_text(text, truncated)
+        return f"{name} (online document): its text ({chars()}).", meta, [block]
+    if not mcp_files.readable(ref) and kind != "office":
+        if (ref.get("size") or 0) > mcp_files.MAX_BYTES and kind in ("pdf", "image", "text"):
+            return note(mcp_files.TOO_LARGE_NOTE)
+        return note(f"{UNREADABLE.get(kind, 'This kind of file cannot be read here.')} Open it in the dashboard.")
+
+    preview = kind == "office"                  # Yungu's PDF rendition of Office and iWork files
+    try:
+        url = me.file_redirect(int(fid), preview)["redirect"]
+    except ServiceError as e:
+        if getattr(e, "status", None) == NO_STORED_FILE:
+            return note("Yungu keeps no file behind this id. Open it in the dashboard.")
+        raise
+    deadline = mcp_files.deadline_from_now()
+    try:
+        data = mcp_files.download(url, deadline)
+    except mcp_files.TooLarge:
+        return note(mcp_files.TOO_LARGE_NOTE)
+    except mcp_files.TooSlow:
+        raise ToolFailure(TOO_SLOW, "timeout") from None
+    except mcp_files.DownloadFailed:
+        raise ToolFailure(UNREACHABLE, "unavailable") from None
+
+    try:
+        if kind in ("pdf", "office"):
+            if preview and not mcp_files.looks_like_pdf(data):
+                return note("Yungu has no PDF preview of this file. Open it in the dashboard.")
+            text, pages, truncated = mcp_files.pdf_text(data, deadline)
+            meta["pages"] = pages
+            blocks: list = [with_text(text, truncated)] if text else []
+            blocks.append(PdfBlock(data, meta["link"] + ("?preview=1" if preview else "")))
+            meta["included"] = meta["included"] + ["pdf"]
+            via = "Yungu's PDF preview, " if preview else "PDF, "
+            if not text:
+                meta["note"] = "No text found in this PDF (it may be scanned): the PDF itself is attached."
+                return f"{name} ({via}{_count(pages, 'page')}): no text found; the PDF is attached.", meta, blocks
+            return f"{name} ({via}{_count(pages, 'page')}): its text ({chars()}) and the PDF.", meta, blocks
+        if kind == "image":
+            out, mime, width, height, downscaled = mcp_files.image(data)
+            meta.update(included=["image"], mime=mime, width=width, height=height, downscaled=downscaled)
+            scaled = f", downscaled to at most {mcp_files.MAX_IMAGE_SIDE} px" if downscaled else ""
+            return f"{name}: the image ({width}×{height}{scaled}).", meta, [ImageBlock(out, mime)]
+        text, truncated = mcp_files.plain_text(data)
+        block = with_text(text, truncated)
+        return f"{name}: its text ({chars()}).", meta, [block]
+    except mcp_files.Unreadable as e:
+        return note(str(e))
+
+
 # --------------------------------------------------------------- the list
 _NO_ARGS = {"type": "object", "properties": {}, "additionalProperties": False}
 TOOLS: Dict[str, dict] = {
@@ -363,8 +475,9 @@ TOOLS: Dict[str, dict] = {
     "get_assignment": {
         "fn": get_assignment, "title": "Assignment details",
         "description": ("One assignment by id: title, course, teacher, due, status, instructions as plain text, "
-                        "attachments (name, kind, dashboard link), the student's own files (names), the teacher's "
-                        "feedback (score or level, comment, criteria) and comments."),
+                        "the teacher's attachments and the student's own files (name, file_id, kind, size in bytes, "
+                        "readable = read_attachment gives its content, dashboard link), the teacher's feedback "
+                        "(score or level, comment, criteria) and comments."),
         "schema": {"type": "object", "additionalProperties": False, "required": ["id"], "properties": {
             "id": {"type": "integer", "description": "Assignment id from list_todo or list_submitted."}}}},
     "get_schedule": {
@@ -390,11 +503,25 @@ TOOLS: Dict[str, dict] = {
         "schema": {"type": "object", "additionalProperties": False, "properties": {
             "unread_only": {"type": "boolean", "default": False},
             "limit": {"type": "integer", "minimum": 1, "maximum": MAX_NOTIFICATIONS, "default": DEFAULT_LIMIT}}}},
+    "read_attachment": {
+        "fn": read_attachment, "title": "Read an attachment",
+        "description": ("The content of one file on an assignment: a teacher attachment or one of the student's "
+                        "own files (file_id from get_assignment). PDFs, and Word/PowerPoint/Excel/Pages/Keynote/"
+                        "Numbers through Yungu's PDF preview: the text page by page plus the PDF itself; images "
+                        "(PNG, JPEG, GIF, WebP): the image; text files and online documents: their text. Videos, "
+                        "audio, other kinds and files over 10 MB: name, kind, size and the dashboard link only. "
+                        "Text is cut at 200,000 characters."),
+        "schema": {"type": "object", "additionalProperties": False, "required": ["assignment_id", "file_id"],
+                   "properties": {
+                       "assignment_id": {"type": "integer", "description": "Assignment id (get_assignment's id)."},
+                       "file_id": {"type": "integer", "description": "A file_id from that assignment's "
+                                                                     "attachments or myFiles."}}}},
 }
 
 
-def run(me, name: str, args) -> Tuple[str, dict]:
-    """Run tool `name` for `me` (a Student). ToolFailure for anything but an answer."""
+def run(me, name: str, args) -> tuple:
+    """Run tool `name` for `me` (a Student): (summary, data) or, for read_attachment, (summary, data, blocks).
+    ToolFailure for anything but an answer."""
     tool = TOOLS.get(name)
     if tool is None:
         raise ToolFailure("Unknown tool.", "unknown_tool")

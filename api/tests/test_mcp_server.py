@@ -1,5 +1,6 @@
 """The /mcp endpoint (api/service/mcp_server.py) and personal agent tokens (agent_tokens.py, the
 /agent/tokens routes): the official MCP SDK client in process over the ASGI app; no network."""
+import base64
 import hashlib
 import json
 import logging
@@ -12,6 +13,7 @@ import anyio
 import httpx2
 import pytest
 import requests
+import responses
 from fastapi.testclient import TestClient
 from mcp import Client, types
 from mcp.client.streamable_http import streamable_http_client
@@ -22,6 +24,7 @@ from service.agent_tokens import MAX_PERSONAL_TOKENS, AccountRef, AgentAuth, Per
 from service.mcp_server import ACCOUNT, MAX_CONCURRENT_CALLS, RATE_LIMIT, RATE_LIMITED
 from service.mcp_tools import SIGN_IN_TO_DASHBOARD, SOMETHING_WRONG
 from service.yungu import IDLE_SECONDS
+from test_mcp_attachments import ONLINE_DELTA, OSS, entry, image_bytes, make_pdf, oss  # noqa: F401
 from test_service import (B_PW, ENDPOINTS, ME, OTHER, SIGN_IN_AGAIN, UNREACHABLE, api, auth, b_auth,  # noqa: F401
                           b_sign_in, clock, make, mode, no_network, sign_in, state_dir, tapi, world)
 
@@ -30,17 +33,19 @@ METADATA = "https://yungu.chihairou.dev/.well-known/oauth-protected-resource/mcp
 CHALLENGE = f'Bearer resource_metadata="{METADATA}", scope="read"'
 INVALID = f'Bearer error="invalid_token", resource_metadata="{METADATA}", scope="read"'
 TOOL_NAMES = {"list_todo", "list_submitted", "get_assignment", "get_schedule", "list_courses", "get_behaviour",
-              "list_notifications"}
+              "list_notifications", "read_attachment"}
 WRITES = {"save_draft", "submit", "add_comment", "delete_comment", "create_online_doc", "update_online_doc",
           "mark_notification_read", "mark_submitted", "upload_bytes", "file_redirect"}
 RPC_HEADERS = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
 
 
 @pytest.fixture(autouse=True)
-def never_writes(world):
+def never_writes(world, request):
     yield
+    # read_attachment opens files (a file redirect, then the OSS download the `oss` fixture mocks); only there
+    forbidden = WRITES - {"file_redirect"} if "oss" in request.fixturenames else WRITES
     for w in (world, world.peer):
-        assert not WRITES & {c[0] for c in w.calls}, "an agent reached a Yungu write or a file"
+        assert not forbidden & {c[0] for c in w.calls}, "an agent reached a Yungu write or a file"
 
 
 def new_token(api, headers, name="Claude"):
@@ -106,18 +111,19 @@ def rpc(api, bearer, method="tools/call", params=None, host=None, origin=None):
 
 
 # ------------------------------------------------------------------ the protocol
-def test_the_sdk_client_initializes_lists_seven_read_only_tools_and_calls_one(api, token, world):
+def test_the_sdk_client_initializes_lists_eight_read_only_tools_and_calls_one(api, token, world):
     async def go(client):
         tools = (await client.list_tools()).tools
         result = await client.call_tool("list_courses", {})
         return client.server_info, tools, result
     info, tools, result = session(api, token, go)
     assert info.name == "yungu-lms"
-    assert {t.name for t in tools} == TOOL_NAMES and len(tools) == 7
+    assert {t.name for t in tools} == TOOL_NAMES and len(tools) == 8
     for t in tools:
         assert t.annotations.read_only_hint is True and t.annotations.destructive_hint is False
         assert t.annotations.idempotent_hint is True and t.description and t.input_schema["type"] == "object"
     assert next(t for t in tools if t.name == "get_assignment").input_schema["required"] == ["id"]
+    assert next(t for t in tools if t.name == "read_attachment").input_schema["required"] == ["assignment_id", "file_id"]
     assert result.is_error is False
     assert result.structured_content["courses"][0] == {"id": 1086, "name": "Chinese I"}
     assert result.content[0].text.startswith("13 courses: ")
@@ -132,9 +138,60 @@ def test_the_sdk_client_in_auto_mode_works_too(api, token, world):
 
 
 def test_every_tool_answers_through_the_endpoint(api, token, world):
-    batch = [(name, {"id": 93251} if name == "get_assignment" else {}) for name in sorted(TOOL_NAMES)]
+    world.mixed[93251]["fileList"] = [entry(5, "Notes", 0, "onlineDocument", storeMeta=ONLINE_DELTA)]
+    args = {"get_assignment": {"id": 93251}, "read_attachment": {"assignment_id": 93251, "file_id": 5}}
+    batch = [(name, args.get(name, {})) for name in sorted(TOOL_NAMES)]
     for result in calls(api, token, batch):
         assert result.is_error is False and result.structured_content is not None
+
+
+def test_read_attachment_answers_text_and_an_embedded_pdf(api, token, world, oss):
+    pdf = make_pdf(["Read chapter two", "Answer"])
+    world.mixed[93251]["fileList"] = [entry(41, "Lesson.pdf", len(pdf))]
+    oss.add(responses.GET, OSS, body=pdf)
+    result = call(api, token, "read_attachment", {"assignment_id": 93251, "file_id": 41})
+    assert result.is_error is False
+    summary, meta, text, resource = result.content
+    assert summary.type == "text" and "Lesson.pdf" in summary.text
+    assert json.loads(meta.text) == result.structured_content and result.structured_content["included"] == ["text", "pdf"]
+    assert text.type == "text" and text.text.startswith("--- Page 1 ---\nRead chapter two")
+    assert "text" not in result.structured_content                     # the text comes once, as its own block
+    assert resource.type == "resource" and resource.resource.mime_type == "application/pdf"
+    assert str(resource.resource.uri) == "https://yungu.chihairou.dev/api/files/41"
+    assert base64.b64decode(resource.resource.blob) == pdf
+    assert "SIGNED" not in json.dumps(result.model_dump(mode="json"))
+
+
+def test_read_attachment_answers_an_image_as_image_content(api, token, world, oss):
+    png = image_bytes((64, 32))
+    world.mixed[93251]["fileList"] = [entry(42, "chart.png", len(png), "image")]
+    oss.add(responses.GET, OSS, body=png)
+    result = call(api, token, "read_attachment", {"assignment_id": 93251, "file_id": 42})
+    summary, meta, image = result.content
+    assert image.type == "image" and image.mime_type == "image/png" and base64.b64decode(image.data) == png
+
+
+def test_read_attachment_of_another_accounts_file_is_not_found(api, world, token, b_token, oss):
+    oss.add(responses.GET, OSS, body=b"their text")
+    mine = call(api, token, "read_attachment", {"assignment_id": 93251, "file_id": 22220001})
+    assert mine.is_error is True and text_of(mine) == "Not found."
+    theirs = call(api, b_token, "read_attachment", {"assignment_id": 93251, "file_id": 22220001})
+    assert theirs.is_error is False and theirs.content[2].text == "their text"
+    assert world.count("file_redirect") == 0 and len(oss.calls) == 1
+
+
+def test_read_attachment_logs_nothing_of_the_file(api, world, token, oss, caplog):
+    caplog.set_level(logging.DEBUG)
+    pdf = make_pdf(["Zebra-Body-5521"])
+    world.mixed[93251]["fileList"] = [entry(4477001, "Zebra-Name-9.pdf", len(pdf))]
+    oss.add(responses.GET, OSS, body=pdf)
+    result = call(api, token, "read_attachment", {"assignment_id": 93251, "file_id": 4477001})
+    assert result.is_error is False
+    text = "\n".join(f"{r.name} {r.getMessage()} {r.exc_text or ''}" for r in caplog.records
+                     if not r.name.startswith(("mcp.client", "httpx2")))
+    assert "tool=read_attachment" in text
+    for secret in ("Zebra-Body-5521", "Zebra-Name-9", "4477001", "SIGNED", "aliyuncs", token):
+        assert secret not in text
 
 
 @pytest.mark.parametrize("header,expected", [(None, CHALLENGE), ("Basic abc", CHALLENGE), ("Bearer ", CHALLENGE),
@@ -207,7 +264,7 @@ def test_each_token_reads_only_its_own_accounts_data(api, world, token, b_token)
     theirs = call(api, b_token, "get_assignment", {"id": 93251})
     assert not mine.structured_content["title"].startswith("B ")
     assert theirs.structured_content["title"].startswith("B ")
-    assert theirs.structured_content["myFiles"] == [{"name": "b.txt"}]
+    assert [f["name"] for f in theirs.structured_content["myFiles"]] == ["b.txt"]
     assert len(world.peer.calls) > peer_calls
     a_courses = call(api, token, "list_courses").structured_content["courses"]
     b_courses = call(api, b_token, "list_courses").structured_content["courses"]

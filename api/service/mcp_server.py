@@ -11,11 +11,12 @@ keeps a session to end. The token's `AccountRef` rides in the ASGI scope; the to
 request the SDK hands it, never from anything the agent sends.
 
 Tools (mcp_tools.py) run in a worker thread for that one account: its own Yungu session and read cache,
-60 calls a minute at most (RATE_LIMIT), at most MAX_CONCURRENT_CALLS at once (the rest wait without holding
+60 calls a minute at most (RATE_LIMIT, read_attachment included), at most MAX_CONCURRENT_CALLS at once (the rest wait without holding
 a thread, so one account cannot take the shared pool), and for an account other than the owner only while
 its Yungu session is on (no login is ever attempted for it). Logs: tool name, hashed account id, status,
-duration; never arguments, results or tokens.
+duration; never arguments, results, file names or contents, or tokens.
 """
+import base64
 import hashlib
 import json
 import logging
@@ -33,6 +34,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from . import mcp_tools
 from .agent_tokens import AccountRef, AgentAuth
+from .mcp_files import ImageBlock, PdfBlock, TextBlock
 from .mcp_tools import PUBLIC_URL, SIGN_IN_TO_DASHBOARD, SOMETHING_WRONG, ToolFailure
 from .yungu import SignInAgain
 
@@ -47,9 +49,10 @@ MAX_CONCURRENT_CALLS = 4
 RATE_LIMITED = "Too many requests: at most 60 tool calls a minute for this account. Try again in a minute."
 NOT_RUNNING = "The agent endpoint is starting. Try again in a moment."
 INSTRUCTIONS = ("Read-only access to one student's Yungu (task.yungu.org) data: assignments to do and handed in, "
-                "assignment details and teacher feedback, the class schedule, courses, behaviour points "
-                "(凌云积分) and notifications. Times are China time (UTC+8). Nothing here can hand in, comment or "
-                "change anything; links open in the student's dashboard.")
+                "assignment details and teacher feedback, the content of an assignment's files (read_attachment), "
+                "the class schedule, courses, behaviour points (凌云积分) and notifications. Times are China time "
+                "(UTC+8). Nothing here can hand in, comment or change anything; links open in the student's "
+                "dashboard.")
 
 
 def account_hash(user_id: int) -> str:
@@ -88,10 +91,25 @@ def _tool_list():
             for name, t in mcp_tools.TOOLS.items()]
 
 
-def _result(summary: str, data: dict) -> types.CallToolResult:
+def _block(block):
+    """read_attachment's content: its text as text, a PDF as an embedded resource, an image as an image."""
+    if isinstance(block, TextBlock):
+        return types.TextContent(type="text", text=block.text)
+    if isinstance(block, PdfBlock):
+        return types.EmbeddedResource(type="resource", resource=types.BlobResourceContents(
+            uri=block.uri, mimeType="application/pdf", blob=base64.b64encode(block.data).decode("ascii")))
+    if isinstance(block, ImageBlock):
+        return types.ImageContent(type="image", data=base64.b64encode(block.data).decode("ascii"),
+                                  mimeType=block.mime)
+    raise TypeError(type(block).__name__)
+
+
+def _result(summary: str, data: dict, blocks=()) -> types.CallToolResult:
+    """The summary, the data as JSON text (and as structured content), then any file content."""
     compact = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
     return types.CallToolResult(content=[types.TextContent(type="text", text=summary),
-                                         types.TextContent(type="text", text=compact)],
+                                         types.TextContent(type="text", text=compact),
+                                         *(_block(b) for b in blocks)],
                                 structuredContent=data)
 
 
@@ -149,8 +167,8 @@ class AgentMcp:
             if busy is None:
                 busy = self._busy[ref.user_id] = anyio.Semaphore(MAX_CONCURRENT_CALLS)
             async with busy:
-                summary, data = await anyio.to_thread.run_sync(self._run, ref.user_id, params.name, params.arguments)
-            result = _result(summary, data)
+                answer = await anyio.to_thread.run_sync(self._run, ref.user_id, params.name, params.arguments)
+            result = _result(*answer)
         except ToolFailure as e:
             status, result = e.status, _error(e.message)
         except Exception as e:                                # never a trace to the agent, nor its text in a log

@@ -141,10 +141,22 @@ Code: `service/mcp_server.py` (endpoint, auth check, rate limit, logs), `service
     token ends the grant.
 - **Tools** (all `readOnlyHint: true`): `list_todo`, `list_submitted(course?, limit?)`, `get_assignment(id)`,
   `get_schedule(date?, week?)`, `list_courses`, `get_behaviour(month?)`, `list_notifications(unread_only?,
-  limit?)`. Each answers a short text summary plus the same data as compact JSON (text and
-  `structuredContent`); times are China time ISO 8601; instructions are plain text; attachments are dashboard
-  links (`/api/files/<id>`, online documents → the assignment page); never file bytes, never a write (reading
-  notifications does not mark them read). They use the account's own session and 60 s read cache.
+  limit?)`, `read_attachment(assignment_id, file_id)`. Each answers a short text summary plus the same data as
+  compact JSON (text and `structuredContent`); times are China time ISO 8601; instructions are plain text;
+  attachments and own files carry `file_id`, `kind`, `size`, `readable` and a dashboard link (`/api/files/<id>`,
+  online documents → the assignment page); never a write (reading notifications does not mark them read). They
+  use the account's own session and 60 s read cache.
+- **`read_attachment`** (`service/mcp_files.py`): only a file listed in that assignment's detail for this
+  account (teacher attachments + own files), else "Not found." (no Yungu file call). Bytes come through the
+  account's file redirect (download for PDF/image/text, Yungu's PDF preview for Office/iWork) from the signed
+  OSS URL, which never leaves the server nor reaches a log: streamed into memory, at most 10 MB (Content-Length
+  and the running count; `Accept-Encoding: identity`), 30 s for the whole call (then "Yungu took too long to
+  send the file. Try again."), no disk. PDF/preview: page-separated text (pypdf, ≤ 200k characters) + the PDF
+  as an embedded resource (`application/pdf`, base64); password-protected/damaged → metadata, link and a note.
+  PNG/JPEG/GIF/WebP: image content, downscaled (Pillow) past 2048 px or 3.5 MB; text files: UTF-8, else
+  GB18030; online documents: text from the Quill delta (headings `# `, lists `- `/`1. `). Video, audio, other
+  kinds and anything over 10 MB: metadata + link + note. The extracted text is its own text block (not in
+  `structuredContent`, which holds the metadata).
 - **Which account:** the token's. The owner always (automatic re-login); any other account only while its
   Yungu session is on, else the tool error "Sign in to the dashboard again to keep agent access working." with
   no login attempt (also the owner's answer after its sign-out deleted the saved password). Yungu down →
