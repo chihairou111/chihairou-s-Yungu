@@ -7,3 +7,12 @@ playwright-report/
 *.tsbuildinfo
 frontend/.impeccable/hook.cache.json
 api/.venv/
+
+# Real account data and private notes: kept on this machine only, never published.
+api/tests/fixtures/
+api/NOTES.md
+api/test_live.py
+api/smoke_live.py
+frontend/docs/
+.impeccable/
+frontend/.impeccable/
