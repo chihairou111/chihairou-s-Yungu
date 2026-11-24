@@ -40,7 +40,6 @@ describe('WeekCalendar', () => {
       .find((li) => li.textContent?.includes('Chinese I'));
     expect(block).toBeDefined();
     expect(within(block!).getByText('Chinese I')).toBeInTheDocument();
-    expect(within(block!).getByText(/08:00–08:40/)).toBeInTheDocument();
     expect(block!.textContent).toBe('Chinese I08:00–08:40 · D419');
   });
 

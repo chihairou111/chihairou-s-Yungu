@@ -9,6 +9,7 @@ import { loadPanelClasses } from '@/lib/schedule';
 import { TODAY_PANEL_COOKIE, parseTodayPanel } from '@/lib/today-panel';
 import AppShell from '@/components/AppShell';
 import NavRail from '@/components/NavRail';
+import SkipLink from '@/components/SkipLink';
 import TodayDrawer from '@/components/TodayDrawer';
 
 // The session gate reads the request cookie, so this segment renders per
@@ -34,6 +35,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
 
   return (
     <>
+      <SkipLink />
       {/* Nav first in DOM order so keyboard users reach it before the page content. */}
       <NavRail />
       <AppShell

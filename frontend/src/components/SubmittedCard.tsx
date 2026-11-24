@@ -7,7 +7,7 @@ import { chinaMonthDay } from '@/lib/time';
 import type { Assignment } from '@/lib/types';
 import CardOpener, { openerHostSx } from './CardOpener';
 
-const META_SX = { fontSize: '0.8125rem', lineHeight: '18px' } as const;
+const META_SX = { fontSize: '0.8125rem', lineHeight: '1.125rem' } as const;
 
 /**
  * A compact submitted-work card: course and due date on one line, the title on the next. Only work
@@ -32,7 +32,7 @@ export default function SubmittedCard({ assignment }: { assignment: Assignment }
           variant="h3"
           component="h4"
           title={assignment.title}
-          sx={{ flex: 1, minWidth: 0, fontSize: '0.9375rem', lineHeight: '22px' }}
+          sx={{ flex: 1, minWidth: 0, fontSize: '0.9375rem', lineHeight: '1.375rem' }}
         >
           <CardOpener taskId={assignment.id} lines={1}>
             {assignment.title}

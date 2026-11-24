@@ -254,7 +254,7 @@ export default function TodayDrawer({ events, now: serverNow, courses, initialPa
       >
         <Stack direction="row" sx={{ alignItems: 'center', gap: 1, pl: 2, pr: 1, py: 1.5, minHeight: 64 }}>
           <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-            <Typography id={TITLE_ID} variant="h2" sx={{ fontSize: '1.375rem', lineHeight: '28px' }}>
+            <Typography id={TITLE_ID} variant="h2" sx={{ fontSize: '1.375rem', lineHeight: '1.75rem' }}>
               Today&apos;s classes
             </Typography>
             {subtitle}

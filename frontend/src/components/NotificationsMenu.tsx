@@ -241,7 +241,7 @@ export default function NotificationsMenu() {
                 height: 18,
                 px: 0.5,
                 borderRadius: 9,
-                fontSize: '0.6875rem',
+                fontSize: '0.75rem',
                 fontWeight: 600,
                 fontVariantNumeric: 'tabular-nums',
                 border: '2px solid',

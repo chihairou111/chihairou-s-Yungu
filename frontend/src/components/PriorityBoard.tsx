@@ -98,7 +98,7 @@ export default function PriorityBoard({ items, now }: PriorityBoardProps) {
                       variant="body2"
                       component="h3"
                       color="text.secondary"
-                      sx={{ fontSize: '0.8125rem', lineHeight: '18px', fontWeight: 500, mb: 1 }}
+                      sx={{ fontSize: '0.8125rem', lineHeight: '1.125rem', fontWeight: 500, mb: 1 }}
                     >
                       {group.label}
                     </Typography>

@@ -1,9 +1,10 @@
 'use client';
-import { useEffect, useRef, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
+import Popover from '@mui/material/Popover';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import ChevronLeft from '@mui/icons-material/ChevronLeft';
@@ -19,6 +20,8 @@ import { VISUALLY_HIDDEN } from './visually-hidden';
 
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
+/** A px length as rem, so the grid's rows, axis and headers grow with the reader's text size. */
+const rem = (px: number) => `${px / 16}rem`;
 /** One hour of the grid: 72px (a 40-minute class gets 48px, two lines); 64px in the narrow grid. */
 const HOUR_PX = 72;
 const HOUR_NARROW_PX = 64;
@@ -107,6 +110,9 @@ export default function WeekCalendar({ weekStart, events, courses, now: serverNo
   const surface = theme.palette.background.paper;
   const todayRef = useRef<HTMLElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  // In the grid a block may cut its name or room short, so each opens its full details; the list shows all of it.
+  const [isGrid, setIsGrid] = useState(false);
+  const [details, setDetails] = useState<{ anchor: HTMLElement; event: ClassEvent; open: boolean } | null>(null);
   const classes = events.filter((e) => e.isClass && dayIndex(e.start, weekStart) >= 0 && dayIndex(e.start, weekStart) < 7);
   const days = [0, 1, 2, 3, 4, 5, 6]
     .map((d) => ({ d, placed: layoutDay(classes.filter((e) => dayIndex(e.start, weekStart) === d)) }))
@@ -125,6 +131,14 @@ export default function WeekCalendar({ weekStart, events, courses, now: serverNo
   };
   const nowLine = classes.length > 0 ? nowLineHours(now, weekStart, firstHour, hours.length) : null;
   const scrollToToday = days.some(({ d }) => d === today) && days[0].d !== today;
+
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => setIsGrid(body.clientWidth >= GRID_MIN_PX));
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, []);
 
   // The list opens at today (once, on arrival), so a Thursday does not start on Monday.
   useEffect(() => {
@@ -151,7 +165,7 @@ export default function WeekCalendar({ weekStart, events, courses, now: serverNo
         {/* One row on phones: the range moves to the right end in its short form; the heading keeps the full range. */}
         <Typography
           variant="h2"
-          sx={{ whiteSpace: 'nowrap', py: 1, [theme.breakpoints.down('sm')]: { ml: 'auto', fontSize: '1rem', lineHeight: '24px', fontWeight: 500 } }}
+          sx={{ whiteSpace: 'nowrap', py: 1, [theme.breakpoints.down('sm')]: { ml: 'auto', fontSize: '1rem', lineHeight: 1.5, fontWeight: 500 } }}
         >
           <Box component="span" sx={{ [theme.breakpoints.down('sm')]: VISUALLY_HIDDEN }}>
             {weekRangeLabel(weekStart, shownDays)}
@@ -175,9 +189,9 @@ export default function WeekCalendar({ weekStart, events, courses, now: serverNo
         ) : (
           <Box
             sx={{
-              '--hour': `${HOUR_PX}px`,
-              '--axis': `${AXIS_PX}px`,
-              [NARROW_GRID]: { '--hour': `${HOUR_NARROW_PX}px`, '--axis': `${AXIS_NARROW_PX}px` },
+              '--hour': rem(HOUR_PX),
+              '--axis': rem(AXIS_PX),
+              [NARROW_GRID]: { '--hour': rem(HOUR_NARROW_PX), '--axis': rem(AXIS_NARROW_PX) },
               display: 'flex',
               flexDirection: 'column',
               gap: 3,
@@ -194,7 +208,7 @@ export default function WeekCalendar({ weekStart, events, courses, now: serverNo
             }}
           >
             {/* Time axis (grid only). */}
-            <Box aria-hidden sx={{ display: 'none', [GRID]: { display: 'block' }, pt: `${HEADER_PX + TOP_PAD}px`, pb: 1 }}>
+            <Box aria-hidden sx={{ display: 'none', [GRID]: { display: 'block' }, pt: `calc(${rem(HEADER_PX)} + ${TOP_PAD}px)`, pb: 1 }}>
               <Box sx={{ position: 'relative', height: bodyHeight }}>
                 {hours.map((h, i) => (
                   <Typography
@@ -237,9 +251,9 @@ export default function WeekCalendar({ weekStart, events, courses, now: serverNo
                       display: 'flex',
                       alignItems: 'center',
                       gap: 1,
-                      [LIST]: { mb: 1, fontSize: '1rem', lineHeight: '24px', fontWeight: 500 },
+                      [LIST]: { mb: 1, fontSize: '1rem', lineHeight: 1.5, fontWeight: 500 },
                       [GRID]: {
-                        height: HEADER_PX,
+                        height: rem(HEADER_PX),
                         justifyContent: 'center',
                         borderBottom: 1,
                         borderColor: 'divider',
@@ -252,8 +266,8 @@ export default function WeekCalendar({ weekStart, events, courses, now: serverNo
                     <Box
                       component="span"
                       sx={(theme) => ({
-                        minWidth: 30,
-                        height: 30,
+                        minWidth: rem(30),
+                        height: rem(30),
                         px: 0.5,
                         borderRadius: `${theme.yungu.shape.full}px`,
                         display: 'inline-flex',
@@ -307,6 +321,7 @@ export default function WeekCalendar({ weekStart, events, courses, now: serverNo
                             surface={surface}
                             weekStart={weekStart}
                             firstHour={firstHour}
+                            onOpen={isGrid ? (anchor) => setDetails({ anchor, event: p.event, open: true }) : undefined}
                           />
                         ))}
                       </Box>
@@ -318,6 +333,37 @@ export default function WeekCalendar({ weekStart, events, courses, now: serverNo
           </Box>
         )}
       </Box>
+
+      <Popover
+        open={details?.open ?? false}
+        anchorEl={details?.anchor}
+        onClose={() => setDetails((d) => d && { ...d, open: false })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+        slotProps={{
+          paper: {
+            role: 'dialog',
+            'aria-label': details?.event.name,
+            sx: (theme) => ({ mt: 0.5, px: 2, py: 1.5, maxWidth: 320, borderRadius: `${theme.yungu.shape.medium}px` }),
+          },
+        }}
+      >
+        {details && (
+          <>
+            <Typography variant="body1" sx={{ fontWeight: 600, overflowWrap: 'anywhere' }}>
+              {details.event.name}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+              {`${chinaClock(details.event.start)}–${chinaClock(details.event.end)}`}
+            </Typography>
+            {details.event.room && (
+              <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>
+                {details.event.room}
+              </Typography>
+            )}
+          </>
+        )}
+      </Popover>
     </>
   );
 }
@@ -365,19 +411,21 @@ interface ClassBlockProps {
   surface: string;
   weekStart: number;
   firstHour: number;
+  /** Opens the class's full details from this block (grid only, where a block may cut its text short). */
+  onOpen?: (anchor: HTMLElement) => void;
 }
 
 /**
  * A class in Google Calendar's light event style: a light tint of its course color, with name and
  * "08:00–08:40 · D419" in a dark shade of the same hue. Positioned by time in the grid; a full-width
- * row in the list.
+ * row in the list. In the grid the room outranks the time, which the block's position already shows:
+ * the narrow grid drops the end time, and a line still too long gives up the time rather than the room.
  */
-function ClassBlock({ placed: { event, lane, lanes }, color, surface, weekStart, firstHour }: ClassBlockProps) {
+function ClassBlock({ placed: { event, lane, lanes }, color, surface, weekStart, firstHour, onOpen }: ClassBlockProps) {
   const top = (minuteOfDay(event.start, weekStart) - firstHour * 60) / 60;
   const duration = (event.end - event.start) / MIN / 60;
-  const meta = [`${chinaClock(event.start)}–${chinaClock(event.end)}`, event.room].filter(Boolean).join(' · ');
   const { bg, fg } = lightEventColors(color, surface);
-  // Grid geometry (in hours; the grid sets px per hour) travels as custom properties so one shared style rule serves every block.
+  // Grid geometry (in hours; the grid sets the length of an hour) travels as custom properties so one shared style rule serves every block.
   const geometry = {
     '--course': color,
     '--course-bg': bg,
@@ -391,53 +439,90 @@ function ClassBlock({ placed: { event, lane, lanes }, color, surface, weekStart,
   return (
     <Box
       component="li"
-      title={`${event.name}\n${meta}`}
       style={geometry}
       data-short={duration * HOUR_NARROW_PX < TWO_LINES_PX ? '' : undefined}
       sx={(theme) => ({
         bgcolor: 'var(--course-bg)',
         color: 'var(--course-fg)',
         borderRadius: `${theme.yungu.shape.small}px`,
-        [LIST]: { px: 1.5, py: 1 },
+        '& > .class-body': {
+          display: 'block',
+          width: '100%',
+          m: 0,
+          border: 0,
+          borderRadius: 'inherit',
+          bgcolor: 'transparent',
+          color: 'inherit',
+          font: 'inherit',
+          letterSpacing: 'inherit',
+          textAlign: 'start',
+        },
+        '& > button.class-body': {
+          cursor: 'pointer',
+          '@media (hover: hover)': { '&:hover': { bgcolor: 'color-mix(in srgb, currentColor 8%, transparent)' } },
+          '&:focus-visible': { outline: `2px solid ${theme.palette.primary.main}`, outlineOffset: -2 },
+        },
+        [LIST]: { '& > .class-body': { px: 1.5, py: 1 } },
         [GRID]: {
           position: 'absolute',
           top: 'calc(var(--top) * var(--hour) + 1px)',
           height: 'calc(var(--duration) * var(--hour) - 2px)',
           left: 'calc(var(--left) + 4px)',
           width: 'calc(var(--width) - 8px)',
-          px: 1,
-          py: 0.5,
-          overflow: 'hidden',
-          '& > *': { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+          '& > .class-body': { height: '100%', px: 1, py: 0.5, overflow: 'hidden' },
+          '& .class-name': { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+          // One line: when time and room do not fit side by side the room wraps onto the line kept in view.
+          '& .class-meta': { display: 'flex', flexWrap: 'wrap-reverse', alignContent: 'flex-end', height: '1.4em', overflow: 'hidden' },
+          '& .class-time': { flex: 'none', whiteSpace: 'pre' },
+          '& .class-room': { minWidth: 0, maxWidth: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
         },
-        [NARROW_GRID]: { px: 0.75, '&[data-short] > :nth-of-type(2)': { display: 'none' } },
+        [NARROW_GRID]: {
+          '& > .class-body': { px: 0.75 },
+          '& .class-meta': { height: '1rem' },
+          '& .class-end': { display: 'none' },
+          '&[data-short] .class-meta': { display: 'none' },
+        },
       })}
     >
-      <Typography
-        variant="body2"
-        sx={{
-          color: 'inherit',
-          fontWeight: 600,
-          overflowWrap: 'anywhere',
-          [LIST]: { lineHeight: '20px' },
-          [GRID]: { fontSize: '0.8125rem', lineHeight: 1.4 },
-          [NARROW_GRID]: { fontSize: '0.75rem', lineHeight: '16px' },
-        }}
+      <Box
+        className="class-body"
+        {...(onOpen
+          ? { component: 'button', type: 'button', 'aria-haspopup': 'dialog', onClick: (e: { currentTarget: HTMLElement }) => onOpen(e.currentTarget) }
+          : {})}
       >
-        {event.name}
-      </Typography>
-      <Typography
-        variant="body2"
-        sx={{
-          color: 'inherit',
-          overflowWrap: 'anywhere',
-          [LIST]: { fontSize: '0.8125rem', lineHeight: '18px' },
-          [GRID]: { fontSize: '0.75rem', lineHeight: 1.4 },
-          [NARROW_GRID]: { fontSize: '0.6875rem', lineHeight: '14px' },
-        }}
-      >
-        {meta}
-      </Typography>
+        <Typography
+          className="class-name"
+          variant="body2"
+          sx={{
+            color: 'inherit',
+            fontWeight: 600,
+            overflowWrap: 'anywhere',
+            [LIST]: { lineHeight: 20 / 14 },
+            [GRID]: { fontSize: '0.8125rem', lineHeight: 1.4 },
+            [NARROW_GRID]: { fontSize: '0.75rem', lineHeight: '1rem' },
+          }}
+        >
+          {event.name}
+        </Typography>
+        <Typography
+          className="class-meta"
+          variant="body2"
+          sx={{
+            color: 'inherit',
+            overflowWrap: 'anywhere',
+            [LIST]: { fontSize: '0.8125rem', lineHeight: 18 / 13 },
+            [GRID]: { fontSize: '0.75rem', lineHeight: 1.4 },
+            [NARROW_GRID]: { lineHeight: '1rem' },
+          }}
+        >
+          <span className="class-time">
+            {chinaClock(event.start)}
+            <span className="class-end">–{chinaClock(event.end)}</span>
+            {event.room ? ' · ' : ''}
+          </span>
+          {event.room && <span className="class-room">{event.room}</span>}
+        </Typography>
+      </Box>
     </Box>
   );
 }

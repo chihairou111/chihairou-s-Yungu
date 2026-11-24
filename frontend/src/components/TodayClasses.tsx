@@ -84,7 +84,7 @@ export default function TodayClasses({ events: classes, now, courses, nextDay }:
             {label && (
               <Typography
                 component="span"
-                sx={{ pl: TEXT_INSET, fontSize: '0.75rem', lineHeight: '16px', fontWeight: 600, color: 'primary.main' }}
+                sx={{ pl: TEXT_INSET, fontSize: '0.75rem', lineHeight: '1rem', fontWeight: 600, color: 'primary.main' }}
               >
                 {label}
               </Typography>

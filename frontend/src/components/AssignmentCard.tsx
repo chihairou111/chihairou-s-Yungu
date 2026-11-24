@@ -34,7 +34,7 @@ export default function AssignmentCard({ assignment, now, variant, headingLevel 
 
   return (
     <Card variant="outlined" component="article" sx={[{ p: 2 }, openerHostSx]}>
-      <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.8125rem', lineHeight: '18px', overflowWrap: 'anywhere' }}>
+      <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.8125rem', lineHeight: '1.125rem', overflowWrap: 'anywhere' }}>
         {assignment.course}
       </Typography>
       <Typography
@@ -44,7 +44,7 @@ export default function AssignmentCard({ assignment, now, variant, headingLevel 
         sx={{
           mt: 0.5,
           fontSize: '0.9375rem',
-          lineHeight: '22px',
+          lineHeight: '1.375rem',
           overflowWrap: 'anywhere',
           textWrap: 'pretty',
         }}

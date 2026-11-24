@@ -121,7 +121,7 @@ export default function BehaviourView({ behaviour, now: serverNow }: BehaviourVi
         </Stack>
         <Typography
           variant="h2"
-          sx={{ whiteSpace: 'nowrap', py: 1, [theme.breakpoints.down('sm')]: { ml: 'auto', fontSize: '1rem', lineHeight: '24px', fontWeight: 500 } }}
+          sx={{ whiteSpace: 'nowrap', py: 1, [theme.breakpoints.down('sm')]: { ml: 'auto', fontSize: '1rem', lineHeight: '1.5rem', fontWeight: 500 } }}
         >
           {monthLabel(month)}
         </Typography>
@@ -325,7 +325,7 @@ function Row({ record: r }: { record: BehaviourRecord }) {
   const struck = r.revoked ? { textDecorationLine: 'line-through', color: 'text.secondary' } : {};
   // Each detail wraps as a whole where it can, so a line never breaks inside a teacher's name.
   const unit = { display: 'inline-block', maxWidth: '100%' } as const;
-  const small = { fontSize: '0.8125rem', lineHeight: '18px', color: 'text.secondary' } as const;
+  const small = { fontSize: '0.8125rem', lineHeight: '1.125rem', color: 'text.secondary' } as const;
   return (
     <Box
       component="li"
@@ -367,7 +367,7 @@ function Row({ record: r }: { record: BehaviourRecord }) {
           {badge}
         </Box>
       </Box>
-      <Typography component="p" sx={{ gridArea: 'name', fontSize: '0.9375rem', fontWeight: 600, lineHeight: '22px', overflowWrap: 'anywhere' }}>
+      <Typography component="p" sx={{ gridArea: 'name', fontSize: '0.9375rem', fontWeight: 600, lineHeight: '1.375rem', overflowWrap: 'anywhere' }}>
         <Box component="span" data-name="" sx={struck}>
           {r.name}
         </Box>
@@ -382,9 +382,9 @@ function Row({ record: r }: { record: BehaviourRecord }) {
               borderRadius: `${theme.yungu.shape.extraSmall + 2}px`,
               bgcolor: theme.yungu.color.surfaceContainerHighest,
               color: 'text.secondary',
-              fontSize: '0.71875rem',
+              fontSize: '0.75rem',
               fontWeight: 600,
-              lineHeight: '18px',
+              lineHeight: '1.125rem',
               verticalAlign: '1px',
             }}
           >

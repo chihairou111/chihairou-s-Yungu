@@ -32,6 +32,7 @@ import TodoistMenu from './TodoistMenu';
 import RefreshButton from './RefreshButton';
 import { RefreshProvider } from './RefreshContext';
 import AgentAccessDialog from './AgentAccessDialog';
+import { MAIN_ID } from './SkipLink';
 
 /** "Bruce Zheng" -> "BZ"; "郑博" -> "郑"; blank -> "?". */
 export function initials(name: string): string {
@@ -110,8 +111,10 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
             onClick={(e) => setMenuAnchor(e.currentTarget)}
             sx={{ ml: 1, p: 0.5, borderRadius: '50%' }}
           >
-            <Avatar sx={{ width: 36, height: 36, fontSize: '0.875rem', fontWeight: 600, bgcolor: 'primary.main' }}>
-              {initials(userName)}
+            {/* Sized in rem with its initials. They are drawn as generated content: a picture of the
+                account, whose name the button's label gives in full. */}
+            <Avatar aria-hidden sx={{ width: '2.25rem', height: '2.25rem', fontSize: '0.875rem', fontWeight: 600, bgcolor: 'primary.main' }}>
+              <Box component="span" data-initials={initials(userName)} sx={{ '&::before': { content: 'attr(data-initials)' } }} />
             </Avatar>
           </IconButton>
           {/* A Popover rather than Menu so the account name and errors sit outside role="menu". */}
@@ -169,6 +172,7 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
       </AppBar>
       <Box
         component="main"
+        id={MAIN_ID}
         sx={(theme) => ({
           ...pagePadding(theme),
           pt: 2,

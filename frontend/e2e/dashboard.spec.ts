@@ -141,7 +141,7 @@ test.describe('phone width', () => {
     expect(Math.round(navBox.x)).toBe(16);
     expect(Math.round(844 - (navBox.y + navBox.height))).toBe(16);
     expect(Math.round(navBox.height)).toBe(56);
-    // Icons only, but each link keeps its name and the current page is marked.
+    // Each icon sits over its label, and the current page is marked.
     await expect(nav.getByRole('link', { name: 'Assignments' })).toHaveAttribute('aria-current', 'page');
     await expect(nav.getByRole('link', { name: 'Calendar' })).toBeVisible();
 

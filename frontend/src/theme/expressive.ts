@@ -40,6 +40,16 @@ const hoverOnSurface = 'rgba(25, 28, 32, 0.08)';
 const hoverOnSecondaryContainer = '#cbd3ea';
 const hoverOnPrimaryContainer = '#c6d4f0';
 
+/**
+ * Touch screens: a button smaller than 48px (M3's minimum target) keeps its size but takes taps over
+ * a 48px area centred on it. The inset is negative only on an axis where the button falls short.
+ */
+const touchTarget = {
+  '@media (pointer: coarse)': {
+    '&::after': { content: '""', position: 'absolute', inset: 'min(0px, calc((100% - 48px) / 2))' },
+  },
+};
+
 const tokens: YunguTokens = {
   shape,
   color,
@@ -115,11 +125,11 @@ const theme = createTheme({
       // M3 filled buttons are flat (level 0).
       defaultProps: { disableElevation: true },
       styleOverrides: {
-        root: { borderRadius: shape.full },
+        root: { borderRadius: shape.full, ...touchTarget },
         outlined: { borderColor: color.outline },
       },
     },
-    MuiIconButton: { styleOverrides: { root: { borderRadius: shape.full } } },
+    MuiIconButton: { styleOverrides: { root: { borderRadius: shape.full, ...touchTarget } } },
     // Assist / filter chip shape.
     MuiChip: { styleOverrides: { root: { borderRadius: shape.small } } },
     // Cards: tonal surface, no shadow.
@@ -137,15 +147,23 @@ const theme = createTheme({
     },
     MuiMenuItem: {
       styleOverrides: {
-        root: {
+        root: ({ theme }) => ({
           minHeight: 48,
+          // MUI shortens menu items from `sm`; a tablet is still a touch screen.
+          [theme.breakpoints.up('sm')]: { minHeight: 48 },
           '&.Mui-selected': {
             backgroundColor: color.secondaryContainer,
             color: color.onSecondaryContainer,
             '& .MuiListItemIcon-root': { color: 'inherit' },
           },
           '&.Mui-selected:hover, &.Mui-selected.Mui-focusVisible': { backgroundColor: hoverOnSecondaryContainer },
-        },
+        }),
+      },
+    },
+    // A small select's 40px field takes taps over 48px on touch screens (see `touchTarget`).
+    MuiSelect: {
+      styleOverrides: {
+        select: { '@media (pointer: coarse)': { '&::after': { content: '""', position: 'absolute', inset: '-4px 0' } } },
       },
     },
     // Modal side sheet: large corners on its inner (left) edge, surface container low, level 1.
@@ -172,6 +190,7 @@ const theme = createTheme({
         root: {
           borderRadius: shape.medium,
           boxShadow: level3,
+          ...touchTarget,
           '&.MuiFab-primary': { backgroundColor: color.primaryContainer, color: color.onPrimaryContainer },
           '&.MuiFab-primary:hover': { backgroundColor: hoverOnPrimaryContainer },
           '&:active': { boxShadow: level3 },
@@ -194,6 +213,12 @@ const theme = createTheme({
         '::selection': { backgroundColor: theme.palette.primary.light, color: theme.palette.text.primary },
         html: { colorScheme: 'light', scrollbarColor: `${color.outlineVariant} transparent` },
         body: { fontVariantNumeric: 'tabular-nums' },
+        // Reduced motion: menus and pop-ups fade in place instead of growing from their anchor, and
+        // the tab indicator moves in one step.
+        '@media (prefers-reduced-motion: reduce)': {
+          '.MuiPopover-paper': { transform: 'none !important', transition: 'opacity 120ms ease-out !important' },
+          '.MuiTabs-indicator': { transition: 'none' },
+        },
       }),
     },
   },
