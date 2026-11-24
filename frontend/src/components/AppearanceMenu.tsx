@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import Grow from '@mui/material/Grow';
+import Fade from '@mui/material/Fade';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
 import MenuItem from '@mui/material/MenuItem';
@@ -14,6 +14,7 @@ import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
 import type { Appearance } from '@/lib/appearance';
 import { useAppearance } from '@/lib/useAppearance';
 import { MENU_SHADOW } from '@/theme/expressive';
+import { EASE_OUT } from './detail/motion';
 
 /** The pointer rests this long on Appearance before the submenu opens (passing over it does nothing). */
 export const HOVER_OPEN_MS = 120;
@@ -34,11 +35,12 @@ const OPTIONS: { value: Appearance; label: string }[] = [
 ];
 
 type Side = 'left' | 'right' | 'below';
-const PLACEMENT = { left: 'left-start', right: 'right-start', below: 'bottom-end' } as const;
+const PLACEMENT = { left: 'left-start', right: 'right-start', below: 'bottom-start' } as const;
 
 /**
  * Where the submenu fits beside the parent menu: left first (the gear sits near the right edge), else
- * right, else (a phone) below Appearance, over the parent menu. Offsets ignore the menu's grow transform.
+ * right, else (a phone) below Appearance, over the parent menu and as wide as it. Offsets ignore the
+ * menu's grow transform.
  */
 function sideFor(item: HTMLElement): Side {
   const paper = item.closest<HTMLElement>('.MuiPaper-root');
@@ -170,7 +172,8 @@ export default function AppearanceMenu({ onClose, autoFocus, tabIndex }: Appeara
           } else show(false);
         }}
         onKeyDown={onItemKeyDown}
-        sx={{ gap: 1 }}
+        // The open submenu's parent keeps the hover state layer, which ties the two together.
+        sx={{ gap: 1, '&[aria-expanded="true"]': { bgcolor: 'var(--yungu-hover-on-surface)' } }}
       >
         <ListItemText>Appearance</ListItemText>
         <Chevron fontSize="small" aria-hidden sx={{ color: 'text.secondary', mr: -0.5 }} />
@@ -190,18 +193,23 @@ export default function AppearanceMenu({ onClose, autoFocus, tabIndex }: Appeara
         ]}
         sx={{ zIndex: 1 }}
       >
-        {({ TransitionProps, placement }) => (
-          <Grow {...TransitionProps} style={{ transformOrigin: placement.startsWith('left') ? 'right top' : placement.startsWith('right') ? 'left top' : 'right top' }}>
+        {({ TransitionProps }) => (
+          // A quick fade in place, no scale: the panel sits beside (or under) its parent, so its position
+          // already says where it came from, and hovering in and out must never lag. A fade alone is
+          // already the reduced-motion form.
+          <Fade {...TransitionProps} timeout={{ enter: 120, exit: 80 }} easing={{ enter: EASE_OUT, exit: 'ease-out' }}>
             <Paper
               onPointerEnter={onSubmenuEnter}
               onPointerLeave={onLeave}
               sx={(theme) => ({
                 minWidth: SUBMENU_PX,
+                // Below Appearance (a phone): flush with the parent menu and exactly as wide.
+                ...(side === 'below' && item ? { width: item.offsetWidth, minWidth: 0 } : {}),
                 borderRadius: `${theme.yungu.shape.extraSmall}px`,
                 bgcolor: theme.yungu.menu.bg,
+                // One tonal step above the parent menu in dark, where its shadow barely shows.
+                ...theme.applyStyles('dark', { bgcolor: theme.yungu.color.surfaceContainerHighest }),
                 boxShadow: MENU_SHADOW,
-                // Reduced motion: it fades in place, like the app's other menus.
-                '@media (prefers-reduced-motion: reduce)': { transform: 'none !important', transition: 'opacity 120ms ease-out !important' },
               })}
             >
               <MenuList id={menuId} aria-labelledby={itemId} onKeyDown={onSubmenuKeyDown}>
@@ -222,7 +230,7 @@ export default function AppearanceMenu({ onClose, autoFocus, tabIndex }: Appeara
                 })}
               </MenuList>
             </Paper>
-          </Grow>
+          </Fade>
         )}
       </Popper>
     </>
