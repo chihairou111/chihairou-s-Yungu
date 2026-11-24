@@ -50,7 +50,7 @@ export default function RefreshButton() {
                 duration: theme.transitions.duration.shortest,
                 easing: 'ease',
               }),
-              '&[aria-disabled="true"]': { color: theme.palette.action.disabled },
+              '&[aria-disabled="true"]': { color: theme.vars.palette.action.disabled },
             },
             // Constant motion, so linear; it starts from the resting angle, so nothing jumps.
             '&[data-spinning] svg': {

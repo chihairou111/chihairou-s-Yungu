@@ -251,10 +251,11 @@ export default function CameraDialog({ open, onClose, onAdd }: CameraDialogProps
                     top: -6,
                     right: -6,
                     p: 0.25,
-                    bgcolor: theme.palette.text.primary,
-                    color: theme.yungu.color.surfaceContainerLowest,
-                    border: `2px solid ${theme.yungu.color.surfaceContainerLowest}`,
-                    '&:hover': { bgcolor: theme.palette.text.primary },
+                    bgcolor: theme.vars.palette.text.primary,
+                    // Cut out of the photo in the dialog's own surface colour.
+                    color: theme.yungu.dialog.bg,
+                    border: `2px solid ${theme.yungu.dialog.bg}`,
+                    '&:hover': { bgcolor: theme.vars.palette.text.primary },
                     // A bigger hit area than the 20px badge it draws.
                     '&::after': { content: '""', position: 'absolute', inset: -8 },
                     '& svg': { fontSize: 14 },

@@ -140,7 +140,7 @@ export default function AssignmentDialog({ now }: { now: number }) {
         paper: {
           'aria-busy': loaded === null ? true : undefined,
           sx: (theme) => ({
-            bgcolor: theme.yungu.color.surfaceContainerLowest,
+            bgcolor: theme.yungu.dialog.bg,
             backgroundImage: 'none',
             overflow: 'hidden',
             borderRadius: `${theme.yungu.shape.extraLarge}px`,

@@ -53,7 +53,7 @@ export default function AllowedWifiDialog({ open, allowedWifi, ssid, onChange, o
         transition: popIn(reduceMotion),
         paper: {
           sx: (theme) => ({
-            bgcolor: theme.yungu.color.surfaceContainerLowest,
+            bgcolor: theme.yungu.dialog.bg,
             backgroundImage: 'none',
             m: 2,
             width: 'calc(100% - 32px)',

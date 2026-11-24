@@ -146,7 +146,12 @@ describe('NotificationsMenu', () => {
   it('rings the badge in the app bar\'s own surface, so it reads as cut out of the bell', async () => {
     render(<NotificationsMenu />);
     const button = await screen.findByRole('button', { name: 'Notifications, 2 unread' });
-    expect(button.querySelector('.MuiBadge-badge')).toHaveStyle({ borderColor: theme.yungu.header.bg });
+    const badge = button.querySelector('.MuiBadge-badge')!;
+    // The colour is a per-scheme CSS variable, which jsdom cannot resolve after the `border` shorthand,
+    // so read the badge's own emitted rule.
+    const css = [...document.querySelectorAll('style')].map((s) => s.textContent).join('');
+    const rules = [...badge.classList].flatMap((c) => css.match(new RegExp(`\\.${c}\\{[^}]*\\}`, 'g')) ?? []);
+    expect(rules.join('')).toContain(`border-color:${theme.yungu.header.bg}`);
   });
 
   it('says so when nothing is unread', async () => {

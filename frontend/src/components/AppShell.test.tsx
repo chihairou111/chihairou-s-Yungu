@@ -165,11 +165,16 @@ function ThemeProbe() {
 }
 
 describe('app bar', () => {
-  it('holds, on the right, Notifications, Refresh and the account avatar, and no Settings gear', () => {
+  it('holds, on the right, Notifications, Refresh, the Settings gear and the account avatar', () => {
     render(<AppShell userName="Bruce Zheng">content</AppShell>);
     const buttons = within(screen.getByRole('banner')).getAllByRole('button');
-    expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(['Notifications', 'Refresh', 'Account: Bruce Zheng']);
-    expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument();
+    expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(['Notifications', 'Refresh', 'Settings', 'Account: Bruce Zheng']);
+  });
+
+  it('keeps Appearance out of the account menu (it lives in the gear)', async () => {
+    render(<AppShell userName="Bruce Zheng">content</AppShell>);
+    await userEvent.click(screen.getByRole('button', { name: 'Account: Bruce Zheng' }));
+    expect(screen.queryByRole('menuitem', { name: 'Appearance' })).not.toBeInTheDocument();
   });
 
   it('is always in the one Rounded (Material 3) style, whatever an old style cookie says', () => {

@@ -1,3 +1,4 @@
+import { darkRoles, lightRoles } from '@/theme/roles';
 import type { CourseColor } from './types';
 
 /** Google Calendar event colors; every course gets one, shared by the calendar and course cards. */
@@ -74,4 +75,31 @@ export function lightEventColors(hex: string, surface: string): { bg: string; fg
     fg = tint(hex, '#000000', 1 - k);
   }
   return { bg, fg };
+}
+
+/** Share of the course color in a dark event fill: more than in light, so the hue still shows on a dark surface. */
+export const DARK_EVENT_TINT = 0.26;
+
+/**
+ * The dark counterpart: a deeper tint of the course color over the dark card surface, with text in a
+ * light shade of the same hue (lightened just until it reads well on the tint).
+ */
+function darkEventColors(hex: string, surface: string): { bg: string; fg: string } {
+  const bg = tint(hex, surface, DARK_EVENT_TINT);
+  let fg = toHex(parseHex(hex));
+  for (let k = 0.05; contrastRatio(fg, bg) < EVENT_INK_CONTRAST && k <= 1; k += 0.05) {
+    fg = tint(hex, '#ffffff', 1 - k);
+  }
+  return { bg, fg };
+}
+
+/**
+ * A course block's fill and ink in each scheme, on the card surface (`surfaceContainerLow`) the
+ * calendar sits on. Both go on the block as custom properties; CSS picks the pair for the scheme.
+ */
+export function courseEventColors(hex: string): { light: { bg: string; fg: string }; dark: { bg: string; fg: string } } {
+  return {
+    light: lightEventColors(hex, lightRoles.surfaceContainerLow),
+    dark: darkEventColors(hex, darkRoles.surfaceContainerLow),
+  };
 }

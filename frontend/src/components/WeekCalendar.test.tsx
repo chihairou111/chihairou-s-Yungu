@@ -1,7 +1,6 @@
 import { render, screen, within } from './test-render';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { COURSE_COLORS, contrastRatio, lightEventColors } from '@/lib/colors';
-import expressive from '@/theme/expressive';
+import { COURSE_COLORS, contrastRatio, courseEventColors } from '@/lib/colors';
 import { data } from '@/lib/data';
 import { parseWeekParam } from '@/lib/time';
 import type { ClassEvent, Course } from '@/lib/types';
@@ -118,15 +117,15 @@ describe('WeekCalendar', () => {
 });
 
 describe('WeekCalendar course colors', () => {
-  // test-render uses the expressive style; blocks sit on its paper surface.
-  const SURFACE = expressive.palette.background.paper;
-
-  it('fills each class with a light tint of its course color and dark readable text in the same hue', async () => {
+  it('fills each class with a tint of its course color and readable text in the same hue, for both schemes', async () => {
     await renderFixtureWeek();
     const chinese = blockFor('Mon 12', 'Chinese I'); // Tomato
+    const { light, dark } = courseEventColors('#D50000');
     expect(chinese.style.getPropertyValue('--course')).toBe('#D50000');
-    expect(chinese.style.getPropertyValue('--course-bg')).toBe(lightEventColors('#D50000', SURFACE).bg);
-    expect(chinese.style.getPropertyValue('--course-fg')).toBe(lightEventColors('#D50000', SURFACE).fg);
+    expect(chinese.style.getPropertyValue('--course-bg')).toBe(light.bg);
+    expect(chinese.style.getPropertyValue('--course-fg')).toBe(light.fg);
+    expect(chinese.style.getPropertyValue('--course-bg-dark')).toBe(dark.bg);
+    expect(chinese.style.getPropertyValue('--course-fg-dark')).toBe(dark.fg);
     const design = blockFor('Wed 14', 'Product Design I'); // Banana
     const bg = design.style.getPropertyValue('--course-bg');
     expect(contrastRatio(design.style.getPropertyValue('--course-fg'), bg)).toBeGreaterThanOrEqual(4.5);
@@ -181,7 +180,13 @@ describe('WeekCalendar phone layout', () => {
   /** The list follows the content column's width (a phone, or a window narrowed by the docked panel), not the window's. */
   function stubWidth(listLayout: boolean) {
     vi.restoreAllMocks();
-    vi.stubGlobal('matchMedia', () => ({ matches: !listLayout, addEventListener() {}, removeEventListener() {} }));
+    vi.stubGlobal('matchMedia', () => ({
+      matches: !listLayout,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+    }));
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(listLayout ? 500 : 900);
   }
 

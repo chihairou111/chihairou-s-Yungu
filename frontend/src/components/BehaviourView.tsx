@@ -37,7 +37,7 @@ const CARD_TOP_PX = 24;
 
 /** Bonus: the theme's success container; deductions: its error pair, like Overdue. Both AA. */
 const plus = (theme: Theme) => ({ fg: theme.yungu.color.onSuccessContainer, bg: theme.yungu.color.successContainer });
-const minus = (theme: Theme) => ({ fg: theme.palette.error.dark, bg: theme.palette.error.light });
+const minus = (theme: Theme) => ({ fg: theme.vars.palette.error.dark, bg: theme.vars.palette.error.light });
 /** Below this window height a sticky card would leave too little of the list; it scrolls away instead. */
 const SHORT = '@media (max-height: 560px)';
 

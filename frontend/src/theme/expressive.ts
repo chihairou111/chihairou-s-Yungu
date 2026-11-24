@@ -1,44 +1,109 @@
 'use client';
-import { createTheme } from '@mui/material/styles';
+import { createTheme, type ColorSystemOptions } from '@mui/material/styles';
 import type { ColorRoles, ShapeScale, YunguTokens } from './tokens';
+import { darkRoles, lightRoles } from './roles';
 import { MuiAlert } from './alert';
+import { APPEARANCE_ATTRIBUTE } from '@/lib/appearance';
 
-// The app's one style, Rounded: Material 3 (Material You). Tonal roles are the M3 light scheme for the
-// existing blue primary (#1565c0): a faintly blue-tinted surface, cards and containers separated by
-// tone rather than shadow, secondary-container for selection. Priorities keep the original
-// error / warning / primary colours, which pass WCAG AA on every surface below.
+// The app's one style, Rounded: Material 3 (Material You). Tonal roles are the M3 light and dark
+// schemes for the existing blue primary (#1565c0): a faintly blue-tinted surface, cards and containers
+// separated by tone rather than shadow, secondary-container for selection. Priorities keep the original
+// error / warning / primary colours in light; dark uses their M3 tone-80 counterparts. Both schemes pass
+// WCAG AA (contrast.test.ts).
+//
+// Scheme selection: `data-appearance="light"|"dark"` on <html>. MUI keys its own variables to that
+// attribute (`colorSchemeSelector: 'data-appearance'` -> `[data-appearance="dark"]`), and the Yungu role
+// variables below use the same selectors, so one attribute switches everything. "Automatic" is resolved
+// to light or dark before paint by MUI's `InitColorSchemeScript attribute="data-appearance"`, which
+// sets the same attribute from `prefers-color-scheme`; with no attribute the page is light (`:root`).
+export { APPEARANCE_ATTRIBUTE, darkRoles, lightRoles };
 
 /** M3 shape scale (dp = px). */
 const shape: ShapeScale = { extraSmall: 4, small: 8, medium: 12, large: 16, extraLarge: 28, full: 9999 };
 
-const color: ColorRoles = {
-  surface: '#f9f9ff',
-  surfaceContainerLowest: '#ffffff',
-  surfaceContainerLow: '#f3f3fa',
-  surfaceContainer: '#ededf4',
-  surfaceContainerHigh: '#e7e8ee',
-  surfaceContainerHighest: '#e2e2e9',
-  onSurface: '#191c20',
-  onSurfaceVariant: '#44474e',
-  outline: '#74777f',
-  outlineVariant: '#c4c6d0',
-  primaryContainer: '#d6e3ff',
-  onPrimaryContainer: '#001b3e',
-  secondaryContainer: '#dae2f9',
-  onSecondaryContainer: '#131c2b',
-  successContainer: '#dcf3e3',
-  onSuccessContainer: '#1b6c3a',
+/** M3 state layers: on-colour at 8% (hover) over the container, per scheme. */
+interface StateRoles {
+  hoverOnSurface: string;
+  hoverOnSecondaryContainer: string;
+  hoverOnPrimaryContainer: string;
+  /**
+   * A dialog's surface: the brightest container in light (lowest = white, above the page), and in dark
+   * a high container, since a raised surface is lighter there (lowest would sink below the page).
+   */
+  dialog: string;
+  /**
+   * A menu's surface: surface container in light; in dark one step higher, since the app bar the
+   * menus open from is itself surface container and a shadow barely shows on a dark page.
+   */
+  menu: string;
+}
+const lightStates: StateRoles = {
+  hoverOnSurface: 'rgba(25, 28, 32, 0.08)',
+  hoverOnSecondaryContainer: '#cbd3ea',
+  hoverOnPrimaryContainer: '#c6d4f0',
+  dialog: lightRoles.surfaceContainerLowest,
+  menu: lightRoles.surfaceContainer,
 };
+const darkStates: StateRoles = {
+  hoverOnSurface: 'rgba(226, 226, 233, 0.08)',
+  hoverOnSecondaryContainer: '#4a5366',
+  hoverOnPrimaryContainer: '#365382',
+  dialog: darkRoles.surfaceContainerHigh,
+  menu: darkRoles.surfaceContainerHigh,
+};
+
+/** Palette keys whose `.light` / `.dark` pair forms a chip (ink on container) in each scheme. */
+interface SchemePalette {
+  primary: { main: string; light: string; dark: string; contrastText: string };
+  secondary: { main: string; light: string; dark: string; contrastText: string };
+  error: { main: string; light: string; dark: string; contrastText: string };
+  warning: { main: string; light: string; dark: string; contrastText: string };
+  success: { main: string; light: string; dark: string; contrastText: string };
+  info: { main: string; light: string; dark: string; contrastText: string };
+}
+
+export const lightPalette: SchemePalette = {
+  primary: { main: '#1565c0', light: lightRoles.primaryContainer, dark: '#0d4a94', contrastText: '#ffffff' },
+  secondary: { main: '#565e71', light: lightRoles.secondaryContainer, dark: '#3e4759', contrastText: '#ffffff' },
+  error: { main: '#c62828', light: '#fdecec', dark: '#9b1c1c', contrastText: '#ffffff' },
+  warning: { main: '#a85100', light: '#fff3e3', dark: '#7f3d00', contrastText: '#ffffff' },
+  // MUI's success and info main colours; the pair is a container (as MUI's light Alert tints them).
+  success: { main: '#2e7d32', light: lightRoles.successContainer, dark: lightRoles.onSuccessContainer, contrastText: '#ffffff' },
+  info: { main: '#0288d1', light: '#e5f6fe', dark: '#014361', contrastText: '#ffffff' },
+};
+
+/** Dark: `main` is the tone-80 accent, `.light` the dark container and `.dark` the light ink on it. */
+export const darkPalette: SchemePalette = {
+  primary: { main: '#aac7ff', light: darkRoles.primaryContainer, dark: darkRoles.onPrimaryContainer, contrastText: '#0a305f' },
+  secondary: { main: '#bec6dc', light: darkRoles.secondaryContainer, dark: darkRoles.onSecondaryContainer, contrastText: '#283141' },
+  error: { main: '#ffb4ab', light: '#93000a', dark: '#ffdad6', contrastText: '#690005' },
+  warning: { main: '#ffb870', light: '#693c00', dark: '#ffdcbe', contrastText: '#4a2800' },
+  success: { main: '#8fd6a0', light: darkRoles.successContainer, dark: darkRoles.onSuccessContainer, contrastText: '#003919' },
+  info: { main: '#8acdff', light: '#004c6e', dark: '#c9e6ff', contrastText: '#00344d' },
+};
+
+type Overlays = NonNullable<ColorSystemOptions['overlays']>;
+
+const kebab = (key: string) => key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+const cssVar = (key: string) => `--yungu-${kebab(key)}`;
+
+/** The CSS custom properties for one scheme (`--yungu-surface: #f9f9ff`, ...). */
+function schemeVars(roles: ColorRoles, states: StateRoles): Record<string, string> {
+  return Object.fromEntries(Object.entries({ ...roles, ...states }).map(([k, v]) => [cssVar(k), v]));
+}
+
+/** Role name -> `var(--yungu-…)`, so `theme.yungu.color.*` resolves per scheme. */
+const color = Object.fromEntries(Object.keys(lightRoles).map((k) => [k, `var(${cssVar(k)})`])) as unknown as ColorRoles;
+const hoverOnSurface = `var(${cssVar('hoverOnSurface')})`;
+const hoverOnSecondaryContainer = `var(${cssVar('hoverOnSecondaryContainer')})`;
+const hoverOnPrimaryContainer = `var(${cssVar('hoverOnPrimaryContainer')})`;
 
 /** M3 elevation levels 1–3 (key + ambient shadow). */
 const level1 = '0 1px 2px 0 rgba(0, 0, 0, 0.3), 0 1px 3px 1px rgba(0, 0, 0, 0.15)';
 const level2 = '0 1px 2px 0 rgba(0, 0, 0, 0.3), 0 2px 6px 2px rgba(0, 0, 0, 0.15)';
+/** A menu's shadow (level 2), for menus drawn outside MUI's Popover (the Appearance submenu). */
+export const MENU_SHADOW = level2;
 const level3 = '0 1px 3px 0 rgba(0, 0, 0, 0.3), 0 4px 8px 3px rgba(0, 0, 0, 0.15)';
-
-/** M3 state layers: on-colour at 8% (hover) over the container. */
-const hoverOnSurface = 'rgba(25, 28, 32, 0.08)';
-const hoverOnSecondaryContainer = '#cbd3ea';
-const hoverOnPrimaryContainer = '#c6d4f0';
 
 /**
  * Touch screens: a button smaller than 48px (M3's minimum target) keeps its size but takes taps over
@@ -76,19 +141,31 @@ const tokens: YunguTokens = {
   // surface, with no line.
   header: { bg: color.surfaceContainer, edge: 'none' },
   loginCard: { radius: shape.extraLarge, shadow: 'none' },
+  dialog: { bg: `var(${cssVar('dialog')})` },
+  menu: { bg: `var(${cssVar('menu')})` },
 };
 
 const theme = createTheme({
-  cssVariables: true,
-  palette: {
-    mode: 'light',
-    primary: { main: '#1565c0', light: color.primaryContainer, dark: '#0d4a94', contrastText: '#ffffff' },
-    secondary: { main: '#565e71', light: color.secondaryContainer, dark: '#3e4759', contrastText: '#ffffff' },
-    error: { main: '#c62828', light: '#fdecec', dark: '#9b1c1c', contrastText: '#ffffff' },
-    warning: { main: '#a85100', light: '#fff3e3', dark: '#7f3d00', contrastText: '#ffffff' },
-    background: { default: color.surface, paper: color.surfaceContainerLow },
-    text: { primary: color.onSurface, secondary: color.onSurfaceVariant },
-    divider: color.outlineVariant,
+  cssVariables: { colorSchemeSelector: APPEARANCE_ATTRIBUTE },
+  colorSchemes: {
+    light: {
+      palette: {
+        ...lightPalette,
+        background: { default: lightRoles.surface, paper: lightRoles.surfaceContainerLow },
+        text: { primary: lightRoles.onSurface, secondary: lightRoles.onSurfaceVariant },
+        divider: lightRoles.outlineVariant,
+      },
+    },
+    dark: {
+      // Tonal M3 surfaces, as in light: no white overlay lightening raised Paper (menus, dialogs).
+      overlays: Array(25).fill('none') as Overlays,
+      palette: {
+        ...darkPalette,
+        background: { default: darkRoles.surface, paper: darkRoles.surfaceContainerLow },
+        text: { primary: darkRoles.onSurface, secondary: darkRoles.onSurfaceVariant },
+        divider: darkRoles.outlineVariant,
+      },
+    },
   },
   // Cards, the calendar frame and empty states take the M3 medium corner.
   shape: { borderRadius: shape.medium },
@@ -114,7 +191,7 @@ const theme = createTheme({
       styleOverrides: {
         root: ({ theme }) => ({
           '&.Mui-focusVisible': {
-            outline: `2px solid ${theme.palette.primary.main}`,
+            outline: `2px solid ${(theme.vars ?? theme).palette.primary.main}`,
             outlineOffset: 2,
           },
         }),
@@ -139,10 +216,10 @@ const theme = createTheme({
     MuiPaper: {
       styleOverrides: { outlined: { borderColor: 'transparent' } },
     },
-    // Menus: extra-small corner, surface container, level 2.
+    // Menus: extra-small corner, surface container (one step higher in dark), level 2.
     MuiPopover: {
       styleOverrides: {
-        paper: { borderRadius: shape.extraSmall, backgroundColor: color.surfaceContainer, boxShadow: level2 },
+        paper: { borderRadius: shape.extraSmall, backgroundColor: tokens.menu.bg, boxShadow: level2 },
       },
     },
     MuiMenuItem: {
@@ -210,8 +287,12 @@ const theme = createTheme({
     },
     MuiCssBaseline: {
       styleOverrides: (theme) => ({
-        '::selection': { backgroundColor: theme.palette.primary.light, color: theme.palette.text.primary },
-        html: { colorScheme: 'light', scrollbarColor: `${color.outlineVariant} transparent` },
+        // The Yungu role variables, keyed like MUI's own: light on :root and [data-appearance="light"],
+        // dark on [data-appearance="dark"] (same specificity, later in the sheet, so it wins).
+        [`:root, [${APPEARANCE_ATTRIBUTE}="light"]`]: { colorScheme: 'light', ...schemeVars(lightRoles, lightStates) },
+        [`[${APPEARANCE_ATTRIBUTE}="dark"]`]: { colorScheme: 'dark', ...schemeVars(darkRoles, darkStates) },
+        '::selection': { backgroundColor: (theme.vars ?? theme).palette.primary.light, color: (theme.vars ?? theme).palette.text.primary },
+        html: { scrollbarColor: `${color.outlineVariant} transparent` },
         body: { fontVariantNumeric: 'tabular-nums' },
         // Reduced motion: menus and pop-ups fade in place instead of growing from their anchor, and
         // the tab indicator moves in one step.

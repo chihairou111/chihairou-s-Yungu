@@ -447,7 +447,7 @@ function Item({ n, now, onOpen, onMarkRead }: { n: Notification; now: number; on
         gap: 1.25,
         px: 2,
         py: 1.25,
-        '&:has(button[data-open]:focus-visible)': { outline: `2px solid ${theme.palette.primary.main}`, outlineOffset: -2 },
+        '&:has(button[data-open]:focus-visible)': { outline: `2px solid ${theme.vars.palette.primary.main}`, outlineOffset: -2 },
       })}
     >
       <Box

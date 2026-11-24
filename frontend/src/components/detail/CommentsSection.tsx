@@ -12,7 +12,6 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import DeleteOutlined from '@mui/icons-material/DeleteOutlined';
 import ExpandMore from '@mui/icons-material/ExpandMore';
-import { alpha } from '@mui/material/styles';
 import { MAX_COMMENT } from '@/lib/limits';
 import type { Comment } from '@/lib/types';
 import { chinaRelativeTime } from '@/lib/time';
@@ -194,8 +193,8 @@ export default function CommentsSection({ taskId, comments: incoming }: { taskId
                       height: 32,
                       fontSize: '0.8125rem',
                       fontWeight: 500,
-                      bgcolor: c.mine ? theme.palette.primary.main : alpha(theme.palette.text.primary, 0.08),
-                      color: c.mine ? theme.palette.primary.contrastText : theme.palette.text.primary,
+                      bgcolor: c.mine ? theme.vars.palette.primary.main : theme.alpha(theme.vars.palette.text.primary, 0.08),
+                      color: c.mine ? theme.vars.palette.primary.contrastText : theme.vars.palette.text.primary,
                     })}
                   >
                     {initials(c.author)}

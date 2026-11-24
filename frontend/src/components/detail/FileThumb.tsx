@@ -381,7 +381,8 @@ const tileSx = (theme: Theme) => ({
   overflow: 'hidden',
   borderRadius: `${theme.yungu.shape.medium}px`,
   border: `1px solid ${theme.yungu.color.outlineVariant}`,
-  bgcolor: theme.yungu.color.surfaceContainerLowest,
+  // The dialog's own surface, set off by its outline (white on white in light).
+  bgcolor: theme.yungu.dialog.bg,
   transition: theme.transitions.create(['border-color', 'box-shadow'], { duration: theme.transitions.duration.shorter }),
   '& .thumb-media': {
     transition: [
@@ -396,7 +397,7 @@ const tileSx = (theme: Theme) => ({
       '& .thumb-media': { transform: 'scale(1.03)' },
     },
   },
-  '&.Mui-focusVisible': { outline: `2px solid ${theme.palette.primary.main}`, outlineOffset: '2px' },
+  '&.Mui-focusVisible': { outline: `2px solid ${theme.vars.palette.primary.main}`, outlineOffset: '2px' },
   '@media (prefers-reduced-motion: reduce)': {
     transition: 'none',
     // The preview still fades in (no movement), just without the hover zoom.
@@ -436,7 +437,7 @@ export default function FileThumb({ file, onOpen }: { file: FileRef; onOpen: () 
           display: 'block',
           aspectRatio: '4 / 3',
           overflow: 'hidden',
-          bgcolor: (theme) => alpha(theme.palette.text.primary, 0.05),
+          bgcolor: (theme) => theme.alpha(theme.vars.palette.text.primary, 0.05),
           borderBottom: 1,
           borderColor: (theme) => theme.yungu.color.outlineVariant,
         }}

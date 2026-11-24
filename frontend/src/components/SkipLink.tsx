@@ -26,7 +26,7 @@ export default function SkipLink() {
         fontSize: '0.875rem',
         fontWeight: 500,
         transform: 'translateY(calc(-100% - 16px))',
-        '&:focus': { transform: 'none', outline: `2px solid ${theme.palette.primary.main}`, outlineOffset: 2 },
+        '&:focus': { transform: 'none', outline: `2px solid ${theme.vars.palette.primary.main}`, outlineOffset: 2 },
       })}
     >
       Skip to content

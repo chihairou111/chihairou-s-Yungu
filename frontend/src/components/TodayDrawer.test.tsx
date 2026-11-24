@@ -182,6 +182,8 @@ function stubWidth(docked: boolean) {
     media: query,
     addEventListener() {},
     removeEventListener() {},
+    addListener() {},
+    removeListener() {},
   }));
 }
 
@@ -315,6 +317,8 @@ describe('TodayDrawer docked panel (1200px and up)', () => {
       media: query,
       addEventListener() {},
       removeEventListener() {},
+      addListener() {},
+      removeListener() {},
     }));
     render(<TodayDrawer events={classes} now={NOW} courses={COURSES} initialPanelOpen />);
     expect(panel()).toHaveAttribute('data-takes-space', 'true');

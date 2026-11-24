@@ -1,4 +1,4 @@
-import { alpha, type Theme } from '@mui/material/styles';
+import { type Theme } from '@mui/material/styles';
 
 /** Styles an online document shares between the writer and its preview. */
 
@@ -7,8 +7,8 @@ export function quoteSx(theme: Theme) {
   return {
     margin: '0 0 0.85em',
     paddingLeft: '1em',
-    borderLeft: `1px solid ${theme.palette.text.disabled}`,
-    color: theme.palette.text.secondary,
+    borderLeft: `1px solid ${theme.vars.palette.text.disabled}`,
+    color: theme.vars.palette.text.secondary,
     '& > :last-child': { marginBottom: 0 },
   };
 }
@@ -22,8 +22,8 @@ export function embedSx(theme: Theme) {
     margin: '0 0 0.85em',
     padding: '4px 10px',
     ...theme.typography.body2,
-    color: theme.palette.text.secondary,
-    backgroundColor: alpha(theme.palette.text.primary, 0.05),
+    color: theme.vars.palette.text.secondary,
+    backgroundColor: theme.alpha(theme.vars.palette.text.primary, 0.05),
     border: `1px solid ${theme.yungu.color.outlineVariant}`,
     borderRadius: `${theme.yungu.shape.small}px`,
     userSelect: 'none' as const,

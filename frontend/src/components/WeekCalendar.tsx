@@ -9,9 +9,9 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import ChevronLeft from '@mui/icons-material/ChevronLeft';
 import ChevronRight from '@mui/icons-material/ChevronRight';
-import { alpha, useTheme } from '@mui/material/styles';
+import { useTheme } from '@mui/material/styles';
 import { chinaClock, chinaDateLabel, dayIndex, formatWeekParam, shiftWeek, weekRangeLabel, weekRangeShortLabel } from '@/lib/time';
-import { COURSE_COLORS, courseColorHex, lightEventColors } from '@/lib/colors';
+import { COURSE_COLORS, courseColorHex, courseEventColors } from '@/lib/colors';
 import { nowLineHours } from '@/lib/schedule';
 import type { ClassEvent, Course } from '@/lib/types';
 import PageHeader from './PageHeader';
@@ -107,7 +107,6 @@ interface WeekCalendarProps {
 export default function WeekCalendar({ weekStart, events, courses, now: serverNow }: WeekCalendarProps) {
   const now = useNow(serverNow);
   const theme = useTheme();
-  const surface = theme.palette.background.paper;
   const todayRef = useRef<HTMLElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   // In the grid a block may cut its name or room short, so each opens its full details; the list shows all of it.
@@ -288,9 +287,9 @@ export default function WeekCalendar({ weekStart, events, courses, now: serverNo
                         mt: `${TOP_PAD}px`,
                         mb: 1,
                         // Today's column is faintly tinted, besides its filled date.
-                        bgcolor: isToday ? alpha(theme.palette.primary.main, 0.04) : undefined,
+                        bgcolor: isToday ? theme.alpha(theme.vars.palette.primary.main, 0.04) : undefined,
                         // A line at every inner hour; the header's border already marks the top...
-                        backgroundImage: `repeating-linear-gradient(to bottom, transparent 0 calc(var(--hour) - 1px), ${theme.palette.divider} calc(var(--hour) - 1px) var(--hour))`,
+                        backgroundImage: `repeating-linear-gradient(to bottom, transparent 0 calc(var(--hour) - 1px), ${theme.vars.palette.divider} calc(var(--hour) - 1px) var(--hour))`,
                         // ...and none at the last hour's end, which would double the frame's bottom border.
                         backgroundSize: `100% calc(${hours.length - 1} * var(--hour))`,
                         backgroundRepeat: 'no-repeat',
@@ -318,7 +317,6 @@ export default function WeekCalendar({ weekStart, events, courses, now: serverNo
                             key={`${p.event.start}-${p.event.name}-${i}`}
                             placed={p}
                             color={colorOf(p.event)}
-                            surface={surface}
                             weekStart={weekStart}
                             firstHour={firstHour}
                             onOpen={isGrid ? (anchor) => setDetails({ anchor, event: p.event, open: true }) : undefined}
@@ -405,10 +403,8 @@ function NowLine({ hours }: { hours: number }) {
 
 interface ClassBlockProps {
   placed: PlacedEvent;
-  /** Course color (hex): tinted for the fill, darkened for the text. */
+  /** Course color (hex): tinted for the fill, darkened (light) or lightened (dark) for the text. */
   color: string;
-  /** The surface the tint is laid over. */
-  surface: string;
   weekStart: number;
   firstHour: number;
   /** Opens the class's full details from this block (grid only, where a block may cut its text short). */
@@ -416,20 +412,23 @@ interface ClassBlockProps {
 }
 
 /**
- * A class in Google Calendar's light event style: a light tint of its course color, with name and
- * "08:00–08:40 · D419" in a dark shade of the same hue. Positioned by time in the grid; a full-width
- * row in the list. In the grid the room outranks the time, which the block's position already shows:
+ * A class in Google Calendar's event style: a tint of its course color, with name and
+ * "08:00–08:40 · D419" in a shade of the same hue (dark ink in light, light ink in dark). Positioned
+ * by time in the grid; a full-width row in the list. In the grid the room outranks the time, which the block's position already shows:
  * the narrow grid drops the end time, and a line still too long gives up the time rather than the room.
  */
-function ClassBlock({ placed: { event, lane, lanes }, color, surface, weekStart, firstHour, onOpen }: ClassBlockProps) {
+function ClassBlock({ placed: { event, lane, lanes }, color, weekStart, firstHour, onOpen }: ClassBlockProps) {
   const top = (minuteOfDay(event.start, weekStart) - firstHour * 60) / 60;
   const duration = (event.end - event.start) / MIN / 60;
-  const { bg, fg } = lightEventColors(color, surface);
-  // Grid geometry (in hours; the grid sets the length of an hour) travels as custom properties so one shared style rule serves every block.
+  const { light, dark } = courseEventColors(color);
+  // Both schemes' colours and the grid geometry (in hours; the grid sets the length of an hour)
+  // travel as custom properties so one shared style rule serves every block.
   const geometry = {
     '--course': color,
-    '--course-bg': bg,
-    '--course-fg': fg,
+    '--course-bg': light.bg,
+    '--course-fg': light.fg,
+    '--course-bg-dark': dark.bg,
+    '--course-fg-dark': dark.fg,
     '--top': String(top),
     '--duration': String(duration),
     '--left': `${(lane / lanes) * 100}%`,
@@ -444,6 +443,8 @@ function ClassBlock({ placed: { event, lane, lanes }, color, surface, weekStart,
       sx={(theme) => ({
         bgcolor: 'var(--course-bg)',
         color: 'var(--course-fg)',
+        // Dark (chosen, or Automatic resolved to dark by the init script) is an attribute on <html>.
+        ...theme.applyStyles('dark', { bgcolor: 'var(--course-bg-dark)', color: 'var(--course-fg-dark)' }),
         borderRadius: `${theme.yungu.shape.small}px`,
         '& > .class-body': {
           display: 'block',
@@ -460,7 +461,7 @@ function ClassBlock({ placed: { event, lane, lanes }, color, surface, weekStart,
         '& > button.class-body': {
           cursor: 'pointer',
           '@media (hover: hover)': { '&:hover': { bgcolor: 'color-mix(in srgb, currentColor 8%, transparent)' } },
-          '&:focus-visible': { outline: `2px solid ${theme.palette.primary.main}`, outlineOffset: -2 },
+          '&:focus-visible': { outline: `2px solid ${theme.vars.palette.primary.main}`, outlineOffset: -2 },
         },
         [LIST]: { '& > .class-body': { px: 1.5, py: 1 } },
         [GRID]: {

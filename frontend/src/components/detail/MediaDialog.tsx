@@ -81,7 +81,7 @@ export default function MediaDialog(props: MediaDialogProps) {
         },
         paper: {
           sx: (theme) => ({
-            bgcolor: theme.yungu.color.surfaceContainerLowest,
+            bgcolor: theme.yungu.dialog.bg,
             backgroundImage: 'none',
             ...(!fullScreen && {
               m: 2,

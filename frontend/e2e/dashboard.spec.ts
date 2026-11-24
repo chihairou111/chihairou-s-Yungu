@@ -213,15 +213,19 @@ test.describe('one style', () => {
   const card = (page: Page) => page.getByRole('article').first();
   const radius = (page: Page) => card(page).evaluate((el) => getComputedStyle(el).borderTopLeftRadius);
 
-  test('the app bar has no Settings gear; the dashboard is Rounded even with an old Classic cookie', async ({ page, context, baseURL }) => {
+  test('no style choice: the Settings gear holds only Appearance; the dashboard is Rounded even with an old Classic cookie', async ({ page, context, baseURL }) => {
     await context.addCookies([{ name: 'yl_style', value: 'classic', url: baseURL! }]);
     await signIn(page);
     await expect(card(page)).toBeVisible();
     expect(await radius(page)).toBe('12px');
     const bar = page.getByRole('banner');
-    await expect(bar.getByRole('button', { name: 'Settings' })).toHaveCount(0);
     const labels = await bar.getByRole('button').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')));
-    expect(labels).toEqual([expect.stringMatching(/^Notifications/), 'Refresh', expect.stringMatching(/^Account: /)]);
+    expect(labels).toEqual([expect.stringMatching(/^Notifications/), 'Refresh', 'Settings', expect.stringMatching(/^Account: /)]);
+    // The gear (hosted) offers Appearance and nothing else: no style picker came back with it.
+    await bar.getByRole('button', { name: 'Settings' }).click();
+    const items = await page.getByRole('menu').getByRole('menuitem').allTextContents();
+    expect(items.map((t) => t.trim())).toEqual(['Appearance']);
+    await page.keyboard.press('Escape');
   });
 
   test('the sign-in page is Rounded on first paint, whatever an old style cookie says', async ({ page, context, baseURL }) => {

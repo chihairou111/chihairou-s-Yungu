@@ -7,7 +7,6 @@ import Fade from '@mui/material/Fade';
 import Modal from '@mui/material/Modal';
 import Typography from '@mui/material/Typography';
 import useMediaQuery from '@mui/material/useMediaQuery';
-import { alpha } from '@mui/material/styles';
 import WifiOffRounded from '@mui/icons-material/WifiOffRounded';
 import { localApi, useLocalState } from './local-api';
 
@@ -46,7 +45,8 @@ export default function SuspensionScreen({ reason, ssid, onTurnOff }: Suspension
         backdrop: {
           transitionDuration: reduceMotion ? 0 : 200,
           sx: (theme) => ({
-            backgroundColor: alpha(theme.yungu.color.surface, 0.55),
+            // The surface is a CSS variable (it follows the colour scheme): mixed, not alpha()'d.
+            backgroundColor: `color-mix(in srgb, ${theme.yungu.color.surface} 55%, transparent)`,
             backdropFilter: 'blur(12px)',
             WebkitBackdropFilter: 'blur(12px)',
           }),
@@ -75,7 +75,7 @@ export default function SuspensionScreen({ reason, ssid, onTurnOff }: Suspension
               px: { xs: 3, sm: 5 },
               py: { xs: 4, sm: 5 },
               borderRadius: `${theme.yungu.shape.extraLarge}px`,
-              bgcolor: theme.yungu.color.surfaceContainerLowest,
+              bgcolor: theme.yungu.dialog.bg,
               boxShadow: theme.shadows[6],
             })}
           >

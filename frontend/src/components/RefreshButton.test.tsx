@@ -143,6 +143,8 @@ describe('refreshing', () => {
       matches: query.includes('prefers-reduced-motion'),
       addEventListener() {},
       removeEventListener() {},
+      addListener() {},
+      removeListener() {},
     }));
     renderButton();
     await userEvent.click(button());

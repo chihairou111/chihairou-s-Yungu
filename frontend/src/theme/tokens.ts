@@ -64,9 +64,18 @@ export interface YunguTokens {
   header: { bg: string; edge: string };
   /** Sign-in panel. */
   loginCard: { radius: number; shadow: string };
+  /** Dialog surface (pop-ups and their sub-dialogs), per scheme. */
+  dialog: { bg: string };
+  /** Menu surface (popovers and the Appearance submenu), per scheme. */
+  menu: { bg: string };
 }
 
 declare module '@mui/material/styles' {
+  // The theme is built with CSS variables, so `theme.vars` is always there: styles written with it
+  // (`theme.vars.palette.*`, `theme.alpha(theme.vars.palette.*, n)`) follow the scheme in CSS.
+  interface CssThemeVariables {
+    enabled: true;
+  }
   interface Theme {
     yungu: YunguTokens;
   }
