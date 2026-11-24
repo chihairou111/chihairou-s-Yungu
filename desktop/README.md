@@ -72,16 +72,20 @@ the switch is on and the Mac is on a network whose router is not in the list, or
 read, nothing is sent to Yungu: the window shows the Suspension Mode screen ("Not sending anything to Yungu
 on this network." / "Can't tell which network this is."; its one button turns the switch off), and it goes
 by itself on an allowed router or off Wi-Fi. No network (Wi-Fi off, not joined, no gateway on the Wi-Fi) is
-never suspended. Settings: `settings.json` in the user-data folder (v1's `allowedWifi` names are dropped on
+never suspended; that includes Ethernet or USB tethering with Wi-Fi off, and an IPv6-only Wi-Fi (no IPv4
+gateway on the Wi-Fi interface). Settings: `settings.json` in the user-data folder (v1's `allowedWifi` names are dropped on
 load).
 
-- `src/network.ts` reads the router (2 s limit in all), with three system commands run by `execFile` (no
+- `src/network.ts` reads the router (3 s limit in all), with system commands run by `execFile` (no
   shell, absolute paths): `/usr/sbin/networksetup -listallhardwareports` (the `Device:` after
   `Hardware Port: Wi-Fi`, e.g. `en0`), `/sbin/route -n get -ifscope <device> default` (its `gateway:`;
   scoped to the Wi-Fi so a proxy in TUN mode, which owns the unscoped default route, does not hide it;
   "not in table" or no `gateway:` = no network) and `/usr/sbin/arp -n <gateway>`
   (`? (10.0.160.1) at 80:5:88:d0:83:e2 on en0 ifscope [ethernet]`; the MAC is normalised to
-  `80:05:88:d0:83:e2`). An `(incomplete)` entry, an entry on another interface, an error or a timeout is
+  `80:05:88:d0:83:e2`). macOS ages ARP entries out (~20 min idle) and neither command asks the router
+  again, so with no MAC the router is pinged once over the Wi-Fi (`/sbin/ping -n -q -c 1 -t 1 -b <device>
+  <gateway>`, result ignored) and arp is read once more; no older reading is reused. 3 s in all. Still an
+  `(incomplete)` entry, an entry on another interface, an error or a timeout is
   "unknown" (suspended). None of this needs a permission: there is no Location prompt (macOS hides the
   Wi-Fi's *name* without Location, which an unsigned app's helper never got asked for).
 - `src/suspension.ts` decides and polls; `src/settings.ts` keeps the switch and the list. The network is
@@ -106,8 +110,8 @@ load).
 and press **Add current network**. A network cannot be typed in by hand: only the router the Mac is on
 can be added. **Remove <label>** takes one off.
 
-**In development**, `YUNGU_NETWORK_COMMANDS=<folder>` replaces the three commands with `<folder>/networksetup`,
-`<folder>/route` and `<folder>/arp` (ignored once packaged); `e2e/suspension.spec.ts` uses shell scripts
+**In development**, `YUNGU_NETWORK_COMMANDS=<folder>` replaces the four commands with `<folder>/networksetup`,
+`<folder>/route`, `<folder>/arp` and `<folder>/ping` (ignored once packaged); `e2e/suspension.spec.ts` uses shell scripts
 whose output it changes.
 
 To check on the Mac: with the switch on at an allowed network the screen stays away (also with the proxy's

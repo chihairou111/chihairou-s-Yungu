@@ -30,14 +30,21 @@ destination: default
 `;
 const ARP_OK = '? (10.0.160.1) at 80:5:88:d0:83:e2 on en0 ifscope [ethernet]\n';
 
-/** A stand-in for the three commands: answers by command name; a function answer may throw. */
-function fakeRun(answers: { networksetup?: string | (() => Promise<string>); route?: string | (() => Promise<string>); arp?: string | (() => Promise<string>) }) {
+type Answer = string | (() => Promise<string>);
+/**
+ * A stand-in for the commands: answers by command name; a function answer may throw; a list answers
+ * call by call (its last entry from then on). A command without an answer fails.
+ */
+function fakeRun(answers: Partial<Record<'networksetup' | 'route' | 'arp' | 'ping', Answer | Answer[]>>) {
   const calls: Array<[string, string[]]> = [];
+  const seen: Record<string, number> = {};
   const run: Run = async (cmd, args) => {
     calls.push([cmd, args]);
     const name = cmd.split('/').pop() as keyof typeof answers;
-    const a = answers[name];
-    if (a === undefined) throw new Error(`unexpected ${cmd}`);
+    const given = answers[name];
+    if (given === undefined) throw new Error(`unexpected ${cmd}`);
+    const i = (seen[name] = (seen[name] ?? -1) + 1);
+    const a = Array.isArray(given) ? given[Math.min(i, given.length - 1)] : given;
     return typeof a === 'string' ? a : a();
   };
   return { run, calls };
@@ -126,6 +133,56 @@ describe('readNetwork', () => {
     expect(await readNetwork(fakeRun({ ...base, arp: failing('arp: bad') }).run)).toEqual({ kind: 'unknown' });
   });
 
+  describe('an aged-out ARP entry (macOS drops it after ~20 min idle)', () => {
+    const base = { networksetup: HARDWARE_PORTS('en0'), route: ROUTE_OK };
+    const PING = ['/sbin/ping', ['-n', '-q', '-c', '1', '-t', '1', '-b', 'en0', '10.0.160.1']];
+
+    it('pings the router once over the Wi-Fi, then reads arp again: no entry → ping → MAC is the network', async () => {
+      const noEntry = failing('10.0.160.1 (10.0.160.1) -- no entry\n');
+      const { run, calls } = fakeRun({ ...base, arp: [noEntry, ARP_OK], ping: '1 packets transmitted, 1 packets received\n' });
+      expect(await readNetwork(run)).toEqual({ kind: 'network', mac: '80:05:88:d0:83:e2' });
+      expect(calls.slice(2)).toEqual([['/usr/sbin/arp', ['-n', '10.0.160.1']], PING, ['/usr/sbin/arp', ['-n', '10.0.160.1']]]);
+    });
+
+    it('also after an (incomplete) entry or no matching line', async () => {
+      for (const first of ['? (10.0.160.1) at (incomplete) on en0 ifscope [ethernet]\n', '']) {
+        const { run, calls } = fakeRun({ ...base, arp: [first, ARP_OK], ping: '' });
+        expect(await readNetwork(run), first).toEqual({ kind: 'network', mac: '80:05:88:d0:83:e2' });
+        expect(calls.filter(([c]) => c === '/sbin/ping')).toEqual([PING]);
+      }
+    });
+
+    it('is unknown when the ping fails and arp still has no MAC (never an older reading)', async () => {
+      const noEntry = failing('10.0.160.1 (10.0.160.1) -- no entry\n');
+      const { run, calls } = fakeRun({ ...base, arp: noEntry, ping: failing('100.0% packet loss') });
+      expect(await readNetwork(run)).toEqual({ kind: 'unknown' });
+      expect(calls.filter(([c]) => c === '/usr/sbin/arp')).toHaveLength(2); // one retry only
+      expect(calls.filter(([c]) => c === '/sbin/ping')).toHaveLength(1);
+    });
+
+    it('a ping that succeeds does not help an arp that stays (incomplete)', async () => {
+      const incomplete = '? (10.0.160.1) at (incomplete) on en0 ifscope [ethernet]\n';
+      expect(await readNetwork(fakeRun({ ...base, arp: incomplete, ping: '' }).run)).toEqual({ kind: 'unknown' });
+    });
+
+    it('never pings when the first arp has the MAC', async () => {
+      const { run, calls } = fakeRun({ ...base, arp: ARP_OK, ping: '' });
+      expect(await readNetwork(run)).toEqual({ kind: 'network', mac: '80:05:88:d0:83:e2' });
+      expect(calls.some(([c]) => c === '/sbin/ping')).toBe(false);
+    });
+
+    it('pings on the Wi-Fi device it found', async () => {
+      const { run, calls } = fakeRun({
+        networksetup: HARDWARE_PORTS('en1'),
+        route: ROUTE_OK.replace('en0', 'en1'),
+        arp: ['', '? (10.0.160.1) at 80:5:88:d0:83:e2 on en1 ifscope [ethernet]\n'],
+        ping: '',
+      });
+      expect(await readNetwork(run)).toEqual({ kind: 'network', mac: '80:05:88:d0:83:e2' });
+      expect(calls.find(([c]) => c === '/sbin/ping')?.[1]).toEqual(['-n', '-q', '-c', '1', '-t', '1', '-b', 'en1', '10.0.160.1']);
+    });
+  });
+
   it('is unknown on any other failure, or a gateway that is not an address', async () => {
     expect(await readNetwork(fakeRun({ networksetup: failing('boom') }).run)).toEqual({ kind: 'unknown' });
     expect(await readNetwork(fakeRun({ networksetup: HARDWARE_PORTS('en0'), route: failing('route: permission denied') }).run)).toEqual({
@@ -136,11 +193,16 @@ describe('readNetwork', () => {
     });
   });
 
-  it('gives up after 2 s in all', async () => {
+  it('gives up after 3 s in all (room for one ping of the router)', async () => {
     vi.useFakeTimers();
-    expect(NETWORK_TIMEOUT_MS).toBe(2_000);
+    expect(NETWORK_TIMEOUT_MS).toBe(3_000);
     const read = readNetwork(fakeRun({ networksetup: HARDWARE_PORTS('en0'), route: () => new Promise<string>(() => undefined) }).run);
-    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(2_999);
+    let settled = false;
+    void read.then(() => (settled = true));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
     await expect(read).resolves.toEqual({ kind: 'unknown' });
   });
 });
@@ -151,6 +213,7 @@ describe('commandPaths', () => {
       networksetup: '/usr/sbin/networksetup',
       route: '/sbin/route',
       arp: '/usr/sbin/arp',
+      ping: '/sbin/ping',
     });
   });
 
@@ -159,6 +222,7 @@ describe('commandPaths', () => {
       networksetup: '/tmp/fake/networksetup',
       route: '/tmp/fake/route',
       arp: '/tmp/fake/arp',
+      ping: '/tmp/fake/ping',
     });
     expect(commandPaths({ packaged: false, env: {} }).route).toBe('/sbin/route');
   });

@@ -47,7 +47,7 @@ import {
   SIGN_IN_NOTICE_COOKIE,
 } from './session-cookie';
 import { commandPaths, readNetwork, runCommand } from './network';
-import { Settings, type AllowedNetwork } from './settings';
+import { LABEL_MAX, Settings, type AllowedNetwork } from './settings';
 import { RETRY_INTERVAL_MS, SignInRetry, type RetryOutcome } from './sign-in-retry';
 import { blockedWhileSuspended, SuspensionMonitor, type SuspensionState } from './suspension';
 import { loadWindowState, MIN_HEIGHT, MIN_WIDTH, saveWindowState, type WindowState } from './window-state';
@@ -712,7 +712,7 @@ function setUpSuspension(): void {
     const ok = (n: unknown): n is AllowedNetwork => {
       if (!n || typeof n !== 'object' || Array.isArray(n)) return false;
       const { label, mac } = n as Record<string, unknown>;
-      return typeof label === 'string' && label.length <= 200 && typeof mac === 'string' && mac.length <= 64;
+      return typeof label === 'string' && label.length <= LABEL_MAX && typeof mac === 'string' && mac.length <= 64;
     };
     if (!Array.isArray(list) || list.length > 200 || !list.every(ok)) throw new Error('bad value');
     settings.setAllowedNetworks(list.map(({ label, mac }) => ({ label, mac })));

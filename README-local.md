@@ -58,7 +58,8 @@ For when you don't want the app talking to Yungu (for example, on a network you 
 The app recognises a network by its router, not by the Wi-Fi's name, so a network can only be added
 while you're on it. While Suspension Mode is on, on any other network (or one whose router can't be
 read), nothing is sent to Yungu and the window shows the Suspension Mode screen. It lifts by itself on an
-allowed network or with Wi-Fi off. The button on the screen turns the switch off. It is off by default.
+allowed network or with Wi-Fi off. "No Wi-Fi" also covers Ethernet or iPhone (USB) tethering with Wi-Fi
+off, and a Wi-Fi with only IPv6: none of these are suspended. The button on the screen turns the switch off. It is off by default.
 To take a network off the list, press **Remove <label>** in **Allowed networks...**.
 
 ## Where your data lives

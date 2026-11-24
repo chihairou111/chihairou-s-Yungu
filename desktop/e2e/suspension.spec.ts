@@ -51,9 +51,14 @@ destination: default
 /**
  * What the fake commands answer: a router's MAC (on Wi-Fi with that router), `none` (Wi-Fi not joined:
  * route says "not in table"), `incomplete` (arp has no MAC) or `garbage` (networksetup fails).
+ * `{ aged: true }`: arp says "-- no entry" until the router has been pinged (macOS ages entries out).
  */
-function setNetwork(net: string) {
+function setNetwork(net: string, opts: { aged?: boolean } = {}) {
   const out = (name: string, text: string) => writeFileSync(path.join(fakeDir(), `${name}.out`), text);
+  rmSync(path.join(fakeDir(), 'pinged'), { force: true });
+  rmSync(path.join(fakeDir(), 'ping-args'), { force: true });
+  out('ping', '');
+  writeFileSync(path.join(fakeDir(), 'aged'), opts.aged ? 'yes' : 'no');
   writeFileSync(path.join(fakeDir(), 'mode'), net === 'garbage' ? 'fail' : net === 'none' ? 'no-route' : 'ok');
   out('networksetup', PORTS);
   out('route', ROUTE);
@@ -69,7 +74,12 @@ function writeFakes() {
   };
   script('networksetup', '[ "$mode" = fail ] && { echo "boom" >&2; exit 1; }');
   script('route', '[ "$mode" = no-route ] && { echo "route: writing to routing socket: not in table" >&2; exit 1; }');
-  script('arp', ':');
+  script(
+    'arp',
+    `[ "$(cat "${fakeDir()}/aged")" = yes ] && [ ! -f "${fakeDir()}/pinged" ] && { echo "10.0.160.1 (10.0.160.1) -- no entry"; exit 1; }`,
+  );
+  // ping: records its arguments and refreshes the (fake) ARP entry.
+  script('ping', `echo "$*" >> "${fakeDir()}/ping-args"\ntouch "${fakeDir()}/pinged"`);
 }
 
 test.beforeEach(async () => {
@@ -267,6 +277,19 @@ test("a router that can't be read suspends, also over the sign-in page; v1's Wi-
   await expect(screen).toContainText("Can't tell which network this is.");
   setNetwork('none');
   await expect(screen).toBeHidden({ timeout: 4_000 });
+  // An aged-out ARP entry for the allowed router: one ping, then the MAC; never suspended for it.
+  setNetwork(SCHOOL, { aged: true });
+  const pings = () => {
+    try {
+      return readFileSync(path.join(fakeDir(), 'ping-args'), 'utf8').split('\n').filter(Boolean);
+    } catch {
+      return [];
+    }
+  };
+  await expect.poll(pings, { timeout: 4_000 }).toEqual(['-n -q -c 1 -t 1 -b en0 10.0.160.1']);
+  await page.waitForTimeout(3_500);
+  await expect(screen).toBeHidden();
+  expect(pings()).toHaveLength(1); // the entry is fresh again: no more pings
   // The allowed router still counts.
   setNetwork(SCHOOL);
   await page.waitForTimeout(3_500);
