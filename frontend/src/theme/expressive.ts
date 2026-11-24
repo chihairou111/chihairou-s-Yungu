@@ -2,6 +2,7 @@
 import { createTheme } from '@mui/material/styles';
 import type { ColorRoles, ShapeScale, YunguTokens } from './tokens';
 import { MuiAlert } from './alert';
+import { APPEARANCE_ATTRIBUTE } from '@/lib/appearance';
 
 // The app's one style, Rounded: Material 3 (Material You). Tonal roles are the M3 light and dark
 // schemes for the existing blue primary (#1565c0): a faintly blue-tinted surface, cards and containers
@@ -14,7 +15,7 @@ import { MuiAlert } from './alert';
 // variables below use the same selectors, so one attribute switches everything. "Automatic" is resolved
 // to light or dark before paint by MUI's `InitColorSchemeScript attribute="data-appearance"`, which
 // sets the same attribute from `prefers-color-scheme`; with no attribute the page is light (`:root`).
-export const APPEARANCE_ATTRIBUTE = 'data-appearance';
+export { APPEARANCE_ATTRIBUTE };
 
 /** M3 shape scale (dp = px). */
 const shape: ShapeScale = { extraSmall: 4, small: 8, medium: 12, large: 16, extraLarge: 28, full: 9999 };
@@ -114,6 +115,8 @@ const hoverOnPrimaryContainer = `var(${cssVar('hoverOnPrimaryContainer')})`;
 /** M3 elevation levels 1–3 (key + ambient shadow). */
 const level1 = '0 1px 2px 0 rgba(0, 0, 0, 0.3), 0 1px 3px 1px rgba(0, 0, 0, 0.15)';
 const level2 = '0 1px 2px 0 rgba(0, 0, 0, 0.3), 0 2px 6px 2px rgba(0, 0, 0, 0.15)';
+/** A menu's shadow (level 2), for menus drawn outside MUI's Popover (the Appearance submenu). */
+export const MENU_SHADOW = level2;
 const level3 = '0 1px 3px 0 rgba(0, 0, 0, 0.3), 0 4px 8px 3px rgba(0, 0, 0, 0.15)';
 
 /**

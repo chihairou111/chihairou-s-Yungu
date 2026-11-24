@@ -30,6 +30,7 @@ import { BOTTOM_FAB_MEDIA, showsTodayPanel } from './TodayDrawer';
 import NotificationsMenu from './NotificationsMenu';
 import TodoistMenu from './TodoistMenu';
 import RefreshButton from './RefreshButton';
+import GearMenu from './GearMenu';
 import { RefreshProvider } from './RefreshContext';
 import AgentAccessDialog from './AgentAccessDialog';
 import { MAIN_ID } from './SkipLink';
@@ -54,7 +55,7 @@ interface AppShellProps {
 }
 
 /**
- * Material app bar (section title, Todoist, notifications, Refresh and the account menu: Agent access, Sign out) over the page content. A page
+ * Material app bar (section title, Todoist, notifications, Refresh, the Settings gear and the account menu: Agent access, Sign out) over the page content. A page
  * may extend the bar with a `PageHeader` (tabs, page controls); the bar then gives up its bottom edge
  * so the two read as one header. The Today's classes panel sits beside the content on every page.
  */
@@ -102,6 +103,7 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
           <TodoistMenu />
           <NotificationsMenu />
           <RefreshButton />
+          <GearMenu />
           <IconButton
             id="account-button"
             aria-label={`Account: ${userName}`}
