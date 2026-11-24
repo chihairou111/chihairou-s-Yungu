@@ -4,6 +4,10 @@ import { ThemeProvider } from '@mui/material/styles';
 import { describe, expect, it } from 'vitest';
 import { contrastRatio } from '@/lib/colors';
 import theme from './index';
+import { darkPalette, lightPalette } from './expressive';
+
+// Styles read MUI's per-scheme CSS variables; the contrast checks use each scheme's hex values.
+const v = (path: string) => `var(--mui-palette-${path})`;
 
 describe('error alert', () => {
   it('is dark red on the light red tint (the palette error.light, not a lightened copy of it)', () => {
@@ -13,10 +17,12 @@ describe('error alert', () => {
       </ThemeProvider>,
     );
     const alert = screen.getByRole('alert');
-    expect(alert).toHaveStyle({ backgroundColor: theme.palette.error.light, color: theme.palette.error.dark });
-    expect(alert.querySelector('.MuiAlert-icon')).toHaveStyle({ color: theme.palette.error.main });
-    expect(contrastRatio(theme.palette.error.dark, theme.palette.error.light)).toBeGreaterThanOrEqual(4.5);
-    expect(contrastRatio(theme.palette.error.main, theme.palette.error.light)).toBeGreaterThanOrEqual(3);
+    expect(alert).toHaveStyle({ backgroundColor: v('error-light'), color: v('error-dark') });
+    expect(alert.querySelector('.MuiAlert-icon')).toHaveStyle({ color: v('error-main') });
+    for (const { error: p } of [lightPalette, darkPalette]) {
+      expect(contrastRatio(p.dark, p.light)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(p.main, p.light)).toBeGreaterThanOrEqual(3);
+    }
   });
 });
 
@@ -28,9 +34,11 @@ describe('warning alert', () => {
       </ThemeProvider>,
     );
     const alert = screen.getByRole('alert');
-    expect(alert).toHaveStyle({ backgroundColor: theme.palette.warning.light, color: theme.palette.warning.dark });
-    expect(alert.querySelector('.MuiAlert-icon')).toHaveStyle({ color: theme.palette.warning.main });
-    expect(contrastRatio(theme.palette.warning.dark, theme.palette.warning.light)).toBeGreaterThanOrEqual(4.5);
-    expect(contrastRatio(theme.palette.warning.main, theme.palette.warning.light)).toBeGreaterThanOrEqual(3);
+    expect(alert).toHaveStyle({ backgroundColor: v('warning-light'), color: v('warning-dark') });
+    expect(alert.querySelector('.MuiAlert-icon')).toHaveStyle({ color: v('warning-main') });
+    for (const { warning: p } of [lightPalette, darkPalette]) {
+      expect(contrastRatio(p.dark, p.light)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(p.main, p.light)).toBeGreaterThanOrEqual(3);
+    }
   });
 });

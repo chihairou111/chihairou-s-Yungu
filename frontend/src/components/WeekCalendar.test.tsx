@@ -181,7 +181,13 @@ describe('WeekCalendar phone layout', () => {
   /** The list follows the content column's width (a phone, or a window narrowed by the docked panel), not the window's. */
   function stubWidth(listLayout: boolean) {
     vi.restoreAllMocks();
-    vi.stubGlobal('matchMedia', () => ({ matches: !listLayout, addEventListener() {}, removeEventListener() {} }));
+    vi.stubGlobal('matchMedia', () => ({
+      matches: !listLayout,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+    }));
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(listLayout ? 500 : 900);
   }
 

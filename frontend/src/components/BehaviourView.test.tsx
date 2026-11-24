@@ -92,7 +92,10 @@ describe('BehaviourView structure', () => {
   it("bonus colours come from the theme's success container", () => {
     show();
     const badge = within(row('课堂发言积极')).getByText('+2').parentElement!;
-    expect(badge).toHaveStyle({ backgroundColor: 'rgb(220, 243, 227)', color: 'rgb(27, 108, 58)' });
+    expect(badge).toHaveStyle({
+      backgroundColor: 'var(--yungu-success-container)',
+      color: 'var(--yungu-on-success-container)',
+    });
   });
 });
 

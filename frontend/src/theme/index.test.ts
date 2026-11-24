@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import type { CssVarsTheme } from '@mui/material/styles';
 import { contrastRatio } from '@/lib/colors';
 import theme from './index';
+import { lightRoles } from './expressive';
 
 describe('the theme (the one Rounded, Material 3 style)', () => {
   it('uses the Material 3 shape scale (cards = medium 12px)', () => {
@@ -11,13 +13,45 @@ describe('the theme (the one Rounded, Material 3 style)', () => {
   it('keeps the blue primary and derives M3 tonal surfaces from it', () => {
     const { palette, yungu } = theme;
     expect(palette.primary.main).toBe('#1565c0');
-    expect(palette.background.default).toBe(yungu.color.surface);
-    expect(palette.background.paper).toBe(yungu.color.surfaceContainerLow);
+    expect(palette.background.default).toBe(lightRoles.surface);
+    expect(palette.background.paper).toBe(lightRoles.surfaceContainerLow);
+    expect(yungu.color.surface).toBe('var(--yungu-surface)');
+  });
+
+  it('has a dark scheme keyed to data-appearance on <html>, read through CSS variables', () => {
+    const vars = theme as unknown as CssVarsTheme;
+    expect(vars.colorSchemes.dark).toBeDefined();
+    expect(vars.colorSchemes.dark?.palette.mode).toBe('dark');
+    expect(vars.colorSchemeSelector).toBe('data-appearance');
+    expect(theme.yungu.color.surface).toMatch(/^var\(--[\w-]+\)$/);
+    expect(theme.yungu.rail.bg).toMatch(/^var\(--[\w-]+\)$/);
+    expect(theme.yungu.header.bg).toMatch(/^var\(--[\w-]+\)$/);
+  });
+
+  it('keeps the light scheme exactly as it was', () => {
+    expect(lightRoles).toEqual({
+      surface: '#f9f9ff',
+      surfaceContainerLowest: '#ffffff',
+      surfaceContainerLow: '#f3f3fa',
+      surfaceContainer: '#ededf4',
+      surfaceContainerHigh: '#e7e8ee',
+      surfaceContainerHighest: '#e2e2e9',
+      onSurface: '#191c20',
+      onSurfaceVariant: '#44474e',
+      outline: '#74777f',
+      outlineVariant: '#c4c6d0',
+      primaryContainer: '#d6e3ff',
+      onPrimaryContainer: '#001b3e',
+      secondaryContainer: '#dae2f9',
+      onSecondaryContainer: '#131c2b',
+      successContainer: '#dcf3e3',
+      onSuccessContainer: '#1b6c3a',
+    });
   });
 
   it('text meets WCAG AA on every surface it sits on', () => {
-    const { palette, yungu } = theme;
-    const c = yungu.color;
+    const { palette } = theme;
+    const c = lightRoles;
     // Page, cards, sheets and menus; the high/highest containers carry no coloured text.
     const surfaces = [c.surface, c.surfaceContainerLowest, c.surfaceContainerLow, c.surfaceContainer];
     for (const s of surfaces) {

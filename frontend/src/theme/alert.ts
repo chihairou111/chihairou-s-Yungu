@@ -12,9 +12,9 @@ export const MuiAlert: Components<Theme>['MuiAlert'] = {
       variants: (['error', 'warning'] as const).map((severity) => ({
         props: { variant: 'standard' as const, severity },
         style: {
-          backgroundColor: theme.palette[severity].light,
-          color: theme.palette[severity].dark,
-          '& .MuiAlert-icon': { color: theme.palette[severity].main },
+          backgroundColor: (theme.vars ?? theme).palette[severity].light,
+          color: (theme.vars ?? theme).palette[severity].dark,
+          '& .MuiAlert-icon': { color: (theme.vars ?? theme).palette[severity].main },
         },
       })),
     }),
