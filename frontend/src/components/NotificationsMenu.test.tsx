@@ -91,14 +91,14 @@ describe('NotificationsMenu', () => {
   });
 
   it('puts the unread count in the page title, and drops it when nothing is unread', async () => {
-    document.title = "chihairou's Yungu";
+    document.title = "chihairou's Yungu (local)";
     const { unmount } = render(<NotificationsMenu />);
-    await waitFor(() => expect(document.title).toBe("(2) chihairou's Yungu"));
+    await waitFor(() => expect(document.title).toBe("(2) chihairou's Yungu (local)"));
     // Next writes the page title back on navigation; the count is put back in front of it.
-    document.title = "chihairou's Yungu";
-    await waitFor(() => expect(document.title).toBe("(2) chihairou's Yungu"));
+    document.title = "chihairou's Yungu (local)";
+    await waitFor(() => expect(document.title).toBe("(2) chihairou's Yungu (local)"));
     unmount();
-    expect(document.title).toBe("chihairou's Yungu");
+    expect(document.title).toBe("chihairou's Yungu (local)");
   });
 
   it('shows no dot and a plain name with nothing unread', async () => {

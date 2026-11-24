@@ -12,11 +12,6 @@
  */
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
-export interface WriteCheck {
-  /** Also refuse multipart (the consent page's Allow / Deny takes JSON only). */
-  jsonOnly?: boolean;
-}
-
 function ownHost(request: Request): string {
   return request.headers.get('x-forwarded-host')?.split(',')[0].trim() || request.headers.get('host') || new URL(request.url).host;
 }
@@ -30,7 +25,7 @@ function originMatches(origin: string, request: Request): boolean {
 }
 
 /** True when the request may go ahead: a read, or a write from this site's own pages. */
-export function isSameOriginWrite(request: Request, { jsonOnly = false }: WriteCheck = {}): boolean {
+export function isSameOriginWrite(request: Request): boolean {
   if (SAFE_METHODS.has((request.method ?? 'POST').toUpperCase())) return true;
   const site = request.headers.get('sec-fetch-site');
   if (site !== null && site !== 'same-origin') return false;
@@ -38,8 +33,8 @@ export function isSameOriginWrite(request: Request, { jsonOnly = false }: WriteC
   if (origin !== null && !originMatches(origin, request)) return false;
   const type = request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() ?? '';
   if (type === 'application/json') return true;
-  if (type === '') return !jsonOnly && !hasBody(request);
-  if (type === 'multipart/form-data') return !jsonOnly && site === 'same-origin' && origin !== null;
+  if (type === '') return !hasBody(request);
+  if (type === 'multipart/form-data') return site === 'same-origin' && origin !== null;
   return false;
 }
 

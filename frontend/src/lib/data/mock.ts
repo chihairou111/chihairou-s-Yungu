@@ -7,18 +7,8 @@ import { TIMETABLE, buildBehaviour, buildCourses } from './fixtures';
 import { docTooLongMessage } from '../limits';
 import { AssignmentNotFound, CommentNotFound, DocumentHandedIn, DocumentTooLong, ServiceError } from './errors';
 import { BLANK_CREDENTIALS_ERROR, NOTIFICATION_PAGE_SIZE } from './messages';
-import { TODOIST_LINK_EXPIRED } from '../todoist';
-import {
-  mockAgentAccess,
-  mockCheckAuthorize,
-  mockCreateToken,
-  mockDecideAuthorize,
-  mockDisconnect,
-  mockRevokeToken,
-} from './mock-agents';
 import {
   findOnlineDoc,
-  mockTodoist,
   getDetail,
   listNotifications,
   listSubmitted,
@@ -40,14 +30,6 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 
 export const MOCK_DISPLAY_NAME = 'Bruce Zheng';
-/** How long a mock Todoist sync runs: long enough to see "Syncing…" in the menu. */
-export const MOCK_SYNC_MS = 1500;
-
-/** Starts a mock sync now (one already running just runs on). */
-function startSync(now: number) {
-  const todoist = mockTodoist();
-  if (todoist.syncEndsAt === null || todoist.syncEndsAt <= now) todoist.syncEndsAt = now + MOCK_SYNC_MS;
-}
 
 /** Writes on an id the fixtures do not hold fail as the service's do (its 404 becomes AssignmentNotFound). */
 function known(id: number, now: number) {
@@ -157,55 +139,7 @@ export const mockData: YunguData = {
     markNotificationRead(id, Date.now());
   },
   async refresh() {
-    // Nothing is cached: every read is already fresh. Like the service, Refresh starts a Todoist sync.
-    if (mockTodoist().connected) startSync(Date.now());
-  },
-  async getTodoist() {
-    const { connected, syncEndsAt } = mockTodoist();
-    if (!connected) return { connected: false, state: 'ok' };
-    const now = Date.now();
-    if (syncEndsAt !== null && syncEndsAt > now) return { connected: true, account: MOCK_DISPLAY_NAME, state: 'syncing' };
-    return { connected: true, account: MOCK_DISPLAY_NAME, state: 'ok', ...(syncEndsAt !== null && { lastSyncAt: syncEndsAt }) };
-  },
-  async connectTodoist() {
-    // No Todoist here: the "authorize page" is our own callback, as Todoist would send the browser back.
-    const state = crypto.randomUUID();
-    mockTodoist().pendingState = state;
-    return `/api/todoist/callback?code=mock-code&state=${state}`;
-  },
-  async finishTodoist(_code, state) {
-    const todoist = mockTodoist();
-    const valid = todoist.pendingState !== null && state === todoist.pendingState;
-    todoist.pendingState = null;
-    if (!valid) throw new ServiceError(400, TODOIST_LINK_EXPIRED);
-    todoist.connected = true;
-    todoist.syncEndsAt = null;
-    startSync(Date.now());
-  },
-  async syncTodoist() {
-    if (!mockTodoist().connected) throw new ServiceError(409, 'Connect Todoist first.');
-    startSync(Date.now());
-  },
-  async disconnectTodoist() {
-    Object.assign(mockTodoist(), { connected: false, pendingState: null, syncEndsAt: null });
-  },
-  async getAgentAccess() {
-    return mockAgentAccess();
-  },
-  async createAgentToken(name) {
-    return mockCreateToken(name, Date.now());
-  },
-  async revokeAgentToken(id) {
-    mockRevokeToken(id);
-  },
-  async disconnectAgent(id) {
-    mockDisconnect(id);
-  },
-  async checkAuthorize(params) {
-    return mockCheckAuthorize(params);
-  },
-  async decideAuthorize(params, decision) {
-    return mockDecideAuthorize(params, decision, Date.now());
+    // Nothing is cached: every read is already fresh.
   },
   async signIn(loginId, password) {
     if (!loginId.trim() || !password.trim()) return { ok: false, error: BLANK_CREDENTIALS_ERROR };

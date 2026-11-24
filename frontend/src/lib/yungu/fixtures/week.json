@@ -1,0 +1,942 @@
+[
+  [
+    {
+      "name": "Routine 1",
+      "eName": "Routine 2",
+      "startTime": 1792364400000,
+      "endTime": 1792364400000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 3",
+      "eName": "Routine 4",
+      "startTime": 1792366200000,
+      "endTime": 1792366200000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 5",
+      "eName": "Routine 6",
+      "startTime": 1792367700000,
+      "endTime": 1792368000000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 7",
+      "eName": "Routine 8",
+      "startTime": 1792368600000,
+      "endTime": 1792369800000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Course 14",
+      "eName": "Course 2",
+      "startTime": 1792370400000,
+      "endTime": 1792372800000,
+      "playground": "Room 1",
+      "courseId": 4840,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 15",
+      "eName": "Course 4",
+      "startTime": 1792373100000,
+      "endTime": 1792375500000,
+      "playground": "Room 2",
+      "courseId": 8147,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 16",
+      "eName": "Course 8",
+      "startTime": 1792376100000,
+      "endTime": 1792378500000,
+      "playground": "Room 3",
+      "courseId": 7744,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 17",
+      "eName": "Course 5",
+      "startTime": 1792378800000,
+      "endTime": 1792381200000,
+      "playground": "Room 4",
+      "courseId": 4588,
+      "scheduleType": 2
+    },
+    {
+      "name": "Routine 9",
+      "eName": "Routine 10",
+      "startTime": 1792381200000,
+      "endTime": 1792382700000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Course 18",
+      "eName": "Course 1",
+      "startTime": 1792383000000,
+      "endTime": 1792385400000,
+      "playground": "Room 1",
+      "courseId": 97349,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 19",
+      "eName": "Course 6",
+      "startTime": 1792386000000,
+      "endTime": 1792388400000,
+      "playground": "Room 2",
+      "courseId": 269,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 20",
+      "eName": "Course 20",
+      "startTime": 1792389000000,
+      "endTime": 1792391400000,
+      "playground": "Room 5",
+      "courseId": 86407,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 21",
+      "eName": "Course 22",
+      "startTime": 1792392000000,
+      "endTime": 1792395600000,
+      "playground": "Room 6",
+      "courseId": 100,
+      "scheduleType": 3
+    },
+    {
+      "name": "Course 23",
+      "eName": "Course 24",
+      "startTime": 1792395900000,
+      "endTime": 1792398300000,
+      "playground": "Room 7",
+      "courseId": 93239,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 25",
+      "eName": "Course 7",
+      "startTime": 1792398900000,
+      "endTime": 1792401300000,
+      "playground": "Room 8",
+      "courseId": 8663,
+      "scheduleType": 2
+    },
+    {
+      "name": "Routine 11",
+      "eName": "Routine 12",
+      "startTime": 1792401300000,
+      "endTime": 1792401300000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 13",
+      "eName": "Routine 14",
+      "startTime": 1792401300000,
+      "endTime": 1792404900000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 15",
+      "eName": "Routine 15",
+      "startTime": 1792404900000,
+      "endTime": 1792413900000,
+      "playground": "Room 7",
+      "courseId": 0,
+      "scheduleType": 5
+    },
+    {
+      "name": "Routine 16",
+      "eName": "Routine 17",
+      "startTime": 1792413900000,
+      "endTime": 1792418400000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 18",
+      "eName": "Routine 19",
+      "startTime": 1792418400000,
+      "endTime": 1792420200000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 20",
+      "eName": "Routine 21",
+      "startTime": 1792420200000,
+      "endTime": 1792420200000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    }
+  ],
+  [
+    {
+      "name": "Routine 1",
+      "eName": "Routine 2",
+      "startTime": 1792450800000,
+      "endTime": 1792450800000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 3",
+      "eName": "Routine 4",
+      "startTime": 1792452600000,
+      "endTime": 1792452600000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 5",
+      "eName": "Routine 6",
+      "startTime": 1792454100000,
+      "endTime": 1792454400000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Course 19",
+      "eName": "Course 6",
+      "startTime": 1792454400000,
+      "endTime": 1792456800000,
+      "playground": "Room 2",
+      "courseId": 269,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 17",
+      "eName": "Course 5",
+      "startTime": 1792457400000,
+      "endTime": 1792459800000,
+      "playground": "Room 4",
+      "courseId": 4588,
+      "scheduleType": 2
+    },
+    {
+      "name": "Routine 22",
+      "eName": "Routine 23",
+      "startTime": 1792459800000,
+      "endTime": 1792461300000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Course 14",
+      "eName": "Course 2",
+      "startTime": 1792461300000,
+      "endTime": 1792463700000,
+      "playground": "Room 1",
+      "courseId": 4840,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 23",
+      "eName": "Course 24",
+      "startTime": 1792464300000,
+      "endTime": 1792466700000,
+      "playground": "Room 7",
+      "courseId": 93239,
+      "scheduleType": 2
+    },
+    {
+      "name": "Routine 9",
+      "eName": "Routine 10",
+      "startTime": 1792466700000,
+      "endTime": 1792469100000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Course 15",
+      "eName": "Course 26",
+      "startTime": 1792469400000,
+      "endTime": 1792471800000,
+      "playground": "Room 2",
+      "courseId": 8147,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 15",
+      "eName": "Course 26",
+      "startTime": 1792472400000,
+      "endTime": 1792474800000,
+      "playground": "Room 2",
+      "courseId": 8147,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 20",
+      "eName": "Course 20",
+      "startTime": 1792475400000,
+      "endTime": 1792477800000,
+      "playground": "Room 5",
+      "courseId": 86407,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 20",
+      "eName": "Course 20",
+      "startTime": 1792478400000,
+      "endTime": 1792480800000,
+      "playground": "Room 5",
+      "courseId": 86407,
+      "scheduleType": 2
+    },
+    {
+      "name": "Routine 24",
+      "eName": "Routine 24",
+      "startTime": 1792480800000,
+      "endTime": 1792482300000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Course 18",
+      "eName": "Course 1",
+      "startTime": 1792482300000,
+      "endTime": 1792484700000,
+      "playground": "Room 1",
+      "courseId": 97349,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 9",
+      "eName": "Course 9",
+      "startTime": 1792485300000,
+      "endTime": 1792487700000,
+      "playground": "Room 9",
+      "courseId": 45886,
+      "scheduleType": 3
+    },
+    {
+      "name": "Routine 11",
+      "eName": "Routine 12",
+      "startTime": 1792488600000,
+      "endTime": 1792488600000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 13",
+      "eName": "Routine 14",
+      "startTime": 1792488600000,
+      "endTime": 1792491300000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 15",
+      "eName": "Routine 15",
+      "startTime": 1792491300000,
+      "endTime": 1792500300000,
+      "playground": "Room 7",
+      "courseId": 0,
+      "scheduleType": 5
+    },
+    {
+      "name": "Routine 25",
+      "eName": "Routine 25",
+      "startTime": 1792497600000,
+      "endTime": 1792503000000,
+      "playground": "Room 10",
+      "courseId": 0,
+      "scheduleType": 5
+    },
+    {
+      "name": "Routine 18",
+      "eName": "Routine 19",
+      "startTime": 1792504800000,
+      "endTime": 1792506600000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 20",
+      "eName": "Routine 21",
+      "startTime": 1792506600000,
+      "endTime": 1792506600000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    }
+  ],
+  [
+    {
+      "name": "Routine 1",
+      "eName": "Routine 2",
+      "startTime": 1792537200000,
+      "endTime": 1792537200000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 3",
+      "eName": "Routine 4",
+      "startTime": 1792539000000,
+      "endTime": 1792539000000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 5",
+      "eName": "Routine 6",
+      "startTime": 1792540500000,
+      "endTime": 1792540800000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Course 19",
+      "eName": "Course 6",
+      "startTime": 1792540800000,
+      "endTime": 1792543200000,
+      "playground": "Room 2",
+      "courseId": 269,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 19",
+      "eName": "Course 6",
+      "startTime": 1792543800000,
+      "endTime": 1792546200000,
+      "playground": "Room 2",
+      "courseId": 269,
+      "scheduleType": 2
+    },
+    {
+      "name": "Routine 22",
+      "eName": "Routine 23",
+      "startTime": 1792546200000,
+      "endTime": 1792547700000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Course 27",
+      "eName": "Course 28",
+      "startTime": 1792547700000,
+      "endTime": 1792550100000,
+      "playground": "Room 11",
+      "courseId": 42747,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 16",
+      "eName": "Course 8",
+      "startTime": 1792550700000,
+      "endTime": 1792553100000,
+      "playground": "Room 3",
+      "courseId": 7744,
+      "scheduleType": 2
+    },
+    {
+      "name": "Routine 9",
+      "eName": "Routine 10",
+      "startTime": 1792553100000,
+      "endTime": 1792555500000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Course 23",
+      "eName": "Course 24",
+      "startTime": 1792555800000,
+      "endTime": 1792558200000,
+      "playground": "Room 7",
+      "courseId": 93239,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 18",
+      "eName": "Course 1",
+      "startTime": 1792558800000,
+      "endTime": 1792561200000,
+      "playground": "Room 1",
+      "courseId": 97349,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 18",
+      "eName": "Course 1",
+      "startTime": 1792561800000,
+      "endTime": 1792564200000,
+      "playground": "Room 1",
+      "courseId": 97349,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 21",
+      "eName": "Course 22",
+      "startTime": 1792564800000,
+      "endTime": 1792568400000,
+      "playground": "Room 6",
+      "courseId": 100,
+      "scheduleType": 3
+    },
+    {
+      "name": "Course 20",
+      "eName": "Course 20",
+      "startTime": 1792568700000,
+      "endTime": 1792571100000,
+      "playground": "Room 5",
+      "courseId": 86407,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 29",
+      "eName": "Course 13",
+      "startTime": 1792571700000,
+      "endTime": 1792574100000,
+      "playground": "Room 11",
+      "courseId": 2705,
+      "scheduleType": 2
+    },
+    {
+      "name": "Routine 11",
+      "eName": "Routine 12",
+      "startTime": 1792574100000,
+      "endTime": 1792574100000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 13",
+      "eName": "Routine 14",
+      "startTime": 1792574100000,
+      "endTime": 1792577700000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 15",
+      "eName": "Routine 15",
+      "startTime": 1792577700000,
+      "endTime": 1792586700000,
+      "playground": "Room 7",
+      "courseId": 0,
+      "scheduleType": 5
+    },
+    {
+      "name": "Routine 16",
+      "eName": "Routine 17",
+      "startTime": 1792586700000,
+      "endTime": 1792591200000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 18",
+      "eName": "Routine 19",
+      "startTime": 1792591200000,
+      "endTime": 1792593000000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 20",
+      "eName": "Routine 21",
+      "startTime": 1792593000000,
+      "endTime": 1792593000000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    }
+  ],
+  [
+    {
+      "name": "Routine 1",
+      "eName": "Routine 2",
+      "startTime": 1792623600000,
+      "endTime": 1792623600000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 3",
+      "eName": "Routine 4",
+      "startTime": 1792625400000,
+      "endTime": 1792625400000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 5",
+      "eName": "Routine 6",
+      "startTime": 1792626900000,
+      "endTime": 1792627200000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Course 14",
+      "eName": "Course 2",
+      "startTime": 1792627200000,
+      "endTime": 1792629600000,
+      "playground": "Room 1",
+      "courseId": 4840,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 23",
+      "eName": "Course 24",
+      "startTime": 1792630200000,
+      "endTime": 1792632600000,
+      "playground": "Room 7",
+      "courseId": 93239,
+      "scheduleType": 2
+    },
+    {
+      "name": "Routine 22",
+      "eName": "Routine 23",
+      "startTime": 1792632600000,
+      "endTime": 1792634100000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Course 15",
+      "eName": "Course 26",
+      "startTime": 1792634100000,
+      "endTime": 1792636500000,
+      "playground": "Room 2",
+      "courseId": 8147,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 15",
+      "eName": "Course 26",
+      "startTime": 1792637100000,
+      "endTime": 1792639500000,
+      "playground": "Room 2",
+      "courseId": 8147,
+      "scheduleType": 2
+    },
+    {
+      "name": "Routine 9",
+      "eName": "Routine 10",
+      "startTime": 1792639500000,
+      "endTime": 1792641900000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Course 27",
+      "eName": "Course 28",
+      "startTime": 1792642200000,
+      "endTime": 1792644600000,
+      "playground": "Room 7",
+      "courseId": 42747,
+      "scheduleType": 2
+    },
+    {
+      "name": "Routine 26",
+      "eName": "Routine 27",
+      "startTime": 1792642200000,
+      "endTime": 1792644600000,
+      "playground": "Room 12",
+      "courseId": 0,
+      "scheduleType": 3
+    },
+    {
+      "name": "Course 17",
+      "eName": "Course 5",
+      "startTime": 1792645200000,
+      "endTime": 1792647600000,
+      "playground": "Room 4",
+      "courseId": 4588,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 16",
+      "eName": "Course 8",
+      "startTime": 1792648200000,
+      "endTime": 1792650600000,
+      "playground": "Room 3",
+      "courseId": 7744,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 20",
+      "eName": "Course 20",
+      "startTime": 1792651200000,
+      "endTime": 1792653600000,
+      "playground": "Room 5",
+      "courseId": 86407,
+      "scheduleType": 2
+    },
+    {
+      "name": "Routine 24",
+      "eName": "Routine 24",
+      "startTime": 1792653600000,
+      "endTime": 1792655100000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Course 23",
+      "eName": "Course 24",
+      "startTime": 1792655100000,
+      "endTime": 1792657500000,
+      "playground": "Room 7",
+      "courseId": 93239,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 9",
+      "eName": "Course 9",
+      "startTime": 1792658100000,
+      "endTime": 1792660500000,
+      "playground": "Room 9",
+      "courseId": 45886,
+      "scheduleType": 3
+    },
+    {
+      "name": "Routine 11",
+      "eName": "Routine 12",
+      "startTime": 1792661400000,
+      "endTime": 1792661400000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 13",
+      "eName": "Routine 14",
+      "startTime": 1792661400000,
+      "endTime": 1792664100000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 15",
+      "eName": "Routine 15",
+      "startTime": 1792664100000,
+      "endTime": 1792673100000,
+      "playground": "Room 7",
+      "courseId": 0,
+      "scheduleType": 5
+    },
+    {
+      "name": "Routine 16",
+      "eName": "Routine 17",
+      "startTime": 1792673100000,
+      "endTime": 1792677600000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 18",
+      "eName": "Routine 19",
+      "startTime": 1792677600000,
+      "endTime": 1792679400000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 20",
+      "eName": "Routine 21",
+      "startTime": 1792679400000,
+      "endTime": 1792679400000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    }
+  ],
+  [
+    {
+      "name": "Routine 1",
+      "eName": "Routine 2",
+      "startTime": 1792710000000,
+      "endTime": 1792710000000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 3",
+      "eName": "Routine 4",
+      "startTime": 1792711800000,
+      "endTime": 1792711800000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Routine 5",
+      "eName": "Routine 6",
+      "startTime": 1792713300000,
+      "endTime": 1792713600000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Course 18",
+      "eName": "Course 1",
+      "startTime": 1792713600000,
+      "endTime": 1792716000000,
+      "playground": "Room 1",
+      "courseId": 97349,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 18",
+      "eName": "Course 1",
+      "startTime": 1792716600000,
+      "endTime": 1792719000000,
+      "playground": "Room 1",
+      "courseId": 97349,
+      "scheduleType": 2
+    },
+    {
+      "name": "Routine 22",
+      "eName": "Routine 23",
+      "startTime": 1792719000000,
+      "endTime": 1792720500000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Course 15",
+      "eName": "Course 26",
+      "startTime": 1792720500000,
+      "endTime": 1792722900000,
+      "playground": "Room 2",
+      "courseId": 8147,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 14",
+      "eName": "Course 2",
+      "startTime": 1792723500000,
+      "endTime": 1792725900000,
+      "playground": "Room 1",
+      "courseId": 4840,
+      "scheduleType": 2
+    },
+    {
+      "name": "Routine 9",
+      "eName": "Routine 10",
+      "startTime": 1792725900000,
+      "endTime": 1792728300000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    },
+    {
+      "name": "Course 19",
+      "eName": "Course 6",
+      "startTime": 1792728600000,
+      "endTime": 1792731000000,
+      "playground": "Room 2",
+      "courseId": 269,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 19",
+      "eName": "Course 6",
+      "startTime": 1792731600000,
+      "endTime": 1792734000000,
+      "playground": "Room 2",
+      "courseId": 269,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 17",
+      "eName": "Course 5",
+      "startTime": 1792734600000,
+      "endTime": 1792737000000,
+      "playground": "Room 4",
+      "courseId": 4588,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 20",
+      "eName": "Course 20",
+      "startTime": 1792737600000,
+      "endTime": 1792740000000,
+      "playground": "Room 5",
+      "courseId": 86407,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 16",
+      "eName": "Course 8",
+      "startTime": 1792740600000,
+      "endTime": 1792743000000,
+      "playground": "Room 3",
+      "courseId": 7744,
+      "scheduleType": 2
+    },
+    {
+      "name": "Course 30",
+      "eName": "Course 31",
+      "startTime": 1792741500000,
+      "endTime": 1792747800000,
+      "playground": "Room 13",
+      "courseId": 2713,
+      "scheduleType": 3
+    }
+  ],
+  [],
+  [
+    {
+      "name": "Routine 20",
+      "eName": "Routine 21",
+      "startTime": 1792938600000,
+      "endTime": 1792938600000,
+      "playground": null,
+      "courseId": null,
+      "scheduleType": null
+    }
+  ]
+]

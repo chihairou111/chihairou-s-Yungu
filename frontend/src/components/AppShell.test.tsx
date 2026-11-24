@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useTheme } from '@mui/material/styles';
 import AppShell, { initials } from './AppShell';
 import PageHeader from './PageHeader';
+import { installFakeLocal, removeFakeLocal } from './local/test-local';
 
 const nav = vi.hoisted(() => ({ pathname: '/assignments', replace: vi.fn() }));
 vi.mock('next/navigation', () => ({
@@ -12,6 +13,7 @@ vi.mock('next/navigation', () => ({
 }));
 
 afterEach(() => {
+  removeFakeLocal();
   document.cookie = 'yl_style=; Max-Age=0; Path=/';
   vi.unstubAllGlobals();
   nav.replace.mockReset();
@@ -115,17 +117,45 @@ describe('AppShell', () => {
     expect(button).toHaveAttribute('aria-controls', menu.id);
     expect(screen.getByText('Signed in as')).toBeVisible();
     expect(within(menu).queryByText('Signed in as')).not.toBeInTheDocument();
-    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Agent access', 'Sign out']);
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Sign out']);
+    expect(within(menu).queryByRole('menuitem', { name: 'Agent access' })).not.toBeInTheDocument();
   });
+});
 
-  it('opens Agent access from the avatar menu, closing the menu', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({ personal: [], clients: [] })))));
+describe('AppShell in the desktop app (Suspension Mode)', () => {
+  it('has no Suspension Mode controls in the web app', async () => {
     render(<AppShell userName="Bruce Zheng">content</AppShell>);
     await userEvent.click(screen.getByRole('button', { name: 'Account: Bruce Zheng' }));
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Agent access' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Agent access' });
-    expect(await within(dialog).findByText('No tokens yet.')).toBeVisible();
-    await vi.waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    expect(screen.queryByText('Suspension Mode')).not.toBeInTheDocument();
+    expect(screen.queryByText('Allowed Wi-Fi…')).not.toBeInTheDocument();
+  });
+
+  it('adds the Suspension Mode switch and "Allowed Wi-Fi…" to the account menu', async () => {
+    const local = installFakeLocal({ suspension: false, allowedWifi: ['School'], ssid: 'Home' });
+    render(<AppShell userName="Bruce Zheng">content</AppShell>);
+    await userEvent.click(screen.getByRole('button', { name: 'Account: Bruce Zheng' }));
+    const menu = screen.getByRole('menu');
+    const toggle = await within(menu).findByRole('menuitemcheckbox', { name: 'Suspension Mode' });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Allowed Wi-Fi…', 'Sign out']);
+
+    await userEvent.click(toggle);
+    expect(local.api.setSuspension).toHaveBeenCalledWith(true);
+    local.emit({ suspension: true });
+    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Suspension Mode' })).toHaveAttribute('aria-checked', 'true');
+
+    expect(local.api.readWifi).not.toHaveBeenCalled();
+    await userEvent.click(within(menu).getByRole('menuitem', { name: 'Allowed Wi-Fi…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Allowed Wi-Fi' });
+    expect(local.api.readWifi).toHaveBeenCalledTimes(1); // so "Add current Wi-Fi" knows the name
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add current Wi-Fi' }));
+    expect(local.api.setAllowedWifi).toHaveBeenCalledWith(['School', 'Home']);
+  });
+
+  it('covers the page with the Suspension Mode screen while suspended', async () => {
+    installFakeLocal({ suspension: true, suspended: true, reason: 'unknown' });
+    render(<AppShell userName="Bruce Zheng">content</AppShell>);
+    expect(await screen.findByRole('alertdialog', { name: 'Suspension Mode' })).toBeInTheDocument();
   });
 });
 
@@ -135,10 +165,10 @@ function ThemeProbe() {
 }
 
 describe('app bar', () => {
-  it('holds, on the right, Todoist, Notifications, Refresh and the account avatar, and no Settings gear', () => {
+  it('holds, on the right, Notifications, Refresh and the account avatar, and no Settings gear', () => {
     render(<AppShell userName="Bruce Zheng">content</AppShell>);
     const buttons = within(screen.getByRole('banner')).getAllByRole('button');
-    expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(['Todoist', 'Notifications', 'Refresh', 'Account: Bruce Zheng']);
+    expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(['Notifications', 'Refresh', 'Account: Bruce Zheng']);
     expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument();
   });
 

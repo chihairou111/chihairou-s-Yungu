@@ -85,6 +85,8 @@ describe('ending a session the service refused', () => {
   it('turns a notice back into its message, ignoring anything unknown', () => {
     expect(signInNotice('password')).toBe(PASSWORD_CHANGED);
     expect(signInNotice('ended')).toBe('Sign in again.');
+    // The desktop app, while its startup sign-in cannot reach Yungu and keeps trying.
+    expect(signInNotice('unreachable')).toBe("Can't reach Yungu right now — trying again.");
     expect(signInNotice('toString')).toBeNull();
     expect(signInNotice('Call 123 now')).toBeNull();
     expect(signInNotice(undefined)).toBeNull();

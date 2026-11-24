@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+<title>chihairou's Yungu (local)</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f7f7f5; --fg: #1d1d1b; --muted: #6b6b66; --accent: #1d1d1b; --accent-fg: #fff; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1b1b1a; --fg: #ececea; --muted: #a3a39d; --accent: #ececea; --accent-fg: #1b1b1a; } }
+  html, body { height: 100%; margin: 0; }
+  body { display: grid; place-items: center; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-user-select: none; user-select: none; }
+  main { text-align: center; padding: 24px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 8px; }
+  p { margin: 0; color: var(--muted); }
+  .error { display: none; }
+  /* loadFile(splash, { hash: 'error' }): the start failed. */
+  body:has(#error:target) .starting { display: none; }
+  #error:target { display: block; }
+  a.button { display: inline-block; margin-top: 20px; padding: 8px 18px; border-radius: 8px;
+    background: var(--accent); color: var(--accent-fg); text-decoration: none; font-weight: 500; }
+  a.button:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>chihairou's Yungu (local)</h1>
+  <p class="starting" role="status">Starting…</p>
+  <!-- The main process watches for #restart (an in-page navigation): the page itself runs no script. -->
+  <section id="error" class="error" role="alert">
+    <p>chihairou's Yungu (local) couldn't start.</p>
+    <a class="button" href="#restart">Restart</a>
+  </section>
+</main>
+</body>
+</html>

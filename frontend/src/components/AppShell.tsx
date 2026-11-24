@@ -10,10 +10,14 @@ import ListItemIcon from '@mui/material/ListItemIcon';
 import MenuItem from '@mui/material/MenuItem';
 import MenuList from '@mui/material/MenuList';
 import Popover from '@mui/material/Popover';
+import Switch from '@mui/material/Switch';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
-import KeyRounded from '@mui/icons-material/KeyRounded';
 import Logout from '@mui/icons-material/Logout';
+import WifiRounded from '@mui/icons-material/WifiRounded';
+import AllowedWifiDialog from './local/AllowedWifiDialog';
+import { localApi, useLocalState } from './local/local-api';
+import { LocalSuspension } from './local/SuspensionScreen';
 import { sectionFor } from './nav-items';
 import {
   CONTENT_MAX_PX,
@@ -28,10 +32,8 @@ import {
 import { PHONE_NAV_CLEARANCE } from './NavRail';
 import { BOTTOM_FAB_MEDIA, showsTodayPanel } from './TodayDrawer';
 import NotificationsMenu from './NotificationsMenu';
-import TodoistMenu from './TodoistMenu';
 import RefreshButton from './RefreshButton';
 import { RefreshProvider } from './RefreshContext';
-import AgentAccessDialog from './AgentAccessDialog';
 import { MAIN_ID } from './SkipLink';
 
 /** "Bruce Zheng" -> "BZ"; "郑博" -> "郑"; blank -> "?". */
@@ -54,7 +56,8 @@ interface AppShellProps {
 }
 
 /**
- * Material app bar (section title, Todoist, notifications, Refresh and the account menu: Agent access, Sign out) over the page content. A page
+ * Material app bar (section title, notifications, Refresh and the account menu: Sign out, and in the
+ * desktop app Suspension Mode's switch and its allowed Wi-Fi) over the page content. A page
  * may extend the bar with a `PageHeader` (tabs, page controls); the bar then gives up its bottom edge
  * so the two read as one header. The Today's classes panel sits beside the content on every page.
  */
@@ -64,8 +67,10 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState(false);
-  const [agentAccessOpen, setAgentAccessOpen] = useState(false);
   const title = sectionFor(pathname)?.label ?? 'Yungu';
+  // The desktop shell's Suspension Mode; null on the web, where none of it shows.
+  const local = useLocalState();
+  const [wifiOpen, setWifiOpen] = useState(false);
   const closeMenu = () => setMenuAnchor(null);
 
   async function signOut() {
@@ -99,7 +104,6 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
           <Typography variant="h1" sx={{ flexGrow: 1, minWidth: 0 }} noWrap>
             {title}
           </Typography>
-          <TodoistMenu />
           <NotificationsMenu />
           <RefreshButton />
           <IconButton
@@ -143,17 +147,43 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
                 if (e.key === 'Tab') closeMenu();
               }}
             >
-              <MenuItem
-                onClick={() => {
-                  closeMenu();
-                  setAgentAccessOpen(true);
-                }}
-              >
-                <ListItemIcon>
-                  <KeyRounded fontSize="small" />
-                </ListItemIcon>
-                Agent access
-              </MenuItem>
+              {local && (
+                <MenuItem
+                  role="menuitemcheckbox"
+                  aria-checked={local.suspension}
+                  onClick={() => void localApi()?.setSuspension(!local.suspension).catch(() => undefined)}
+                  sx={{ gap: 1 }}
+                >
+                  <Box component="span" sx={{ flex: 1 }}>
+                    Suspension Mode
+                  </Box>
+                  {/* The menu item is the control; the switch only shows its state. */}
+                  <Switch
+                    size="small"
+                    checked={local.suspension}
+                    tabIndex={-1}
+                    aria-hidden
+                    slotProps={{ input: { 'aria-hidden': true, tabIndex: -1 } }}
+                    sx={{ mr: -1, pointerEvents: 'none' }}
+                  />
+                </MenuItem>
+              )}
+              {local && (
+                <MenuItem
+                  onClick={() => {
+                    closeMenu();
+                    setWifiOpen(true);
+                    // The shell reads the Wi-Fi only while the switch is on; one reading for "Add current Wi-Fi".
+                    void localApi()?.readWifi().catch(() => undefined);
+                  }}
+                >
+                  <ListItemIcon>
+                    <WifiRounded fontSize="small" />
+                  </ListItemIcon>
+                  Allowed Wi-Fi…
+                </MenuItem>
+              )}
+              {local && <Divider />}
               <MenuItem onClick={signOut} disabled={signingOut}>
                 <ListItemIcon>
                   <Logout fontSize="small" />
@@ -167,7 +197,6 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
               </Typography>
             )}
           </Popover>
-          <AgentAccessDialog open={agentAccessOpen} onClose={() => setAgentAccessOpen(false)} />
         </Toolbar>
       </AppBar>
       <Box
@@ -193,6 +222,16 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
         {children}
       </Box>
       {panel}
+      {local && (
+        <AllowedWifiDialog
+          open={wifiOpen}
+          allowedWifi={local.allowedWifi}
+          ssid={local.ssid}
+          onChange={(names) => void localApi()?.setAllowedWifi(names).catch(() => undefined)}
+          onClose={() => setWifiOpen(false)}
+        />
+      )}
+      <LocalSuspension />
     </Box>
   );
   // The bar's Refresh also reloads an open assignment pop-up, which lives in the page content.

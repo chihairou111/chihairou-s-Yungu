@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useId, useRef, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import ButtonBase from '@mui/material/ButtonBase';
@@ -15,6 +15,7 @@ import DownloadOutlined from '@mui/icons-material/DownloadOutlined';
 import EditOutlined from '@mui/icons-material/EditOutlined';
 import OpenInNew from '@mui/icons-material/OpenInNew';
 import type { Theme } from '@mui/material/styles';
+import { FILE_STORAGE_UNREACHABLE } from '@/lib/data/errors';
 import { deltaToHtml, parseDelta, type Delta } from '@/lib/quill-delta';
 import type { FileRef } from '@/lib/types';
 import { embedSx, quoteSx, strikeSx } from './docStyles';
@@ -371,11 +372,59 @@ function FileList({ files, at, onPick }: { files: FileRef[]; at: number; onPick:
   );
 }
 
+/**
+ * Asks the file route for one byte of `url` and says whether it answered that Yungu's file storage cannot
+ * be reached (a frame or image cannot report an HTTP error body itself). Any other outcome is false.
+ */
+async function storageBlocked(url: string, signal: AbortSignal): Promise<boolean> {
+  try {
+    const res = await fetch(url, { headers: { range: 'bytes=0-0' }, cache: 'no-store', signal });
+    if (res.ok || res.status !== 502) return false;
+    return ((await res.json()) as { error?: string }).error === FILE_STORAGE_UNREACHABLE;
+  } catch {
+    return false;
+  }
+}
+
+/** True once a request for `url` has been found to fail with the file-storage sentence. Probes at once when `now`. */
+function useStorageBlocked(url: string | null, now: boolean): { blocked: boolean; probe: () => void } {
+  const [blocked, setBlocked] = useState(false);
+  const abort = useRef<AbortController | null>(null);
+  const probe = () => {
+    if (!url) return;
+    abort.current?.abort();
+    const ctl = (abort.current = new AbortController());
+    void storageBlocked(url, ctl.signal).then((b) => {
+      if (b && !ctl.signal.aborted) setBlocked(true);
+    });
+  };
+  useEffect(() => {
+    if (now) probe();
+    return () => abort.current?.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url, now]);
+  return { blocked, probe };
+}
+
+/** The viewer's own failure state for a file that cannot be fetched, in the same place and tone as "No preview". */
+function StorageBlocked({ file }: { file: FileRef }) {
+  return (
+    <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 1.5, px: 3, textAlign: 'center' }}>
+      <FileKindIcon file={file} sx={{ fontSize: 64, color: V.muted }} />
+      <Typography variant="body1" role="alert">
+        {FILE_STORAGE_UNREACHABLE}
+      </Typography>
+    </Stack>
+  );
+}
+
 /** The current file, as large as the stage allows. */
 function Stage({ file }: { file: FileRef }) {
   const pdf = viewPdf(file);
+  const { blocked, probe } = useStorageBlocked(pdf ?? file.url, pdf !== null);
   const fill = { flex: 1, minWidth: 0, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' } as const;
 
+  if (blocked) return <StorageBlocked file={file} />;
   if (pdf) {
     return (
       <Box
@@ -396,7 +445,7 @@ function Stage({ file }: { file: FileRef }) {
   if (file.kind === 'image') {
     return (
       <Box sx={fill}>
-        <Box component="img" src={file.url} alt={file.name} sx={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block' }} />
+        <Box component="img" src={file.url} alt={file.name} onError={probe} sx={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block' }} />
       </Box>
     );
   }

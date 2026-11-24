@@ -89,6 +89,24 @@ describe('POST /api/files', () => {
   it('400s when no file is sent', async () => {
     expect((await POST(upload(null))).status).toBe(400);
   });
+  it('accepts exactly 50 MB', async () => {
+    const spy = vi.spyOn(data, 'uploadFile');
+    const res = await POST(upload(new File([new Uint8Array(50 * 1024 * 1024)], 'big.bin')));
+    expect(res.status).toBe(200);
+    expect(spy.mock.calls[0][2].length).toBe(50 * 1024 * 1024);
+    spy.mockRestore();
+  });
+  it('refuses without the local cookie when the lock is on, before reading the body', async () => {
+    vi.stubEnv('YUNGU_LOCAL_SECRET', 'abc');
+    try {
+      const res = await POST(upload(new File(['x'], 'a.txt')));
+      expect(res.status).toBe(403);
+      const ok = await POST(upload(new File(['x'], 'a.txt'), { ...OWN, cookie: 'yl_local=abc' }));
+      expect(ok.status).toBe(200);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
   it('413s over 50 MB', async () => {
     const res = await POST(upload(new File([new Uint8Array(50 * 1024 * 1024 + 1)], 'big.bin')));
     expect(res.status).toBe(413);

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Linked into the wifi-ssid helper's __TEXT,__info_plist section (see build:wifi-helper), so macOS
+     treats the bare command-line tool as an identified app that may ask for Location access. -->
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>dev.chihairou.yungu.local.wifi-ssid</string>
+	<key>CFBundleName</key>
+	<string>chihairou's Yungu (local) Wi-Fi check</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>To check which Wi-Fi you're on for Suspension Mode. Your location is never stored or sent.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>To check which Wi-Fi you're on for Suspension Mode. Your location is never stored or sent.</string>
+</dict>
+</plist>

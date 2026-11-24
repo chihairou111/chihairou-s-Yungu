@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { encodeSession } from '@/lib/session-cookie';
 import { NextRequest } from 'next/server';
 import { unstable_doesMiddlewareMatch } from 'next/experimental/testing/server';
@@ -29,17 +29,10 @@ describe('routeFor', () => {
 });
 
 describe('coming back after signing in', () => {
-  const authorize = '/oauth/authorize?client_id=ylc_1&redirect_uri=https%3A%2F%2Fclaude.ai%2Fcb&state=s';
-
-  it('sends a signed-out visitor of the consent page to sign in first, then back to it', () => {
-    expect(routeFor('/oauth/authorize', undefined, authorize.slice('/oauth/authorize'.length))).toEqual({
-      redirect: `/login?next=${encodeURIComponent(authorize)}`,
-      clearCookie: false,
-    });
-  });
+  const back = '/assignments/42?tab=files&x=1';
 
   it('honours a safe next once signed in', () => {
-    expect(routeFor('/login', valid, `?next=${encodeURIComponent(authorize)}`)).toEqual({ redirect: authorize, clearCookie: false });
+    expect(routeFor('/login', valid, `?next=${encodeURIComponent(back)}`)).toEqual({ redirect: back, clearCookie: false });
     expect(routeFor('/login', valid, '?next=%2Fcalendar')).toEqual({ redirect: '/calendar', clearCookie: false });
   });
 
@@ -59,7 +52,7 @@ describe('proxy on Route Handlers', () => {
   const call = (path: string, init: { method?: string; headers?: Record<string, string>; body?: string }) => proxy(new NextRequest(`http://localhost${path}`, init));
 
   it('refuses a write from another site before any handler runs, dotted paths included', async () => {
-    for (const path of ['/api/agent/tokens', '/api/notifications/a.b/read', '/api/assignments/1/submit']) {
+    for (const path of ['/api/notifications/a.b/read', '/api/assignments/1/submit']) {
       const res = call(path, { method: 'POST', headers: { host: 'localhost', 'content-type': 'text/plain' }, body: '{}' });
       expect(res.status, path).toBe(403);
       expect(await res.json()).toEqual({ error: 'Forbidden.' });
@@ -68,8 +61,8 @@ describe('proxy on Route Handlers', () => {
   });
 
   it('lets reads and same-origin writes on to the handler', () => {
-    expect(call('/api/todoist/callback?code=x', { headers: { 'sec-fetch-site': 'cross-site' } }).headers.get('x-middleware-next')).toBe('1');
-    const ok = call('/api/agent/tokens', {
+    expect(call('/api/notifications?x=1', { headers: { 'sec-fetch-site': 'cross-site' } }).headers.get('x-middleware-next')).toBe('1');
+    const ok = call('/api/assignments/1/submit', {
       method: 'POST',
       headers: { host: 'localhost', origin: 'http://localhost', 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' },
       body: '{}',
@@ -79,11 +72,50 @@ describe('proxy on Route Handlers', () => {
 
   it('covers every Route Handler, dotted paths included, but the upload route (which checks for itself)', () => {
     const matches = (url: string) => unstable_doesMiddlewareMatch({ config, url });
-    for (const url of ['/api/agent/tokens', '/api/agent/tokens/a.b', '/api/notifications/x.y/read', '/api/files/abc', '/api/session', '/api/oauth/approve']) {
+    for (const url of ['/api/notifications/x.y/read', '/api/files/abc', '/api/session', '/api/assignments/1/submit']) {
       expect(matches(url), url).toBe(true);
     }
     expect(matches('/api/files')).toBe(false);
     expect(matches('/api/files?x=1')).toBe(false);
     expect(matches('/assignments')).toBe(true);
+  });
+});
+
+describe('the local lock (YUNGU_LOCAL_SECRET)', () => {
+  const SECRET = 's3cret-per-launch';
+  afterEach(() => vi.unstubAllEnvs());
+  const call = (path: string, cookie?: string) =>
+    proxy(new NextRequest(`http://127.0.0.1:3201${path}`, { headers: cookie ? { cookie } : {} }));
+
+  it('refuses a request without yl_local (403) when the secret is set', async () => {
+    vi.stubEnv('YUNGU_LOCAL_SECRET', SECRET);
+    for (const path of ['/assignments', '/login', '/api/notifications', '/api/files/abc', '/_next/static/x.js', '/favicon.ico']) {
+      expect(call(path).status, path).toBe(403);
+    }
+  });
+
+  it('refuses a request with the wrong yl_local value (403)', () => {
+    vi.stubEnv('YUNGU_LOCAL_SECRET', SECRET);
+    expect(call('/login', 'yl_local=nope').status).toBe(403);
+    expect(call('/login', `yl_local=${SECRET}x`).status).toBe(403);
+    expect(call('/login', 'yl_local=').status).toBe(403);
+  });
+
+  it('allows the right value, and static assets get through without a sign-in', () => {
+    vi.stubEnv('YUNGU_LOCAL_SECRET', SECRET);
+    expect(call('/login', `yl_local=${SECRET}`).headers.get('x-middleware-next')).toBe('1');
+    expect(call('/_next/static/x.js', `yl_local=${SECRET}`).headers.get('x-middleware-next')).toBe('1');
+    expect(call('/assignments', `yl_local=${SECRET}`).status).toBe(307);
+  });
+
+  it('does nothing when the secret is unset (hosted/tests)', () => {
+    expect(call('/login').headers.get('x-middleware-next')).toBe('1');
+  });
+
+  it('also matches the static paths, but still not the upload route (its own check)', () => {
+    const matches = (url: string) => unstable_doesMiddlewareMatch({ config, url });
+    expect(matches('/_next/static/x.js')).toBe(true);
+    expect(matches('/favicon.ico')).toBe(true);
+    expect(matches('/api/files')).toBe(false);
   });
 });

@@ -173,6 +173,48 @@ describe('GET /api/files/[id]', () => {
         }
       });
 
+      it("502s with the file-storage sentence when the OSS fetch throws", async () => {
+        vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => { throw new TypeError('fetch failed'); }));
+        const spy = vi.spyOn(data, 'getFile').mockResolvedValueOnce({ redirect: SIGNED });
+        try {
+          const res = await GET(new Request('http://localhost/x?view=pdf'), ctx({ id: ref.id }));
+          expect(res.status).toBe(502);
+          expect(await res.json()).toEqual({ error: "Can't reach Yungu's file storage from this network." });
+        } finally {
+          spy.mockRestore();
+        }
+      });
+
+      it("502s with the usual Yungu sentence, not the file-storage one, while Suspension Mode refuses", async () => {
+        const suspended = Object.assign(new Error('Suspension Mode'), { name: 'Suspended' });
+        vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => { throw suspended; }));
+        const spy = vi.spyOn(data, 'getFile').mockResolvedValueOnce({ redirect: SIGNED });
+        try {
+          const res = await GET(new Request('http://localhost/x?view=pdf'), ctx({ id: ref.id }));
+          expect(res.status).toBe(502);
+          expect(await res.json()).toEqual({ error: "Can't reach Yungu right now. Try again." });
+        } finally {
+          spy.mockRestore();
+        }
+      });
+
+      it('fetches through the desktop shell fetch when it is installed', async () => {
+        const shell = upstream('%PDF', { status: 200, headers: { 'content-type': 'application/pdf' } });
+        const plain = vi.fn<typeof fetch>(async () => { throw new Error('should not be used'); });
+        vi.stubGlobal('fetch', plain);
+        (globalThis as { __yunguFetch?: typeof fetch }).__yunguFetch = shell;
+        const spy = vi.spyOn(data, 'getFile').mockResolvedValueOnce({ redirect: SIGNED });
+        try {
+          const res = await GET(new Request('http://localhost/x?view=pdf'), ctx({ id: ref.id }));
+          expect(res.status).toBe(200);
+          expect(shell).toHaveBeenCalledTimes(1);
+          expect(plain).not.toHaveBeenCalled();
+        } finally {
+          delete (globalThis as { __yunguFetch?: typeof fetch }).__yunguFetch;
+          spy.mockRestore();
+        }
+      });
+
       it('502s when the store cannot be reached', async () => {
         vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => { throw new TypeError('fetch failed'); }));
         const spy = vi.spyOn(data, 'getFile').mockResolvedValueOnce({ redirect: SIGNED });

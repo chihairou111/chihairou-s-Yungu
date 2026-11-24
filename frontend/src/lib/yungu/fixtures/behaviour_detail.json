@@ -1,0 +1,102 @@
+{
+  "2026-10": {
+    "id": 342,
+    "name": "Student A",
+    "enName": "Student B",
+    "unionId": null,
+    "groupNum": null,
+    "stuGroupName": "Group 1",
+    "stuGroupEnName": "Group 2",
+    "groupId": 69452,
+    "gradeId": 52,
+    "sort": null,
+    "rank": null,
+    "lastRank": null,
+    "statisticsType": null,
+    "score": 91,
+    "studentScoreModelList": [
+      {
+        "score": 91,
+        "baseScore": 100,
+        "positiveScore": 8,
+        "negativeScore": -17,
+        "behaviorId": null,
+        "behaviorName": null,
+        "behaviorEnName": null,
+        "sort": null
+      }
+    ],
+    "earlyWarningCountDTO": {
+      "totalCount": 0,
+      "revokedCount": 0,
+      "unRevokedCount": 0
+    },
+    "baseScore": 100,
+    "positiveScore": 8,
+    "negativeScore": -17,
+    "rewardScore": null,
+    "maxScore": null,
+    "minScore": null,
+    "tierDetailList": [
+      {
+        "tier": 1,
+        "count": 1,
+        "revokeCount": 0,
+        "netCount": 1
+      }
+    ],
+    "stuTierDetailList": null,
+    "positiveModelList": null,
+    "negativeModelList": null
+  },
+  "2026-09": {
+    "id": 342,
+    "name": "Student A",
+    "enName": "Student B",
+    "unionId": null,
+    "groupNum": null,
+    "stuGroupName": "Group 1",
+    "stuGroupEnName": "Group 2",
+    "groupId": 69452,
+    "gradeId": 52,
+    "sort": null,
+    "rank": null,
+    "lastRank": null,
+    "statisticsType": null,
+    "score": 74,
+    "studentScoreModelList": [
+      {
+        "score": 74,
+        "baseScore": 100,
+        "positiveScore": 5,
+        "negativeScore": -31,
+        "behaviorId": null,
+        "behaviorName": null,
+        "behaviorEnName": null,
+        "sort": null
+      }
+    ],
+    "earlyWarningCountDTO": {
+      "totalCount": 0,
+      "revokedCount": 0,
+      "unRevokedCount": 0
+    },
+    "baseScore": 100,
+    "positiveScore": 5,
+    "negativeScore": -31,
+    "rewardScore": null,
+    "maxScore": null,
+    "minScore": null,
+    "tierDetailList": [
+      {
+        "tier": 1,
+        "count": 2,
+        "revokeCount": 0,
+        "netCount": 2
+      }
+    ],
+    "stuTierDetailList": null,
+    "positiveModelList": null,
+    "negativeModelList": null
+  }
+}

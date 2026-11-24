@@ -3,9 +3,7 @@ import { loginPath, safeNext } from './next-path';
 
 describe('safeNext', () => {
   it('keeps a relative same-origin path, query included', () => {
-    expect(safeNext('/oauth/authorize?client_id=ylc_1&redirect_uri=https%3A%2F%2Fclaude.ai%2Fcb')).toBe(
-      '/oauth/authorize?client_id=ylc_1&redirect_uri=https%3A%2F%2Fclaude.ai%2Fcb',
-    );
+    expect(safeNext('/assignments/42?tab=files&x=1')).toBe('/assignments/42?tab=files&x=1');
     expect(safeNext('/calendar')).toBe('/calendar');
   });
 
@@ -36,7 +34,7 @@ describe('safeNext', () => {
 
 describe('loginPath', () => {
   it('carries a safe return path and drops an unsafe one', () => {
-    expect(loginPath('/oauth/authorize?a=1&b=2')).toBe('/login?next=%2Foauth%2Fauthorize%3Fa%3D1%26b%3D2');
+    expect(loginPath('/assignments/42?a=1&b=2')).toBe('/login?next=%2Fassignments%2F42%3Fa%3D1%26b%3D2');
     expect(loginPath('//evil.example')).toBe('/login');
     expect(loginPath(null)).toBe('/login');
   });

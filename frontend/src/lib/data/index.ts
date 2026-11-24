@@ -1,25 +1,20 @@
 import 'server-only';
-import type { AuthorizeDecision, AuthorizeParams } from '../oauth';
 import type {
-  AgentAccess,
   Assignment,
   AssignmentDetail,
-  AuthorizeCheck,
-  AuthorizeOutcome,
   Behaviour,
   ClassEvent,
   Comment,
   Course,
   FileRef,
-  NewAgentToken,
   NotificationPage,
-  TodoistStatus,
 } from '../types';
+import { directData } from './direct';
 import { mockData } from './mock';
 import { serviceData } from './service';
 
 export { BLANK_CREDENTIALS_ERROR, NOTIFICATION_PAGE_SIZE } from './messages';
-export { AssignmentNotFound, CommentNotFound, DocumentHandedIn, DocumentTooLong, ServiceError, SessionEnded, YunguUnavailable } from './errors';
+export { AssignmentNotFound, CommentNotFound, DocumentHandedIn, DocumentTooLong, ServiceError, SessionEnded, Suspended, YunguUnavailable } from './errors';
 
 export type SignInResult = { ok: true; displayName: string; token: string } | { ok: false; error: string };
 
@@ -117,56 +112,21 @@ export interface YunguData {
   getNotifications(read: boolean, page: number): Promise<NotificationPage>;
   /** Marks one notification read on Yungu (what clicking it there does). */
   markNotificationRead(id: string): Promise<void>;
-  /** Drops every cached read, so the next ones come fresh from Yungu (the refresh button); also starts a Todoist sync when connected. */
+  /** Drops every cached read, so the next ones come fresh from Yungu (the refresh button). */
   refresh(): Promise<void>;
-  /** The account's Todoist sync: connected or not, to whom, ok / syncing / error (and why), the last sync. */
-  getTodoist(): Promise<TodoistStatus>;
-  /**
-   * Starts connecting Todoist: the URL of Todoist's authorize page, carrying a one-use `state` bound to
-   * this account (the mock answers with its own callback URL). 503 when the server has no Todoist app.
-   */
-  connectTodoist(): Promise<string>;
-  /**
-   * Finishes connecting with what Todoist sent back to the callback; the service exchanges the code
-   * itself and starts the first sync. 400 for a missing, used, expired or foreign `state` (the message
-   * `TODOIST_LINK_EXPIRED`); 502 when Todoist refuses or cannot be reached.
-   */
-  finishTodoist(code: string, state: string): Promise<void>;
-  /** "Try again": starts a sync now (returns at once); 409 when not connected. */
-  syncTodoist(): Promise<void>;
-  /** Forgets the Todoist token and stops syncing; tasks already in Todoist stay. Idempotent. */
-  disconnectTodoist(): Promise<void>;
-  /** Agent access: this account's personal tokens and the agents connected through OAuth (never a token). */
-  getAgentAccess(): Promise<AgentAccess>;
-  /**
-   * A new personal token, its secret answered this once. 400 with the service's sentence for a blank
-   * name, one over 64 characters, or a 21st token.
-   */
-  createAgentToken(name: string): Promise<NewAgentToken>;
-  /** Revokes a personal token; the next agent call with it is refused. 404 for an unknown id. */
-  revokeAgentToken(id: string): Promise<void>;
-  /** Disconnects an OAuth-connected agent (its grant); the next call is refused. 404 for an unknown id. */
-  disconnectAgent(id: string): Promise<void>;
-  /**
-   * The consent page's check of an agent's authorization request (passed on field for field). A refusal
-   * is an answer, not an error: its `redirect` is present only when the service trusts the client's
-   * return address, and is always an http(s) URL. Only a 401 (`SessionEnded`) or an outage throws.
-   */
-  checkAuthorize(params: AuthorizeParams): Promise<AuthorizeCheck>;
-  /**
-   * Allow or Deny: the service checks the request again and answers where the browser goes (with a
-   * one-use code, or the denial). A refusal (e.g. 20 agents connected) is an answer, as above.
-   */
-  decideAuthorize(params: AuthorizeParams, decision: AuthorizeDecision): Promise<AuthorizeOutcome>;
   signIn(loginId: string, password: string): Promise<SignInResult>;
   signOut(token: string): Promise<void>;
 }
 
-/** `DATA_SOURCE=service` (the default) talks to the Yungu service; Vitest and Playwright set `mock`. */
+/**
+ * `DATA_SOURCE=service` (the default) talks to the Yungu service; `direct` (the local desktop app) talks
+ * to Yungu itself for one local account; Vitest and Playwright set `mock`.
+ */
 function selectData(source = process.env.DATA_SOURCE ?? 'service'): YunguData {
   if (source === 'service') return serviceData;
+  if (source === 'direct') return directData;
   if (source === 'mock') return mockData;
-  throw new Error(`DATA_SOURCE must be "service" or "mock", not ${JSON.stringify(source)}`);
+  throw new Error(`DATA_SOURCE must be "service", "direct" or "mock", not ${JSON.stringify(source)}`);
 }
 
 export const data: YunguData = selectData();

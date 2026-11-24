@@ -1,0 +1,32 @@
+{
+  "name": "chihairou-yungu-local",
+  "productName": "chihairou's Yungu (local)",
+  "version": "0.1.0",
+  "private": true,
+  "description": "chihairou's Yungu (local): the desktop shell around the standalone Next server.",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
+    "start": "npm run build && electron .",
+    "test": "vitest run",
+    "test:e2e": "npm run build && playwright test",
+    "build:wifi-helper": "mkdir -p build/bin && swiftc -O native/wifi-ssid.swift -o build/bin/wifi-ssid -framework CoreWLAN -framework CoreLocation -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker native/wifi-ssid-Info.plist",
+    "dist:mac": "npm run build:server && npm run build && npm run build:wifi-helper && electron-builder --mac --arm64",
+    "setup": "npm --prefix ../frontend ci && npm ci",
+    "build:server": "npm --prefix ../frontend run build",
+    "electron:dev": "npm run build:server && npm start",
+    "dist:linux-dir": "npm run build:server && npm run build && electron-builder --linux dir"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^24.19.2",
+    "electron": "45.4.1",
+    "electron-builder": "^26.18.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  },
+  "allowScripts": {
+    "esbuild": false,
+    "electron-winstaller": false
+  }
+}

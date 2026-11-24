@@ -4,6 +4,10 @@ export const SIGN_IN_AGAIN = 'Sign in again.';
 export const PASSWORD_CHANGED = 'Sign in again — your Yungu password may have changed.';
 /** Yungu (or the service in front of it) is down, slow or answering nonsense. */
 export const YUNGU_UNAVAILABLE = "Can't reach Yungu right now. Try again.";
+/** The desktop app's sign-in page while its startup sign-in cannot reach Yungu and keeps trying by itself. */
+export const SIGN_IN_RETRYING = "Can't reach Yungu right now — trying again.";
+/** The local app could not reach Yungu's OSS file storage (a network that blocks it). */
+export const FILE_STORAGE_UNREACHABLE = "Can't reach Yungu's file storage from this network.";
 
 /** A failed call to the Yungu service: its HTTP status and the message to show. */
 export class ServiceError extends Error {
@@ -30,6 +34,26 @@ export class YunguUnavailable extends ServiceError {
     super(502, message);
     this.name = 'YunguUnavailable';
   }
+}
+
+/**
+ * The desktop app's Suspension Mode refused (or cut off) a Yungu request: the Mac is on a Wi-Fi that is
+ * not allowed. A YunguUnavailable, so pages show their usual "Can't reach Yungu" state under the
+ * Suspension Mode screen, never a file-storage or sign-in message.
+ */
+export class Suspended extends YunguUnavailable {
+  constructor() {
+    super();
+    this.name = 'Suspended';
+  }
+}
+
+/** True for the desktop shell's fetch-gate error (`name: 'Suspended'`), itself or as an error's cause. */
+export function isSuspension(e: unknown): boolean {
+  for (let cur = e, depth = 0; cur && typeof cur === 'object' && depth < 5; cur = (cur as { cause?: unknown }).cause, depth++) {
+    if ((cur as { name?: unknown }).name === 'Suspended') return true;
+  }
+  return false;
 }
 
 /** 404 on deleting a comment that is not the student's own (someone else's, or none by that id). */

@@ -45,18 +45,18 @@ describe('detail api', () => {
   it('createOnlineDoc POSTs the title and content as JSON and returns the FileRef', async () => {
     const delta = '{"ops":[{"insert":"研究\\n"}]}';
     const fetchMock = respond(200, { id: '11138501', online: true, content: delta });
-    await expect(createOnlineDoc(93251, '研究', delta)).resolves.toMatchObject({ id: '11138501', content: delta });
+    await expect(createOnlineDoc(60417, '研究', delta)).resolves.toMatchObject({ id: '11138501', content: delta });
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('/api/assignments/93251/online-docs');
+    expect(url).toBe('/api/assignments/60417/online-docs');
     expect(init).toMatchObject({ method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' } });
     expect(JSON.parse(String(init!.body))).toEqual({ title: '研究', content: delta });
   });
 
   it('updateOnlineDoc PUTs to the encoded document id', async () => {
     const fetchMock = respond(200, { id: 'a/b' });
-    await updateOnlineDoc(93251, 'a/b', 'T', '{"ops":[]}');
+    await updateOnlineDoc(60417, 'a/b', 'T', '{"ops":[]}');
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('/api/assignments/93251/online-docs/a%2Fb');
+    expect(url).toBe('/api/assignments/60417/online-docs/a%2Fb');
     expect(init!.method).toBe('PUT');
     expect(JSON.parse(String(init!.body))).toEqual({ title: 'T', content: '{"ops":[]}' });
   });

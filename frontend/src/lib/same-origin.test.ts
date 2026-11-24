@@ -3,7 +3,7 @@ import { isSameOriginWrite } from './same-origin';
 
 const HOST = 'yungu.chihairou.dev';
 const req = (method: string, headers: Record<string, string> = {}) =>
-  new Request('http://127.0.0.1:3000/api/agent/tokens', { method, headers: { host: HOST, ...headers } });
+  new Request('http://127.0.0.1:3000/api/assignments/1/submit', { method, headers: { host: HOST, ...headers } });
 const own = { origin: `https://${HOST}`, 'sec-fetch-site': 'same-origin' };
 
 describe('isSameOriginWrite', () => {
@@ -32,11 +32,5 @@ describe('isSameOriginWrite', () => {
     ['a body without a type', { ...own, 'content-length': '12' }],
   ])('refuses %s', (_, headers) => {
     expect(isSameOriginWrite(req('POST', headers))).toBe(false);
-  });
-
-  it('JSON only, for the consent page: no multipart, no bodiless post', () => {
-    expect(isSameOriginWrite(req('POST', { ...own, 'content-type': 'application/json' }), { jsonOnly: true })).toBe(true);
-    expect(isSameOriginWrite(req('POST', { ...own, 'content-type': 'multipart/form-data; boundary=x' }), { jsonOnly: true })).toBe(false);
-    expect(isSameOriginWrite(req('POST', own), { jsonOnly: true })).toBe(false);
   });
 });

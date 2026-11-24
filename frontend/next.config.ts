@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { NextConfig } from "next";
 
 // Never inside another site's frame (clickjacking): every page and route.
@@ -8,6 +9,9 @@ const NO_FRAMING = [
 
 const nextConfig: NextConfig = {
   /* config options here */
+  // The desktop app runs `.next/standalone/server.js` in its own process.
+  output: "standalone",
+  outputFileTracingRoot: path.join(__dirname),
   cacheComponents: true,
   partialPrefetching: true,
   async headers() {
@@ -21,8 +25,6 @@ const nextConfig: NextConfig = {
           { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
         ],
       },
-      // The consent page's URL carries the agent's request: never passed on in a Referer.
-      { source: "/oauth/:path*", headers: [{ key: "Referrer-Policy", value: "no-referrer" }] },
     ];
   },
 };

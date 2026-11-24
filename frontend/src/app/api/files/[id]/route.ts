@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { requireSession, withServiceErrors } from '@/lib/api-auth';
 import { data } from '@/lib/data';
-import { YUNGU_UNAVAILABLE } from '@/lib/data/errors';
+import { FILE_STORAGE_UNREACHABLE, YUNGU_UNAVAILABLE, isSuspension } from '@/lib/data/errors';
+import { ossFetch } from '@/lib/oss-fetch';
 import { READ_TIMEOUT_MS } from '@/lib/data/service';
 
 const ACTIVE_TYPES = new Set([
@@ -77,14 +78,19 @@ async function pdfThrough(link: string, range: string | null, browserGone: Abort
   const timer = setTimeout(() => slow.abort(), READ_TIMEOUT_MS);
   let upstream: Response;
   try {
-    upstream = await fetch(link, {
+    upstream = await ossFetch()(link, {
       headers: { 'accept-encoding': 'identity', ...(range ? { range } : {}) },
       cache: 'no-store',
       redirect: 'error',
       signal: AbortSignal.any([browserGone, slow.signal]),
     });
-  } catch {
-    return unavailable();
+  } catch (err) {
+    // The connection itself failed, as on a network that blocks OSS. A slow answer, the browser leaving
+    // or a refused redirect are Yungu trouble, not the network's.
+    const cause = (err as { cause?: { message?: string } } | null)?.cause?.message ?? '';
+    if (isSuspension(err)) return unavailable(); // Suspension Mode, not the network
+    if (slow.signal.aborted || browserGone.aborted || /redirect/i.test(`${(err as Error | null)?.message} ${cause}`)) return unavailable();
+    return NextResponse.json({ error: FILE_STORAGE_UNREACHABLE }, { status: 502 });
   } finally {
     clearTimeout(timer);
   }

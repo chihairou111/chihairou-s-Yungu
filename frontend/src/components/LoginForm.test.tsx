@@ -41,14 +41,14 @@ describe('LoginForm', () => {
     await vi.waitFor(() => expect(nav.replace).toHaveBeenCalledWith('/assignments'));
   });
 
-  it('goes back to the page that sent it here (an agent\'s consent page) when given one', async () => {
+  it('goes back to the page that sent it here when given one', async () => {
     stubFetch(200, { name: 'Bruce Zheng' });
-    render(<LoginForm next="/oauth/authorize?client_id=ylc_1" />);
+    render(<LoginForm next="/assignments/42?tab=files" />);
     await userEvent.type(screen.getByLabelText('Student ID'), 's123');
     await userEvent.type(screen.getByLabelText('Password'), 'pw');
     await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
-    // A full navigation, so the consent page's own headers (no framing) apply.
-    await vi.waitFor(() => expect(page.assign).toHaveBeenCalledWith('/oauth/authorize?client_id=ylc_1'));
+    // A full navigation, not a client-side route change.
+    await vi.waitFor(() => expect(page.assign).toHaveBeenCalledWith('/assignments/42?tab=files'));
     expect(nav.replace).not.toHaveBeenCalled();
   });
 

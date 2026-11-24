@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { render, screen, within } from '../test-render';
+import { render, screen, waitFor, within, fireEvent } from '../test-render';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FileRef } from '@/lib/types';
 import FileViewer from './FileViewer';
 
@@ -144,5 +144,35 @@ describe('FileViewer', () => {
     await userEvent.keyboard('{Escape}');
     await userEvent.click(within(viewer()).getByRole('button', { name: 'Close' }));
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("FileViewer when Yungu's file storage is blocked", () => {
+  const SENTENCE = "Can't reach Yungu's file storage from this network.";
+  const blocked = () =>
+    vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ error: SENTENCE }), { status: 502, headers: { 'content-type': 'application/json' } }));
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('says so instead of an empty PDF frame', async () => {
+    vi.stubGlobal('fetch', blocked());
+    render(<Harness />);
+    expect(await within(viewer()).findByText(SENTENCE)).toBeInTheDocument();
+    expect(viewer().querySelector('iframe')).toBeNull();
+  });
+
+  it('says so when an image fails to load', async () => {
+    vi.stubGlobal('fetch', blocked());
+    render(<Harness start={2} />);
+    fireEvent.error(within(viewer()).getByRole('img', { name: 'Plan.png' }));
+    expect(await within(viewer()).findByText(SENTENCE)).toBeInTheDocument();
+  });
+
+  it('keeps the frame when the probe finds nothing wrong', async () => {
+    const ok = vi.fn<typeof fetch>(async () => new Response('%PDF', { status: 206 }));
+    vi.stubGlobal('fetch', ok);
+    render(<Harness />);
+    await waitFor(() => expect(ok).toHaveBeenCalled());
+    expect(viewer().querySelector('iframe')).not.toBeNull();
+    expect(within(viewer()).queryByText(SENTENCE)).toBeNull();
   });
 });

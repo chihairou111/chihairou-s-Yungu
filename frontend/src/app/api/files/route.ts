@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { readCapped, requireSession, withServiceErrors } from '@/lib/api-auth';
 import { data } from '@/lib/data';
 import { isSameOriginWrite } from '@/lib/same-origin';
+import { localLockDenied } from '@/lib/local-lock';
 
 const MAX_BYTES = 50 * 1024 * 1024;
 /** Room for the multipart boundaries and part headers around a file of the largest allowed size. */
@@ -16,10 +17,11 @@ function baseMime(type: string): string {
 
 /**
  * Uploads. This route is left out of the proxy (it would copy the body and cut it at 10 MB, under the
- * 50 MB limit), so it runs the same write check itself, first: multipart only from this site's own
+ * 50 MB limit), so it runs the same write check itself (and the local lock), first: multipart only from this site's own
  * pages (`Sec-Fetch-Site: same-origin` and a matching `Origin`), before any of the body is read.
  */
 export const POST = withServiceErrors(async (request: Request) => {
+  if (localLockDenied(request)) return NextResponse.json({ error: 'Forbidden.' }, { status: 403 });
   if (!isSameOriginWrite(request)) return NextResponse.json({ error: 'Forbidden.' }, { status: 403 });
   const denied = await requireSession();
   if (denied) return denied;

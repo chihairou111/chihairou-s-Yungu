@@ -1,0 +1,282 @@
+[
+  {
+    "courseId": 97349,
+    "courseName": "Course 1",
+    "courseEnName": "Course 1",
+    "coursePicture": null,
+    "subjectIcon": null,
+    "subjectColor": "#00ACAA",
+    "suitGradeName": "Grades 1",
+    "suitGradeList": [
+      52,
+      9903
+    ],
+    "suitSujectList": [
+      24
+    ],
+    "schoolYearName": "Year 1",
+    "schoolYearId": 260,
+    "sortNo": 1,
+    "grade": 52
+  },
+  {
+    "courseId": 4840,
+    "courseName": "Course 2",
+    "courseEnName": "Course 2",
+    "coursePicture": null,
+    "subjectIcon": null,
+    "subjectColor": "#BA7C47",
+    "suitGradeName": "Grades 2",
+    "suitGradeList": [
+      52
+    ],
+    "suitSujectList": [
+      14
+    ],
+    "schoolYearName": "Year 1",
+    "schoolYearId": 260,
+    "sortNo": 1,
+    "grade": 52
+  },
+  {
+    "courseId": 86407,
+    "courseName": "Course 3",
+    "courseEnName": "Course 3",
+    "coursePicture": null,
+    "subjectIcon": null,
+    "subjectColor": "#F05A8F",
+    "suitGradeName": "Grades 3",
+    "suitGradeList": [
+      9903,
+      52,
+      87,
+      11
+    ],
+    "suitSujectList": [
+      32
+    ],
+    "schoolYearName": "Year 1",
+    "schoolYearId": 260,
+    "sortNo": 2,
+    "grade": 9903
+  },
+  {
+    "courseId": 8147,
+    "courseName": "Course 4",
+    "courseEnName": "Course 4",
+    "coursePicture": null,
+    "subjectIcon": null,
+    "subjectColor": "#1EA5FC",
+    "suitGradeName": "Grades 4",
+    "suitGradeList": [
+      52,
+      87,
+      11
+    ],
+    "suitSujectList": [
+      15
+    ],
+    "schoolYearName": "Year 1",
+    "schoolYearId": 260,
+    "sortNo": 5,
+    "grade": 52
+  },
+  {
+    "courseId": 4588,
+    "courseName": "Course 5",
+    "courseEnName": "Course 5",
+    "coursePicture": null,
+    "subjectIcon": null,
+    "subjectColor": "#466D1B",
+    "suitGradeName": "Grades 5",
+    "suitGradeList": [
+      9903,
+      52,
+      87,
+      74
+    ],
+    "suitSujectList": [
+      63
+    ],
+    "schoolYearName": "Year 1",
+    "schoolYearId": 260,
+    "sortNo": 6,
+    "grade": 9903
+  },
+  {
+    "courseId": 269,
+    "courseName": "Course 6",
+    "courseEnName": "Course 6",
+    "coursePicture": null,
+    "subjectIcon": null,
+    "subjectColor": "#0054AF",
+    "suitGradeName": "Grades 4",
+    "suitGradeList": [
+      52,
+      87,
+      11
+    ],
+    "suitSujectList": [
+      11
+    ],
+    "schoolYearName": "Year 1",
+    "schoolYearId": 260,
+    "sortNo": 8,
+    "grade": 52
+  },
+  {
+    "courseId": 8663,
+    "courseName": "Course 7",
+    "courseEnName": "Course 7",
+    "coursePicture": null,
+    "subjectIcon": null,
+    "subjectColor": "#EB7D37",
+    "suitGradeName": "Grades 4",
+    "suitGradeList": [
+      52,
+      87,
+      11
+    ],
+    "suitSujectList": [
+      57
+    ],
+    "schoolYearName": "Year 1",
+    "schoolYearId": 260,
+    "sortNo": 9,
+    "grade": 52
+  },
+  {
+    "courseId": 7744,
+    "courseName": "Course 8",
+    "courseEnName": "Course 8",
+    "coursePicture": null,
+    "subjectIcon": null,
+    "subjectColor": "#48AC4F",
+    "suitGradeName": "Grades 2",
+    "suitGradeList": [
+      52
+    ],
+    "suitSujectList": [
+      8
+    ],
+    "schoolYearName": "Year 1",
+    "schoolYearId": 260,
+    "sortNo": 11,
+    "grade": 52
+  },
+  {
+    "courseId": 45886,
+    "courseName": "Course 9",
+    "courseEnName": "Course 9",
+    "coursePicture": "",
+    "subjectIcon": null,
+    "subjectColor": "#1EA5FC",
+    "suitGradeName": "Grades 6",
+    "suitGradeList": [
+      9903,
+      24,
+      32,
+      74,
+      52
+    ],
+    "suitSujectList": [
+      4995
+    ],
+    "schoolYearName": "Year 1",
+    "schoolYearId": 260,
+    "sortNo": 41,
+    "grade": 9903
+  },
+  {
+    "courseId": 2713,
+    "courseName": "Course 10",
+    "courseEnName": "Course 10",
+    "coursePicture": null,
+    "subjectIcon": null,
+    "subjectColor": "#0054AF",
+    "suitGradeName": "Grades 7",
+    "suitGradeList": [
+      9903,
+      14,
+      24,
+      32,
+      74,
+      52,
+      87,
+      11
+    ],
+    "suitSujectList": [
+      234
+    ],
+    "schoolYearName": "Year 1",
+    "schoolYearId": 260,
+    "sortNo": 42,
+    "grade": 9903
+  },
+  {
+    "courseId": 100,
+    "courseName": "Course 11",
+    "courseEnName": "Course 11",
+    "coursePicture": null,
+    "subjectIcon": null,
+    "subjectColor": "#F9B100",
+    "suitGradeName": "Grades 3",
+    "suitGradeList": [
+      87,
+      11,
+      52,
+      9903
+    ],
+    "suitSujectList": [
+      49
+    ],
+    "schoolYearName": "Year 1",
+    "schoolYearId": 260,
+    "sortNo": 52,
+    "grade": 87
+  },
+  {
+    "courseId": 6019,
+    "courseName": "Course 12",
+    "courseEnName": "Course 12",
+    "coursePicture": null,
+    "subjectIcon": null,
+    "subjectColor": "#1EA5FC",
+    "suitGradeName": "Grades 3",
+    "suitGradeList": [
+      9903,
+      52,
+      87,
+      11
+    ],
+    "suitSujectList": [
+      43
+    ],
+    "schoolYearName": "Year 1",
+    "schoolYearId": 260,
+    "sortNo": 200,
+    "grade": 9903
+  },
+  {
+    "courseId": 2705,
+    "courseName": "Course 13",
+    "courseEnName": "Course 13",
+    "coursePicture": null,
+    "subjectIcon": null,
+    "subjectColor": "#1EA5FC",
+    "suitGradeName": "Grades 3",
+    "suitGradeList": [
+      9903,
+      52,
+      87,
+      11
+    ],
+    "suitSujectList": [
+      43
+    ],
+    "schoolYearName": "Year 1",
+    "schoolYearId": 260,
+    "sortNo": 200,
+    "grade": 9903
+  }
+]

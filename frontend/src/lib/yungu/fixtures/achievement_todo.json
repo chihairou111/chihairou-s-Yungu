@@ -1,0 +1,31 @@
+{
+  "taskPublishId": 44157,
+  "taskUserRelationId": 9086651,
+  "achievementStatus": 1,
+  "feedback": [],
+  "fileModelList": null,
+  "permissionsOperationalEdit": false,
+  "distributionType": 1,
+  "scopes": [
+    4
+  ],
+  "aiFeedbackStudentVisible": false,
+  "textStatus": 0,
+  "shareCount": 0,
+  "markHighlightMoment": false,
+  "permissionsOperationalHighlightMoment": false,
+  "achievementId": null,
+  "courseId": 2713,
+  "taskStatus": 2,
+  "taskTitle": "Lorem title 2",
+  "taskId": 185740,
+  "needEnclosure": false,
+  "ifTimeout": false,
+  "ifEditStatus": false,
+  "over": false,
+  "aiGenStatus": null,
+  "aiPublishStatus": null,
+  "hasNewAiVersion": null,
+  "aiFeedback": null,
+  "finalFeedback": null
+}

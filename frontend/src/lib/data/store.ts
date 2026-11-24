@@ -47,42 +47,17 @@ interface MockStore {
   assignments: Map<number, AssignmentState>;
   /** Seeded on first use, newest first; marking one read flips it in place. */
   notifications?: Notification[];
-  todoist: MockTodoist;
-  agents: MockAgents;
-}
-
-/** The mock's Agent access: personal tokens (only hashes would be kept for real) and connected agents. */
-export interface MockAgents {
-  personal: { id: string; name: string; createdAt: number; lastUsedAt: number | null }[];
-  clients: { id: string; clientId: string; name: string; connectedAt: number; lastUsedAt: number | null }[];
-}
-
-/** The mock's one Todoist connection (one student), as the service keeps it per account. */
-export interface MockTodoist {
-  connected: boolean;
-  /** The `state` handed out by the last connect, until a callback uses it up. */
-  pendingState: string | null;
-  /** When the running (or last) sync ends; null before the first. */
-  syncEndsAt: number | null;
 }
 
 const createStore = (): MockStore => ({
   refs: new Map(),
   blobs: new Map(),
   assignments: new Map(),
-  todoist: { connected: false, pendingState: null, syncEndsAt: null },
-  agents: { personal: [], clients: [] },
 });
 
 // Module state would be lost when Next dev reloads this module, so the store hangs off globalThis.
 const globalStore = globalThis as typeof globalThis & { __yunguMockStore?: MockStore };
 const store = (): MockStore => (globalStore.__yunguMockStore ??= createStore());
-
-/** The mock's Todoist connection, changed in place. */
-export const mockTodoist = (): MockTodoist => store().todoist;
-
-/** The mock's Agent access, changed in place. */
-export const mockAgents = (): MockAgents => store().agents;
 
 /** Forgets every upload, draft, comment and submission. Tests call this; the app never does. */
 export function resetMockStore(): void {

@@ -59,9 +59,9 @@ describe('notification routes', () => {
 
   it('POST /[id]/read marks it and answers 204', async () => {
     const spy = vi.spyOn(data, 'markNotificationRead').mockResolvedValue();
-    const res = await mark('7791043');
+    const res = await mark('5180327');
     expect(res.status).toBe(204);
-    expect(spy).toHaveBeenCalledWith('7791043');
+    expect(spy).toHaveBeenCalledWith('5180327');
   });
 
   it('POST /[id]/read 404s on a non-numeric id', async () => {

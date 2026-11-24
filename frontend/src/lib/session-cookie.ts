@@ -1,6 +1,6 @@
 // Cookie format helpers with no next/headers import, so the proxy can use them too.
 import type { NextResponse } from 'next/server';
-import { PASSWORD_CHANGED, SIGN_IN_AGAIN } from './data/errors';
+import { PASSWORD_CHANGED, SIGN_IN_AGAIN, SIGN_IN_RETRYING } from './data/errors';
 
 export const SESSION_COOKIE = 'yl_session';
 export const SESSION_MAX_AGE = 60 * 60 * 24 * 30;
@@ -58,10 +58,12 @@ export function sessionCookieOptions(request: Request, maxAge: number) {
  * Why the last session ended, for the sign-in page to say. The service tells only the request that hit
  * the rejected re-login that the password may have changed, so that answer is kept here for the page
  * that follows. The cookie holds a reason code, never text, so a link cannot put words on the sign-in page.
+ * `unreachable` is set only by the desktop app: its startup sign-in could not reach Yungu and it keeps
+ * trying (it opens Assignments by itself once it gets through).
  */
 export const SIGN_IN_NOTICE_COOKIE = 'yl_signin_notice';
 const NOTICE_MAX_AGE = 5 * 60;
-const NOTICES = { password: PASSWORD_CHANGED, ended: SIGN_IN_AGAIN } as const;
+const NOTICES = { password: PASSWORD_CHANGED, ended: SIGN_IN_AGAIN, unreachable: SIGN_IN_RETRYING } as const;
 type NoticeReason = keyof typeof NOTICES;
 
 const reasonFor = (message: string): NoticeReason => (message === PASSWORD_CHANGED ? 'password' : 'ended');

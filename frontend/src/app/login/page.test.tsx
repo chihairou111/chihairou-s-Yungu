@@ -30,6 +30,9 @@ describe('the sign-in page', () => {
     jar.notice = 'ended';
     render(await LoginPage(page()));
     expect(screen.getAllByRole('alert')[1]).toHaveTextContent(/^Sign in again\.$/);
+    jar.notice = 'unreachable';
+    render(await LoginPage(page()));
+    expect(screen.getAllByRole('alert')[2]).toHaveTextContent("Can't reach Yungu right now — trying again.");
   });
 
   it('shows no notice without one, or for a value that is not ours', async () => {
@@ -64,9 +67,9 @@ describe('the sign-in page', () => {
 describe('coming back after signing in', () => {
   it('returns to a safe relative next', async () => {
     jar.notice = undefined;
-    render(await LoginPage(page({ next: '/oauth/authorize?client_id=ylc_1&state=s' })));
+    render(await LoginPage(page({ next: '/assignments/42?tab=files' })));
     await signIn();
-    await vi.waitFor(() => expect(nav.assign).toHaveBeenCalledWith('/oauth/authorize?client_id=ylc_1&state=s'));
+    await vi.waitFor(() => expect(nav.assign).toHaveBeenCalledWith('/assignments/42?tab=files'));
     vi.unstubAllGlobals();
   });
 

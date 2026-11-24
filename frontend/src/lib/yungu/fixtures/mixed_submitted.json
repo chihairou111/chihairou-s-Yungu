@@ -1,0 +1,40 @@
+{
+  "courseId": 2713,
+  "courseName": "Course 10",
+  "taskTitle": "Lorem title 1",
+  "taskContent": "<p>Lorem text 1 <strong>Lorem text 2</strong> Lorem text 3</p>",
+  "taskDescription": "<p>Lorem text 1 <strong>Lorem text 2</strong> Lorem text 3</p>",
+  "useTime": 30,
+  "sendTime": "2026-10-09 11:37:25",
+  "endTime": "2026-10-16 22:00:00",
+  "mainTeachers": [
+    {
+      "userId": 6432,
+      "userName": "Teacher 1",
+      "eName": null
+    },
+    {
+      "userId": 2453,
+      "userName": "Teacher 2",
+      "eName": "Alias 2"
+    }
+  ],
+  "fileList": [],
+  "taskDescribe": null,
+  "taskSatus": 2,
+  "taskStatusId": 2,
+  "taskPublishId": 21685,
+  "taskId": 284406,
+  "ifIsOpenTaskPublish": false,
+  "distributioType": 1,
+  "doTaskStatusId": 4,
+  "totalScore": null,
+  "evaluationItemRubricsResponses": null,
+  "scope": null,
+  "auditStatus": null,
+  "duty": false,
+  "needEnclosure": false,
+  "ifTiming": false,
+  "evaluationItemId": null,
+  "over": false
+}

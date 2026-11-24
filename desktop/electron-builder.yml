@@ -1,0 +1,29 @@
+appId: dev.chihairou.yungu.local
+productName: "chihairou's Yungu (local)"
+asar: true
+publish: null
+directories:
+  output: release
+files:
+  - dist/**/*
+  - package.json
+# The standalone Next server (resources/server/server.js) is copied whole, node_modules included, by
+# scripts/after-pack.cjs: extraResources drops node_modules folders and trips on the symlinks Next leaves in them.
+afterPack: scripts/after-pack.cjs
+mac:
+  target:
+    - target: dmg
+      arch: arm64
+  identity: null
+  hardenedRuntime: false
+  entitlements: build/entitlements.mac.plist
+  category: public.app-category.education
+  # The Wi-Fi helper for Suspension Mode (built by `npm run build:wifi-helper`): resources/bin/wifi-ssid.
+  extraResources:
+    - from: build/bin/wifi-ssid
+      to: bin/wifi-ssid
+  extendInfo:
+    NSCameraUsageDescription: To photograph your work for an assignment.
+    NSMicrophoneUsageDescription: To record audio for an assignment.
+    NSLocationWhenInUseUsageDescription: To check which Wi-Fi you're on for Suspension Mode. Your location is never stored or sent.
+    NSLocationUsageDescription: To check which Wi-Fi you're on for Suspension Mode. Your location is never stored or sent.

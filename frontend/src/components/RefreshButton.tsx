@@ -14,7 +14,7 @@ import { VISUALLY_HIDDEN } from './visually-hidden';
 const TURN_MS = 800;
 
 /**
- * Refresh in the app bar, between Notifications and the avatar (after Todoist): reloads the page (and the open assignment) from Yungu,
+ * Refresh in the app bar, between Notifications and the avatar: reloads the page (and the open assignment) from Yungu,
  * past every cache. The icon turns while it works and finishes its turn rather than snapping back;
  * with reduced motion it stays still and dims instead. It is marked disabled while running but keeps
  * focus (`aria-disabled`, not `disabled`), so a keyboard user is not dropped to the page.

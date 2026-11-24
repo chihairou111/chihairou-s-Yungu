@@ -60,7 +60,7 @@ function append(items: Notification[], more: Notification[]): Notification[] {
 
 /**
  * The bell in the app bar, left of Refresh. While anything is unread: a red numbered badge, the count
- * in the button's name and in the tab title ("(N) chihairou's Yungu"), checked on load, on Refresh, and every 5 minutes while the tab is visible. It opens a
+ * in the button's name and in the tab title ("(N) chihairou's Yungu (local)"), checked on load, on Refresh, and every 5 minutes while the tab is visible. It opens a
  * popover: Unread, then Read (20 at a time). Mark as read moves an item down at once (put back, with
  * the reason, if Yungu refuses). An item about an assignment opens it in the pop-up and, like Yungu's
  * own bell, marks it read; a behaviour record opens the Behaviour page at its month.

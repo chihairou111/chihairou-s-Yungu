@@ -9,7 +9,7 @@ function titled(count: number): string {
 }
 
 /**
- * Keeps "(N) chihairou's Yungu" in the browser tab while N notifications are unread. Next writes the
+ * Keeps "(N) chihairou's Yungu (local)" in the browser tab while N notifications are unread. Next writes the
  * page's own title back on navigation, so the head is watched and the count put back in front of it.
  */
 export function useTitleCount(count: number): void {

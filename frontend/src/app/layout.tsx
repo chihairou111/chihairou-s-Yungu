@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: SITE_NAME,
-  description: "Assignments and timetable from task.yungu.org.",
+  description: "Assignments and timetable from task.yungu.org, on this Mac.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

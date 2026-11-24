@@ -156,7 +156,7 @@ describe('serviceData timeouts: a stalled Yungu or a hung service is "Can\'t rea
     ['getWeek', () => data.getWeek(0)],
     ['getCourses', () => data.getCourses()],
     ['getBehaviour', () => data.getBehaviour('2026-10')],
-    ['getAssignmentDetail', () => data.getAssignmentDetail(93251)],
+    ['getAssignmentDetail', () => data.getAssignmentDetail(60417)],
     ['getFile', () => data.getFile('1')],
   ])('%s gives up after the read budget with YunguUnavailable', async (_name, run) => {
     hang();
@@ -166,12 +166,12 @@ describe('serviceData timeouts: a stalled Yungu or a hung service is "Can\'t rea
   });
 
   it.each([
-    ['saveDraft', () => data.saveDraft(93251, ['1'])],
-    ['submit', () => data.submit(93251, ['1'])],
-    ['addComment', () => data.addComment(93251, 'x')],
-    ['deleteComment', () => data.deleteComment(93251, '2')],
-    ['createOnlineDoc', () => data.createOnlineDoc(93251, 'T', '{"ops":[]}')],
-    ['updateOnlineDoc', () => data.updateOnlineDoc(93251, '11138501', 'T', '{"ops":[]}')],
+    ['saveDraft', () => data.saveDraft(60417, ['1'])],
+    ['submit', () => data.submit(60417, ['1'])],
+    ['addComment', () => data.addComment(60417, 'x')],
+    ['deleteComment', () => data.deleteComment(60417, '2')],
+    ['createOnlineDoc', () => data.createOnlineDoc(60417, 'T', '{"ops":[]}')],
+    ['updateOnlineDoc', () => data.updateOnlineDoc(60417, '11138501', 'T', '{"ops":[]}')],
     ['refresh', () => data.refresh()],
     ['signOut', () => data.signOut('tok')],
   ])('%s gives up after the longer write budget with YunguUnavailable', async (_name, run) => {
@@ -202,18 +202,18 @@ describe('serviceData timeouts: a stalled Yungu or a hung service is "Can\'t rea
 });
 
 describe('serviceData.getAssignmentDetail', () => {
-  const detail = { id: 93251, title: 'T', instructionsHtml: '<p>Read <b>this</b></p>', comments: [] };
+  const detail = { id: 60417, title: 'T', instructionsHtml: '<p>Read <b>this</b></p>', comments: [] };
 
   it('GETs /assignments/<id> and returns the detail', async () => {
     reply(json(200, detail));
-    expect(await data.getAssignmentDetail(93251)).toEqual(detail);
-    expect(call().url).toBe('http://127.0.0.1:8100/assignments/93251');
+    expect(await data.getAssignmentDetail(60417)).toEqual(detail);
+    expect(call().url).toBe('http://127.0.0.1:8100/assignments/60417');
     expect(call().headers.get('authorization')).toBe('Bearer tok-123');
   });
 
   it('sanitizes the raw Yungu instructions HTML', async () => {
     reply(json(200, { ...detail, instructionsHtml: '<p onclick="x()">Hi</p><script>alert(1)</script><img src="https://a/b.png" onerror="alert(2)">' }));
-    const got = await data.getAssignmentDetail(93251);
+    const got = await data.getAssignmentDetail(60417);
     expect(got?.instructionsHtml).toBe('<p>Hi</p><img src="https://a/b.png" />');
     expect(got?.instructionsHtml).not.toMatch(/script|onerror|onclick/);
   });
@@ -287,8 +287,8 @@ describe('serviceData files', () => {
 describe('serviceData writes', () => {
   it('saveDraft PUTs the file ids', async () => {
     reply(empty());
-    await data.saveDraft(93251, ['1', '2']);
-    expect(call()).toMatchObject({ url: 'http://127.0.0.1:8100/assignments/93251/draft', method: 'PUT' });
+    await data.saveDraft(60417, ['1', '2']);
+    expect(call()).toMatchObject({ url: 'http://127.0.0.1:8100/assignments/60417/draft', method: 'PUT' });
     expect(call().headers.get('content-type')).toBe('application/json');
     expect(call().headers.get('authorization')).toBe('Bearer tok-123');
     expect(bodyOf()).toEqual({ fileIds: ['1', '2'] });
@@ -296,23 +296,23 @@ describe('serviceData writes', () => {
 
   it('submit POSTs the file ids and returns submittedAt', async () => {
     reply(json(200, { submittedAt: 1760900000000 }));
-    expect(await data.submit(93251, ['1'])).toEqual({ submittedAt: 1760900000000 });
-    expect(call()).toMatchObject({ url: 'http://127.0.0.1:8100/assignments/93251/submit', method: 'POST' });
+    expect(await data.submit(60417, ['1'])).toEqual({ submittedAt: 1760900000000 });
+    expect(call()).toMatchObject({ url: 'http://127.0.0.1:8100/assignments/60417/submit', method: 'POST' });
     expect(bodyOf()).toEqual({ fileIds: ['1'] });
   });
 
   it('addComment POSTs the text and returns the comment', async () => {
     const comment = { id: '55', author: 'Ada', text: '你好', at: 1, mine: true };
     reply(json(200, comment));
-    expect(await data.addComment(93251, '你好')).toEqual(comment);
-    expect(call()).toMatchObject({ url: 'http://127.0.0.1:8100/assignments/93251/comments', method: 'POST' });
+    expect(await data.addComment(60417, '你好')).toEqual(comment);
+    expect(call()).toMatchObject({ url: 'http://127.0.0.1:8100/assignments/60417/comments', method: 'POST' });
     expect(bodyOf()).toEqual({ text: '你好' });
   });
 
   it('deleteComment DELETEs the encoded comment id', async () => {
     reply(empty());
-    await data.deleteComment(93251, '55/x');
-    expect(call()).toMatchObject({ url: 'http://127.0.0.1:8100/assignments/93251/comments/55%2Fx', method: 'DELETE' });
+    await data.deleteComment(60417, '55/x');
+    expect(call()).toMatchObject({ url: 'http://127.0.0.1:8100/assignments/60417/comments/55%2Fx', method: 'DELETE' });
   });
 
   it.each([
@@ -329,7 +329,7 @@ describe('serviceData writes', () => {
 
   it("deleteComment turns the service's 404 for a comment that is not mine into CommentNotFound", async () => {
     reply(json(404, { error: 'Comment not found.' }));
-    const error = await data.deleteComment(93251, '327995').catch((e: unknown) => e);
+    const error = await data.deleteComment(60417, '327995').catch((e: unknown) => e);
     expect(error).toBeInstanceOf(CommentNotFound);
     expect(error).toMatchObject({ status: 404, message: 'Comment not found' });
   });
@@ -355,8 +355,8 @@ describe('serviceData online documents and Mark as submitted', () => {
 
   it('createOnlineDoc POSTs the title and content verbatim and returns the FileRef', async () => {
     reply(json(200, doc));
-    expect(await data.createOnlineDoc(93251, '研究测试', DELTA)).toEqual(doc);
-    expect(call()).toMatchObject({ url: 'http://127.0.0.1:8100/assignments/93251/online-docs', method: 'POST' });
+    expect(await data.createOnlineDoc(60417, '研究测试', DELTA)).toEqual(doc);
+    expect(call()).toMatchObject({ url: 'http://127.0.0.1:8100/assignments/60417/online-docs', method: 'POST' });
     expect(call().headers.get('content-type')).toBe('application/json');
     expect(call().headers.get('authorization')).toBe('Bearer tok-123');
     expect(call().headers.get('x-refresh')).toBeNull();
@@ -365,17 +365,17 @@ describe('serviceData online documents and Mark as submitted', () => {
 
   it('updateOnlineDoc PUTs to the encoded document id and returns the FileRef', async () => {
     reply(json(200, doc));
-    expect(await data.updateOnlineDoc(93251, '11138501', '研究测试', DELTA)).toEqual(doc);
-    expect(call()).toMatchObject({ url: 'http://127.0.0.1:8100/assignments/93251/online-docs/11138501', method: 'PUT' });
+    expect(await data.updateOnlineDoc(60417, '11138501', '研究测试', DELTA)).toEqual(doc);
+    expect(call()).toMatchObject({ url: 'http://127.0.0.1:8100/assignments/60417/online-docs/11138501', method: 'PUT' });
     expect(bodyOf()).toEqual({ title: '研究测试', content: DELTA });
     reply(json(200, doc));
-    await data.updateOnlineDoc(93251, 'a/b?c', 'x', DELTA);
-    expect(call(1).url).toBe('http://127.0.0.1:8100/assignments/93251/online-docs/a%2Fb%3Fc');
+    await data.updateOnlineDoc(60417, 'a/b?c', 'x', DELTA);
+    expect(call(1).url).toBe('http://127.0.0.1:8100/assignments/60417/online-docs/a%2Fb%3Fc');
   });
 
   it.each([
-    ['createOnlineDoc', () => data.createOnlineDoc(93251, 'T', DELTA)],
-    ['updateOnlineDoc', () => data.updateOnlineDoc(93251, '1', 'T', DELTA)],
+    ['createOnlineDoc', () => data.createOnlineDoc(60417, 'T', DELTA)],
+    ['updateOnlineDoc', () => data.updateOnlineDoc(60417, '1', 'T', DELTA)],
   ])("%s passes the service's 400, 413 and 502 through with their messages", async (_name, run) => {
     reply(json(400, { error: 'Give the document a title.' }));
     const blank = await run().catch((e: unknown) => e);
@@ -398,7 +398,7 @@ describe('serviceData online documents and Mark as submitted', () => {
 
   it("updateOnlineDoc turns the service's 409 for a handed-in document into DocumentHandedIn with its message", async () => {
     reply(json(409, { error: 'This document was handed in — save it as a new one.' }));
-    const error = await data.updateOnlineDoc(93251, '11138501', 'T', DELTA).catch((e: unknown) => e);
+    const error = await data.updateOnlineDoc(60417, '11138501', 'T', DELTA).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(DocumentHandedIn);
     expect(error).toMatchObject({ status: 409, message: 'This document was handed in — save it as a new one.' });
   });
@@ -546,140 +546,5 @@ describe('serviceData notifications', () => {
   it("markNotificationRead passes Yungu's 502 on", async () => {
     reply(json(502, { error: UNAVAILABLE }));
     await expect(data.markNotificationRead('1')).rejects.toBeInstanceOf(YunguUnavailable);
-  });
-});
-
-describe('serviceData Todoist', () => {
-  it('getTodoist GETs /todoist with the session token and returns the status', async () => {
-    const status = { connected: true, account: 'Bruce', state: 'ok', lastSyncAt: 1 };
-    reply(json(200, status));
-    expect(await data.getTodoist()).toEqual(status);
-    expect(call().url).toBe('http://127.0.0.1:8100/todoist');
-    expect(call().method).toBe('GET');
-    expect(call().headers.get('authorization')).toBe('Bearer tok-123');
-  });
-
-  it('connectTodoist POSTs /todoist/connect and returns the authorize URL', async () => {
-    reply(json(200, { authorizeUrl: 'https://app.todoist.com/oauth/authorize?state=s' }));
-    expect(await data.connectTodoist()).toBe('https://app.todoist.com/oauth/authorize?state=s');
-    expect(call().url).toBe('http://127.0.0.1:8100/todoist/connect');
-    expect(call().method).toBe('POST');
-  });
-
-  it('connectTodoist without an authorize URL in the answer is unavailable', async () => {
-    reply(json(200, {}));
-    await expect(data.connectTodoist()).rejects.toBeInstanceOf(YunguUnavailable);
-  });
-
-  it('finishTodoist POSTs the code and state as JSON', async () => {
-    reply(empty(204));
-    await data.finishTodoist('the-code', 'the-state');
-    expect(call().url).toBe('http://127.0.0.1:8100/todoist/callback');
-    expect(call().method).toBe('POST');
-    expect(call().headers.get('content-type')).toBe('application/json');
-    expect(bodyOf()).toEqual({ code: 'the-code', state: 'the-state' });
-  });
-
-  it('syncTodoist POSTs /todoist/sync; disconnectTodoist DELETEs /todoist', async () => {
-    reply(empty(202));
-    reply(empty(204));
-    await data.syncTodoist();
-    await data.disconnectTodoist();
-    expect([call(0).method, call(0).url]).toEqual(['POST', 'http://127.0.0.1:8100/todoist/sync']);
-    expect([call(1).method, call(1).url]).toEqual(['DELETE', 'http://127.0.0.1:8100/todoist']);
-  });
-
-  it("passes the service's own messages on: 400 expired link, 502 refused, 503 not set up", async () => {
-    reply(json(400, { error: 'That Todoist link expired. Try connecting again.' }));
-    await expect(data.finishTodoist('c', 's')).rejects.toEqual(new ServiceError(400, 'That Todoist link expired. Try connecting again.'));
-    reply(json(502, { error: "Todoist didn't accept the connection. Try again." }));
-    await expect(data.finishTodoist('c', 's')).rejects.toEqual(new YunguUnavailable("Todoist didn't accept the connection. Try again."));
-    reply(json(503, { error: "Todoist isn't set up on this server." }));
-    const notSetUp = await data.connectTodoist().catch((e: unknown) => e);
-    expect(notSetUp).toBeInstanceOf(ServiceError);
-    expect(notSetUp).toMatchObject({ status: 503, message: "Todoist isn't set up on this server." });
-  });
-
-  it('a 503 without a message is still unavailable', async () => {
-    reply(new Response('<html>', { status: 503 }));
-    await expect(data.getTodoist()).rejects.toEqual(new YunguUnavailable(UNAVAILABLE));
-  });
-});
-
-describe('serviceData agent access', () => {
-  const params = {
-    response_type: 'code', client_id: 'ylc_1', redirect_uri: 'https://claude.ai/cb', state: 's', code_challenge: 'c'.repeat(43),
-    code_challenge_method: 'S256', scope: '', resource: 'https://yungu.chihairou.dev/mcp',
-  };
-
-  it('lists, creates and revokes personal tokens and disconnects agents with the session token', async () => {
-    reply(json(200, { personal: [], clients: [] }));
-    expect(await data.getAgentAccess()).toEqual({ personal: [], clients: [] });
-    expect(call(0).url).toBe('http://127.0.0.1:8100/agent/tokens');
-    expect(call(0).headers.get('authorization')).toBe('Bearer tok-123');
-
-    reply(json(200, { id: 't1', name: 'Laptop', token: 'ylp_x' }));
-    expect(await data.createAgentToken('Laptop')).toEqual({ id: 't1', name: 'Laptop', token: 'ylp_x' });
-    expect(call(1).method).toBe('POST');
-    expect(bodyOf(1)).toEqual({ name: 'Laptop' });
-
-    reply(empty());
-    await data.revokeAgentToken('t/1');
-    expect(call(2)).toMatchObject({ url: 'http://127.0.0.1:8100/agent/tokens/t%2F1', method: 'DELETE' });
-
-    reply(empty());
-    await data.disconnectAgent('g1');
-    expect(call(3)).toMatchObject({ url: 'http://127.0.0.1:8100/agent/clients/g1', method: 'DELETE' });
-  });
-
-  it("passes the service's refusals on (a name, the 20 cap, an unknown id)", async () => {
-    reply(json(400, { error: 'You can have up to 20 tokens. Revoke one first.' }));
-    await expect(data.createAgentToken('x')).rejects.toMatchObject({ status: 400, message: 'You can have up to 20 tokens. Revoke one first.' });
-    reply(json(404, { error: 'Not found.' }));
-    await expect(data.revokeAgentToken('nope')).rejects.toBeInstanceOf(ServiceError);
-  });
-
-  it('checks an authorization request, passing every field on as is', async () => {
-    reply(json(200, { valid: true, client: { name: 'Claude', redirectHost: 'claude.ai' } }));
-    expect(await data.checkAuthorize(params)).toEqual({ valid: true, client: { name: 'Claude', redirectHost: 'claude.ai' } });
-    expect(call(0)).toMatchObject({ url: 'http://127.0.0.1:8100/oauth/authorize/request', method: 'POST' });
-    expect(call(0).headers.get('authorization')).toBe('Bearer tok-123');
-    expect(bodyOf(0)).toEqual(params);
-  });
-
-  it('keeps a refusal with its redirect, and one without as it is', async () => {
-    reply(json(400, { error: 'This agent asked for a kind of sign-in this service doesn’t offer.', code: 'unsupported_response_type', redirect: 'https://claude.ai/cb?error=x' }));
-    expect(await data.checkAuthorize(params)).toEqual({
-      valid: false, error: 'This agent asked for a kind of sign-in this service doesn’t offer.', redirect: 'https://claude.ai/cb?error=x',
-    });
-    reply(json(400, { error: "This agent isn't registered here.", code: 'invalid_client' }));
-    expect(await data.checkAuthorize(params)).toEqual({ valid: false, error: "This agent isn't registered here." });
-    // A field over the service's length limit (its 422) is a request that isn't valid, never a redirect.
-    reply(json(422, { detail: [] }));
-    expect(await data.checkAuthorize(params)).toEqual({ valid: false, error: "This agent's request isn't valid. Start connecting again from the agent." });
-    // A redirect that is not an http(s) URL is never kept.
-    reply(json(400, { error: 'No.', redirect: 'javascript:alert(1)' }));
-    expect(await data.checkAuthorize(params)).toEqual({ valid: false, error: 'No.' });
-  });
-
-  it('allows or denies, answering where the browser goes', async () => {
-    reply(json(200, { redirect: 'https://claude.ai/cb?code=c&state=s' }));
-    expect(await data.decideAuthorize(params, 'allow')).toEqual({ ok: true, redirect: 'https://claude.ai/cb?code=c&state=s' });
-    expect(call(0)).toMatchObject({ url: 'http://127.0.0.1:8100/oauth/authorize/approve', method: 'POST' });
-    expect(bodyOf(0)).toEqual({ ...params, decision: 'allow' });
-
-    reply(json(400, { error: 'You can connect up to 20 agents. Disconnect one in Agent access first.', code: 'access_denied' }));
-    expect(await data.decideAuthorize(params, 'allow')).toEqual({ ok: false, error: 'You can connect up to 20 agents. Disconnect one in Agent access first.' });
-
-    // An answer without a usable redirect is the service failing, not somewhere to go.
-    reply(json(200, { redirect: 'javascript:alert(1)' }));
-    await expect(data.decideAuthorize(params, 'deny')).rejects.toBeInstanceOf(YunguUnavailable);
-  });
-
-  it('ends the session on a 401 and is unavailable on a 5xx', async () => {
-    reply(json(401, { error: 'Sign in again.' }));
-    await expect(data.checkAuthorize(params)).rejects.toBeInstanceOf(SessionEnded);
-    reply(json(502, { error: 'x' }));
-    await expect(data.decideAuthorize(params, 'allow')).rejects.toBeInstanceOf(YunguUnavailable);
   });
 });
