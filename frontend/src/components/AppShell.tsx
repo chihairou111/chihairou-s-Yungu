@@ -14,7 +14,6 @@ import Switch from '@mui/material/Switch';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
 import Logout from '@mui/icons-material/Logout';
-import WifiRounded from '@mui/icons-material/WifiRounded';
 import AllowedNetworksDialog from './local/AllowedNetworksDialog';
 import { localApi, useLocalState } from './local/local-api';
 import { LocalSuspension } from './local/SuspensionScreen';
@@ -57,9 +56,6 @@ function AllowedNetworksItem({ onOpen, ...props }: MenuItemProps & { onOpen: () 
         onOpen();
       }}
     >
-      <ListItemIcon>
-        <WifiRounded fontSize="small" />
-      </ListItemIcon>
       Allowed networks…
     </MenuItem>
   );
@@ -247,6 +243,7 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
           open={networksOpen}
           allowedNetworks={local.allowedNetworks}
           mac={local.mac}
+          suspension={local.suspension}
           onChange={(list) => void localApi()?.setAllowedNetworks(list).catch(() => undefined)}
           onClose={() => setNetworksOpen(false)}
           onExited={() => gearButton.current?.focus()}

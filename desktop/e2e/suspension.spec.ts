@@ -195,7 +195,8 @@ test('suspends on a router not allowed, resumes by itself on an allowed one, and
   await expect.poll(helperCalls).toBe(2); // opening it reads the network once
   await dialog.getByLabel('Label').fill('School');
   await add.click();
-  await expect(dialog.getByRole('listitem')).toHaveText(['School']);
+  // Listed, and marked as the network you're on.
+  await expect(dialog.getByRole('listitem')).toHaveText(['SchoolThis network']);
   await expect(dialog.getByText('This network is allowed as “School”.')).toBeVisible();
   await dialog.getByRole('button', { name: 'Done' }).click();
   await expect(dialog).toBeHidden();

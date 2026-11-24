@@ -1,4 +1,4 @@
-import { render, screen, within } from '../test-render';
+import { render, screen, waitFor, within } from '../test-render';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import AllowedNetworksDialog, { type AllowedNetwork } from './AllowedNetworksDialog';
@@ -7,11 +7,11 @@ const SCHOOL: AllowedNetwork = { label: 'School', mac: '80:05:88:d0:83:e2' };
 const HOME: AllowedNetwork = { label: 'Home', mac: 'aa:bb:cc:dd:ee:01' };
 const CAFE_MAC = 'cc:cc:cc:00:00:01';
 
-function setUp(props: { allowedNetworks?: AllowedNetwork[]; mac?: string } = {}) {
+function setUp(props: { allowedNetworks?: AllowedNetwork[]; mac?: string; suspension?: boolean } = {}) {
   const onChange = vi.fn();
   const onClose = vi.fn();
   render(
-    <AllowedNetworksDialog open allowedNetworks={props.allowedNetworks ?? []} mac={props.mac} onChange={onChange} onClose={onClose} />,
+    <AllowedNetworksDialog open allowedNetworks={props.allowedNetworks ?? []} mac={props.mac} suspension={props.suspension} onChange={onChange} onClose={onClose} />,
   );
   return { onChange, onClose, dialog: screen.getByRole('dialog', { name: 'Allowed networks' }) };
 }
@@ -53,12 +53,48 @@ describe('AllowedNetworksDialog', () => {
     expect(onChange).toHaveBeenCalledWith([{ label: 'Cafe', mac: CAFE_MAC }]);
   });
 
-  it('cannot add when the current network is unknown (no router read)', async () => {
+  it('with no router reading, says what to do instead of showing a disabled form', () => {
     const { onChange, dialog } = setUp({ allowedNetworks: [SCHOOL] });
-    expect(within(dialog).getByLabelText('Label')).toBeDisabled();
-    expect(within(dialog).getByRole('button', { name: 'Add current network' })).toBeDisabled();
-    expect(within(dialog).getByText(/Connect to the Wi-Fi you want to allow/)).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText('Label')).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Add current network' })).not.toBeInTheDocument();
+    expect(within(dialog).getByText('Connect to the Wi-Fi you want to allow, then add it here.')).toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('marks the network you are on', () => {
+    const { dialog } = setUp({ allowedNetworks: [SCHOOL, HOME], mac: HOME.mac });
+    const items = within(dialog).getAllByRole('listitem');
+    expect(within(items[1]).getByText('This network')).toBeInTheDocument();
+    expect(within(items[0]).queryByText('This network')).not.toBeInTheDocument();
+  });
+
+  it('with Suspension Mode on, asks in the row before removing the network you are on', async () => {
+    const { onChange, dialog } = setUp({ allowedNetworks: [SCHOOL, HOME], mac: HOME.mac, suspension: true });
+    const remove = within(dialog).getByRole('button', { name: 'Remove Home' });
+    await userEvent.click(remove);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(within(dialog).getByText('You’re on this network — removing it suspends the app now.')).toBeInTheDocument();
+    // Cancel keeps it, and the × comes back with focus.
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(onChange).not.toHaveBeenCalled();
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Remove Home' })).toHaveFocus());
+    // Remove removes it.
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove Home' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
+    expect(onChange).toHaveBeenCalledWith([SCHOOL]);
+  });
+
+  it('removes any other network at once', async () => {
+    const { onChange, dialog } = setUp({ allowedNetworks: [SCHOOL, HOME], mac: HOME.mac, suspension: true });
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove School' }));
+    expect(onChange).toHaveBeenLastCalledWith([HOME]);
+  });
+
+  it('removes the network you are on at once while Suspension Mode is off', async () => {
+    const { onChange, dialog } = setUp({ allowedNetworks: [SCHOOL, HOME], mac: HOME.mac, suspension: false });
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove Home' }));
+    expect(onChange).toHaveBeenCalledWith([SCHOOL]);
   });
 
   it('says which label the current network has when it is already allowed, and offers no add', () => {

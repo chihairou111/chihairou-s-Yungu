@@ -8,9 +8,12 @@ import Modal from '@mui/material/Modal';
 import Typography from '@mui/material/Typography';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import WifiOffRounded from '@mui/icons-material/WifiOffRounded';
+import { EASE_OUT } from '../detail/motion';
 import { localApi, useLocalState } from './local-api';
 
 interface SuspensionScreenProps {
+  /** Shown (true), or fading out on an allowed network (false). */
+  open?: boolean;
   reason?: string;
   onTurnOff: () => void;
 }
@@ -25,7 +28,7 @@ export function suspensionLine(reason: string | undefined): string {
  * that turns Suspension Mode off. It takes focus, keeps Tab inside, blocks clicks to the page and is not
  * dismissed by Escape or a click outside: only the button (or an allowed network) ends it.
  */
-export default function SuspensionScreen({ reason, onTurnOff }: SuspensionScreenProps) {
+export default function SuspensionScreen({ open = true, reason, onTurnOff }: SuspensionScreenProps) {
   const titleId = useId();
   const lineId = useId();
   const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
@@ -35,14 +38,15 @@ export default function SuspensionScreen({ reason, onTurnOff }: SuspensionScreen
 
   return (
     <Modal
-      open
+      open={open}
       disableAutoFocus // the button takes focus itself
-      closeAfterTransition={false}
+      // Leaving fades out (quicker than it came in) rather than vanishing in one frame.
+      closeAfterTransition
       // Neither Escape nor a click outside closes it.
       onClose={() => undefined}
       slotProps={{
         backdrop: {
-          transitionDuration: reduceMotion ? 0 : 200,
+          transitionDuration: reduceMotion ? 0 : { enter: 200, exit: 150 },
           sx: (theme) => ({
             // The surface is a CSS variable (it follows the colour scheme): mixed, not alpha()'d.
             backgroundColor: `color-mix(in srgb, ${theme.yungu.color.surface} 55%, transparent)`,
@@ -52,7 +56,12 @@ export default function SuspensionScreen({ reason, onTurnOff }: SuspensionScreen
         },
       }}
     >
-      <Fade in appear={!reduceMotion} timeout={reduceMotion ? 0 : 200}>
+      <Fade
+        in={open}
+        appear={!reduceMotion}
+        timeout={reduceMotion ? 0 : { enter: 200, exit: 150 }}
+        easing={{ enter: EASE_OUT, exit: 'ease-out' }}
+      >
         <Box
           role="alertdialog"
           aria-modal="true"
@@ -100,7 +109,9 @@ export default function SuspensionScreen({ reason, onTurnOff }: SuspensionScreen
             <Typography id={lineId} color="text.secondary" sx={{ mt: 1, mb: 3, textWrap: 'pretty', overflowWrap: 'anywhere' }}>
               {suspensionLine(reason)}
             </Typography>
-            <Button ref={button} variant="contained" size="large" onClick={onTurnOff}>
+            {/* Focus arrives here without user input, and the screen can stay up for a lesson: no focus
+                pulse (the theme turns it off too; this is the one place it must never run). */}
+            <Button ref={button} variant="contained" size="large" disableFocusRipple onClick={onTurnOff}>
               Turn off Suspension Mode
             </Button>
           </Box>
@@ -123,9 +134,11 @@ export function LocalSuspension() {
     if (was.current && !suspended) router.refresh();
     was.current = suspended;
   }, [suspended, router]);
-  if (!state || !suspended) return null;
+  // Mounted while the shell reports a state, so the screen can fade out when suspension ends.
+  if (!state) return null;
   return (
     <SuspensionScreen
+      open={suspended}
       reason={state.reason}
       onTurnOff={() => void localApi()?.setSuspension(false).catch(() => undefined)}
     />
