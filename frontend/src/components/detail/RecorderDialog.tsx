@@ -5,7 +5,6 @@ import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import { alpha } from '@mui/material/styles';
 import FiberManualRecord from '@mui/icons-material/FiberManualRecord';
 import MicOffOutlined from '@mui/icons-material/MicOffOutlined';
 import PauseRounded from '@mui/icons-material/PauseRounded';
@@ -250,7 +249,7 @@ export default function RecorderDialog({ open, onClose, onAdd }: RecorderDialogP
               height: 6,
               borderRadius: 3,
               overflow: 'hidden',
-              bgcolor: alpha(theme.palette.text.primary, 0.1),
+              bgcolor: theme.alpha(theme.vars.palette.text.primary, 0.1),
             })}
           >
             <Box
@@ -331,8 +330,8 @@ function StatusDot({ phase }: { phase: Phase }) {
         width: 10,
         height: 10,
         borderRadius: '50%',
-        bgcolor: on ? theme.palette.error.main : 'transparent',
-        border: on ? 'none' : `2px solid ${theme.palette.text.secondary}`,
+        bgcolor: on ? theme.vars.palette.error.main : 'transparent',
+        border: on ? 'none' : `2px solid ${theme.vars.palette.text.secondary}`,
         ...(on && {
           '@media (prefers-reduced-motion: no-preference)': { animation: 'yl-rec-pulse 1.6s ease-in-out infinite' },
           '@keyframes yl-rec-pulse': { '50%': { opacity: 0.35 } },

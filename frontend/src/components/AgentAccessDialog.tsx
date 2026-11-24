@@ -126,7 +126,7 @@ export default function AgentAccessDialog({ open, onClose }: AgentAccessDialogPr
         },
         paper: {
           sx: (theme) => ({
-            bgcolor: theme.yungu.color.surfaceContainerLowest,
+            bgcolor: theme.yungu.dialog.bg,
             backgroundImage: 'none',
             ...(!fullScreen && {
               m: 2,

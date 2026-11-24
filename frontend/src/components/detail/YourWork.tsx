@@ -10,7 +10,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import IconButton from '@mui/material/IconButton';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import { alpha, type Theme } from '@mui/material/styles';
+import { type Theme } from '@mui/material/styles';
 import CheckCircleOutline from '@mui/icons-material/CheckCircleOutlineOutlined';
 import Close from '@mui/icons-material/Close';
 import EditNoteOutlined from '@mui/icons-material/EditNoteOutlined';
@@ -134,7 +134,7 @@ export default function YourWork({ onWrite, focusOnMount = null }: YourWorkProps
         outline: '2px dashed transparent',
         outlineOffset: -6,
         transition: theme.transitions.create(['outline-color', 'background-color'], { duration: theme.transitions.duration.shorter }),
-        ...(dragging && { outlineColor: theme.palette.primary.main, bgcolor: alpha(theme.palette.primary.main, 0.06) }),
+        ...(dragging && { outlineColor: theme.vars.palette.primary.main, bgcolor: theme.alpha(theme.vars.palette.primary.main, 0.06) }),
         '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
       })}
     >
@@ -268,11 +268,11 @@ export default function YourWork({ onWrite, focusOnMount = null }: YourWorkProps
           mt: 2,
           ...(nothingToUpdate &&
             !work.submitting && {
-              color: theme.palette.action.disabled,
-              bgcolor: theme.palette.action.disabledBackground,
+              color: theme.vars.palette.action.disabled,
+              bgcolor: theme.vars.palette.action.disabledBackground,
               boxShadow: 'none',
               cursor: 'default',
-              '&:hover': { bgcolor: theme.palette.action.disabledBackground, boxShadow: 'none' },
+              '&:hover': { bgcolor: theme.vars.palette.action.disabledBackground, boxShadow: 'none' },
             }),
         })}
       >
@@ -312,22 +312,22 @@ type ChipStatus = WorkStatus | 'returned';
 const STATUS: Record<ChipStatus, { label: string; icon?: ReactElement; sx: (theme: Theme) => object }> = {
   'not-submitted': {
     label: 'Not submitted',
-    sx: (theme) => ({ bgcolor: alpha(theme.palette.text.primary, 0.07), color: theme.yungu.color.onSurfaceVariant }),
+    sx: (theme) => ({ bgcolor: theme.alpha(theme.vars.palette.text.primary, 0.07), color: theme.yungu.color.onSurfaceVariant }),
   },
   // Still to hand in, in the Nearly overdue tone the card shows it in.
   returned: {
     label: 'Returned for revision',
-    sx: (theme) => ({ bgcolor: theme.palette.warning.light, color: theme.palette.warning.dark }),
+    sx: (theme) => ({ bgcolor: theme.vars.palette.warning.light, color: theme.vars.palette.warning.dark }),
   },
   submitted: {
     label: 'Submitted',
     icon: <CheckCircleOutline />,
-    sx: (theme) => ({ bgcolor: alpha(theme.palette.success.main, 0.12), color: theme.palette.success.dark }),
+    sx: (theme) => ({ bgcolor: theme.yungu.color.successContainer, color: theme.yungu.color.onSuccessContainer }),
   },
   late: {
     label: 'Submitted late',
     icon: <ScheduleOutlined />,
-    sx: (theme) => ({ bgcolor: theme.palette.warning.light, color: theme.palette.warning.dark }),
+    sx: (theme) => ({ bgcolor: theme.vars.palette.warning.light, color: theme.vars.palette.warning.dark }),
   },
 };
 
@@ -382,7 +382,7 @@ function RowPreview({ file, children }: { file?: FileRef; children?: ReactNode }
         placeItems: 'center',
         overflow: 'hidden',
         borderRadius: `${theme.yungu.shape.small}px`,
-        bgcolor: alpha(theme.palette.text.primary, 0.06),
+        bgcolor: theme.alpha(theme.vars.palette.text.primary, 0.06),
         color: theme.yungu.color.onSurfaceVariant,
         '& svg': { fontSize: 22 },
       })}
@@ -424,7 +424,7 @@ const rowLayoutSx = (theme: Theme) => ({
 
 const rowSx = (theme: Theme) => ({
   ...rowLayoutSx(theme),
-  '@media (hover: hover)': { '&:hover': { bgcolor: alpha(theme.palette.text.primary, 0.05) } },
+  '@media (hover: hover)': { '&:hover': { bgcolor: theme.alpha(theme.vars.palette.text.primary, 0.05) } },
 });
 
 function FileRow({ file, onOpen, onRemove, disabled }: { file: FileRef; onOpen: () => void; onRemove: () => void; disabled: boolean }) {

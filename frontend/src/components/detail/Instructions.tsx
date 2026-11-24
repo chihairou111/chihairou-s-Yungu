@@ -75,7 +75,7 @@ export const proseSx = (theme: Theme) =>
       textDecorationThickness: '1px',
       textUnderlineOffset: '0.2em',
       '&:hover': { textDecorationThickness: '2px' },
-      '&:focus-visible': { outline: `2px solid ${theme.palette.primary.main}`, outlineOffset: 2, borderRadius: '2px' },
+      '&:focus-visible': { outline: `2px solid ${theme.vars.palette.primary.main}`, outlineOffset: 2, borderRadius: '2px' },
     },
     '& img': { display: 'block', maxWidth: '100%', height: 'auto', my: 1.5, borderRadius: `${theme.yungu.shape.small}px` },
     '& blockquote': { mx: 0, pl: 2, color: 'text.secondary', fontStyle: 'normal' },

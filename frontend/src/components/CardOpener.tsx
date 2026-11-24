@@ -19,7 +19,7 @@ interface CardOpenerProps {
 export function openerHostSx(theme: Theme) {
   return {
     position: 'relative',
-    '&:has(button:focus-visible)': { outline: `2px solid ${theme.palette.primary.main}`, outlineOffset: '2px' },
+    '&:has(button:focus-visible)': { outline: `2px solid ${theme.vars.palette.primary.main}`, outlineOffset: '2px' },
   } as const;
 }
 

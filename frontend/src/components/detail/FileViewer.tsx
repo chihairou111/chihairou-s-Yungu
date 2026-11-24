@@ -468,11 +468,11 @@ function DocPage({ file, delta }: { file: FileRef; delta: Delta }) {
           px: { xs: 2.5, sm: 6 },
           py: { xs: 3, sm: 5 },
           bgcolor: theme.yungu.color.surfaceContainerLowest,
-          color: theme.palette.text.primary,
+          color: theme.vars.palette.text.primary,
           borderRadius: { xs: 0, sm: `${theme.yungu.shape.medium}px` },
           boxShadow: { sm: '0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.32)' },
           '& ::selection': { bgcolor: theme.yungu.color.primaryContainer, color: theme.yungu.color.onPrimaryContainer },
-          '& :focus-visible': { outlineColor: `${theme.palette.primary.main} !important` },
+          '& :focus-visible': { outlineColor: `${theme.vars.palette.primary.main} !important` },
         })}
       >
         <Box

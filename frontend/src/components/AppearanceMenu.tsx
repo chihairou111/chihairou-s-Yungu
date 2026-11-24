@@ -198,7 +198,7 @@ export default function AppearanceMenu({ onClose, autoFocus, tabIndex }: Appeara
               sx={(theme) => ({
                 minWidth: SUBMENU_PX,
                 borderRadius: `${theme.yungu.shape.extraSmall}px`,
-                bgcolor: theme.yungu.color.surfaceContainer,
+                bgcolor: theme.yungu.menu.bg,
                 boxShadow: MENU_SHADOW,
                 // Reduced motion: it fades in place, like the app's other menus.
                 '@media (prefers-reduced-motion: reduce)': { transform: 'none !important', transition: 'opacity 120ms ease-out !important' },

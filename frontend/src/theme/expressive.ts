@@ -1,6 +1,7 @@
 'use client';
-import { createTheme } from '@mui/material/styles';
+import { createTheme, type ColorSystemOptions } from '@mui/material/styles';
 import type { ColorRoles, ShapeScale, YunguTokens } from './tokens';
+import { darkRoles, lightRoles } from './roles';
 import { MuiAlert } from './alert';
 import { APPEARANCE_ATTRIBUTE } from '@/lib/appearance';
 
@@ -15,64 +16,40 @@ import { APPEARANCE_ATTRIBUTE } from '@/lib/appearance';
 // variables below use the same selectors, so one attribute switches everything. "Automatic" is resolved
 // to light or dark before paint by MUI's `InitColorSchemeScript attribute="data-appearance"`, which
 // sets the same attribute from `prefers-color-scheme`; with no attribute the page is light (`:root`).
-export { APPEARANCE_ATTRIBUTE };
+export { APPEARANCE_ATTRIBUTE, darkRoles, lightRoles };
 
 /** M3 shape scale (dp = px). */
 const shape: ShapeScale = { extraSmall: 4, small: 8, medium: 12, large: 16, extraLarge: 28, full: 9999 };
-
-export const lightRoles: ColorRoles = {
-  surface: '#f9f9ff',
-  surfaceContainerLowest: '#ffffff',
-  surfaceContainerLow: '#f3f3fa',
-  surfaceContainer: '#ededf4',
-  surfaceContainerHigh: '#e7e8ee',
-  surfaceContainerHighest: '#e2e2e9',
-  onSurface: '#191c20',
-  onSurfaceVariant: '#44474e',
-  outline: '#74777f',
-  outlineVariant: '#c4c6d0',
-  primaryContainer: '#d6e3ff',
-  onPrimaryContainer: '#001b3e',
-  secondaryContainer: '#dae2f9',
-  onSecondaryContainer: '#131c2b',
-  successContainer: '#dcf3e3',
-  onSuccessContainer: '#1b6c3a',
-};
-
-export const darkRoles: ColorRoles = {
-  surface: '#111318',
-  surfaceContainerLowest: '#0c0e13',
-  surfaceContainerLow: '#191c20',
-  surfaceContainer: '#1d2024',
-  surfaceContainerHigh: '#282a2f',
-  surfaceContainerHighest: '#33353a',
-  onSurface: '#e2e2e9',
-  onSurfaceVariant: '#c4c6d0',
-  outline: '#8e9099',
-  outlineVariant: '#44474e',
-  primaryContainer: '#284777',
-  onPrimaryContainer: '#d6e3ff',
-  secondaryContainer: '#3e4759',
-  onSecondaryContainer: '#dae2f9',
-  successContainer: '#1b5e33',
-  onSuccessContainer: '#b7f1c4',
-};
 
 /** M3 state layers: on-colour at 8% (hover) over the container, per scheme. */
 interface StateRoles {
   hoverOnSurface: string;
   hoverOnSecondaryContainer: string;
   hoverOnPrimaryContainer: string;
+  /**
+   * A dialog's surface: the brightest container in light (lowest = white, above the page), and in dark
+   * a high container, since a raised surface is lighter there (lowest would sink below the page).
+   */
+  dialog: string;
+  /**
+   * A menu's surface: surface container in light; in dark one step higher, since the app bar the
+   * menus open from is itself surface container and a shadow barely shows on a dark page.
+   */
+  menu: string;
 }
 const lightStates: StateRoles = {
   hoverOnSurface: 'rgba(25, 28, 32, 0.08)',
   hoverOnSecondaryContainer: '#cbd3ea',
   hoverOnPrimaryContainer: '#c6d4f0',
+  dialog: lightRoles.surfaceContainerLowest,
+  menu: lightRoles.surfaceContainer,
 };
 const darkStates: StateRoles = {
   hoverOnSurface: 'rgba(226, 226, 233, 0.08)',
   hoverOnSecondaryContainer: '#4a5366',
   hoverOnPrimaryContainer: '#365382',
+  dialog: darkRoles.surfaceContainerHigh,
+  menu: darkRoles.surfaceContainerHigh,
 };
 
 /** Palette keys whose `.light` / `.dark` pair forms a chip (ink on container) in each scheme. */
@@ -81,6 +58,8 @@ interface SchemePalette {
   secondary: { main: string; light: string; dark: string; contrastText: string };
   error: { main: string; light: string; dark: string; contrastText: string };
   warning: { main: string; light: string; dark: string; contrastText: string };
+  success: { main: string; light: string; dark: string; contrastText: string };
+  info: { main: string; light: string; dark: string; contrastText: string };
 }
 
 export const lightPalette: SchemePalette = {
@@ -88,6 +67,9 @@ export const lightPalette: SchemePalette = {
   secondary: { main: '#565e71', light: lightRoles.secondaryContainer, dark: '#3e4759', contrastText: '#ffffff' },
   error: { main: '#c62828', light: '#fdecec', dark: '#9b1c1c', contrastText: '#ffffff' },
   warning: { main: '#a85100', light: '#fff3e3', dark: '#7f3d00', contrastText: '#ffffff' },
+  // MUI's success and info main colours; the pair is a container (as MUI's light Alert tints them).
+  success: { main: '#2e7d32', light: lightRoles.successContainer, dark: lightRoles.onSuccessContainer, contrastText: '#ffffff' },
+  info: { main: '#0288d1', light: '#e5f6fe', dark: '#014361', contrastText: '#ffffff' },
 };
 
 /** Dark: `main` is the tone-80 accent, `.light` the dark container and `.dark` the light ink on it. */
@@ -96,7 +78,11 @@ export const darkPalette: SchemePalette = {
   secondary: { main: '#bec6dc', light: darkRoles.secondaryContainer, dark: darkRoles.onSecondaryContainer, contrastText: '#283141' },
   error: { main: '#ffb4ab', light: '#93000a', dark: '#ffdad6', contrastText: '#690005' },
   warning: { main: '#ffb870', light: '#693c00', dark: '#ffdcbe', contrastText: '#4a2800' },
+  success: { main: '#8fd6a0', light: darkRoles.successContainer, dark: darkRoles.onSuccessContainer, contrastText: '#003919' },
+  info: { main: '#8acdff', light: '#004c6e', dark: '#c9e6ff', contrastText: '#00344d' },
 };
+
+type Overlays = NonNullable<ColorSystemOptions['overlays']>;
 
 const kebab = (key: string) => key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
 const cssVar = (key: string) => `--yungu-${kebab(key)}`;
@@ -155,6 +141,8 @@ const tokens: YunguTokens = {
   // surface, with no line.
   header: { bg: color.surfaceContainer, edge: 'none' },
   loginCard: { radius: shape.extraLarge, shadow: 'none' },
+  dialog: { bg: `var(${cssVar('dialog')})` },
+  menu: { bg: `var(${cssVar('menu')})` },
 };
 
 const theme = createTheme({
@@ -169,6 +157,8 @@ const theme = createTheme({
       },
     },
     dark: {
+      // Tonal M3 surfaces, as in light: no white overlay lightening raised Paper (menus, dialogs).
+      overlays: Array(25).fill('none') as Overlays,
       palette: {
         ...darkPalette,
         background: { default: darkRoles.surface, paper: darkRoles.surfaceContainerLow },
@@ -226,10 +216,10 @@ const theme = createTheme({
     MuiPaper: {
       styleOverrides: { outlined: { borderColor: 'transparent' } },
     },
-    // Menus: extra-small corner, surface container, level 2.
+    // Menus: extra-small corner, surface container (one step higher in dark), level 2.
     MuiPopover: {
       styleOverrides: {
-        paper: { borderRadius: shape.extraSmall, backgroundColor: color.surfaceContainer, boxShadow: level2 },
+        paper: { borderRadius: shape.extraSmall, backgroundColor: tokens.menu.bg, boxShadow: level2 },
       },
     },
     MuiMenuItem: {

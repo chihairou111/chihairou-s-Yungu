@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 
 // Appearance in the gear menu, against the mock: the choice applies at once, is remembered in the
@@ -110,3 +111,106 @@ test.describe('on a phone', () => {
     await expect(page.locator('html')).toHaveAttribute('data-appearance', 'dark');
   });
 });
+
+// Every surface in Dark: axe finds no contrast failure, and each is photographed in both schemes at a
+// laptop and a phone size for review (SHOTS_DIR, else test-results/appearance).
+const SHOTS = process.env.SHOTS_DIR ?? 'test-results/appearance';
+const AXE = path.join(process.cwd(), 'node_modules/axe-core/axe.min.js');
+
+async function contrastViolations(page: Page, include?: string) {
+  await page.addScriptTag({ path: AXE });
+  // Let entrance motion settle so colours are measured at rest.
+  await page.waitForTimeout(400);
+  return page.evaluate(async (scope) => {
+    const axe = (window as unknown as { axe: { run: (c: unknown, o: unknown) => Promise<{ violations: { id: string; nodes: { target: string[]; failureSummary: string }[] }[] }> } }).axe;
+    const r = await axe.run(scope ? { include: [scope] } : document, { runOnly: { type: 'rule', values: ['color-contrast'] } });
+    return r.violations.flatMap((v) => v.nodes.map((n) => `${n.target.join(' ')}: ${n.failureSummary}`));
+  }, include);
+}
+
+type Surface = { name: string; open: (page: Page) => Promise<void>; scope?: string; signedOut?: boolean };
+
+const SURFACES: Surface[] = [
+  { name: 'assignments', open: async (p) => { await p.goto('/assignments'); await expect(p.getByRole('article').first()).toBeVisible(); } },
+  { name: 'submitted', open: async (p) => { await p.goto('/assignments?tab=submitted'); await expect(p.getByRole('article').first()).toBeVisible(); } },
+  { name: 'calendar', open: async (p) => { await p.goto('/calendar'); await expect(p.getByRole('listitem').first()).toBeVisible(); } },
+  { name: 'behaviour', open: async (p) => { await p.goto('/behaviour'); await expect(p.getByRole('main')).toBeVisible(); } },
+  {
+    name: 'popup-todo',
+    scope: '[role="dialog"]',
+    open: async (p) => { await p.goto('/assignments?task=102'); await expect(p.getByRole('dialog').getByRole('heading', { name: 'Attachments (4)' })).toBeVisible(); },
+  },
+  {
+    name: 'popup-submitted',
+    scope: '[role="dialog"]',
+    open: async (p) => { await p.goto('/assignments?tab=submitted&task=207'); await expect(p.getByRole('dialog', { name: 'Task 2：用户访谈提纲' })).toBeVisible(); },
+  },
+  {
+    name: 'write',
+    scope: '[role="dialog"]',
+    open: async (p) => {
+      await p.goto('/assignments?task=102');
+      await p.getByRole('dialog').getByRole('region', { name: 'Your work' }).getByRole('button', { name: 'Write' }).click();
+      await expect(p.getByRole('dialog').getByRole('textbox', { name: 'Your writing' })).toBeVisible();
+    },
+  },
+  {
+    name: 'camera',
+    open: async (p) => {
+      await p.goto('/assignments?task=102');
+      await p.getByRole('dialog').getByRole('region', { name: 'Your work' }).getByRole('button', { name: 'Camera' }).click();
+      const camera = p.getByRole('dialog', { name: 'Camera' });
+      await camera.getByRole('button', { name: 'Take photo' }).click();
+      await expect(camera.getByRole('list', { name: 'Photos taken' })).toBeVisible();
+    },
+  },
+  {
+    name: 'recorder',
+    open: async (p) => {
+      await p.goto('/assignments?task=102');
+      await p.getByRole('dialog').getByRole('region', { name: 'Your work' }).getByRole('button', { name: 'Record' }).click();
+      await expect(p.getByRole('dialog', { name: 'Record audio' })).toBeVisible();
+    },
+  },
+  {
+    name: 'notifications',
+    scope: '[role="dialog"]',
+    open: async (p) => {
+      await p.goto('/assignments');
+      await p.getByRole('banner').getByRole('button', { name: /^Notifications/ }).click();
+      await expect(p.getByRole('dialog', { name: 'Notifications' }).getByRole('heading', { name: /^Unread/ })).toBeVisible();
+    },
+  },
+  {
+    name: 'gear',
+    scope: '[role="menu"]',
+    open: async (p) => {
+      await p.goto('/assignments');
+      await p.getByRole('banner').getByRole('button', { name: 'Settings' }).click();
+      await p.getByRole('menuitem', { name: 'Appearance' }).click();
+      await expect(p.getByRole('menu', { name: 'Appearance' })).toBeVisible();
+    },
+  },
+  { name: 'login', signedOut: true, open: async (p) => { await p.goto('/login'); await expect(p.getByLabel('Student ID')).toBeVisible(); } },
+];
+
+for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+  test.describe(`every surface at ${viewport.width}×${viewport.height}`, () => {
+    test.use({ viewport });
+
+    for (const surface of SURFACES) {
+      test(`${surface.name}: no contrast failure in Dark; photographed in both schemes`, async ({ page, context }) => {
+        if (!surface.signedOut) await signIn(page);
+        for (const scheme of ['light', 'dark'] as const) {
+          await context.addCookies([{ name: 'yl_appearance', value: scheme, url: 'http://127.0.0.1:3100' }]);
+          await surface.open(page);
+          await expect(html(page)).toHaveAttribute('data-appearance', scheme);
+          const violations = await contrastViolations(page, surface.scope);
+          await page.screenshot({ path: `${SHOTS}/${surface.name}-${scheme}-${viewport.width}.png` });
+          if (scheme === 'dark') expect(violations).toEqual([]);
+          await page.keyboard.press('Escape');
+        }
+      });
+    }
+  });
+}

@@ -26,8 +26,8 @@ describe.each(schemes)('the %s scheme meets WCAG AA', (_name, c, palette) => {
   });
 
   it('palette chips: the ink (.dark) on its container (.light) (4.5:1)', () => {
-    for (const key of ['error', 'warning', 'primary'] as const) {
-      expect(contrastRatio(palette[key].dark, palette[key].light)).toBeGreaterThanOrEqual(4.5);
+    for (const key of ['error', 'warning', 'primary', 'success', 'info'] as const) {
+      expect(contrastRatio(palette[key].dark, palette[key].light), key).toBeGreaterThanOrEqual(4.5);
     }
   });
 
@@ -36,6 +36,13 @@ describe.each(schemes)('the %s scheme meets WCAG AA', (_name, c, palette) => {
       expect(contrastRatio(palette.primary.main, s)).toBeGreaterThanOrEqual(4.5);
       expect(contrastRatio(palette.error.main, s)).toBeGreaterThanOrEqual(4.5);
       expect(contrastRatio(palette.warning.dark, s)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('success and info marks (icons) on the page and cards (3:1)', () => {
+    for (const s of [c.surface, c.surfaceContainerLowest, c.surfaceContainerLow]) {
+      expect(contrastRatio(palette.success.main, s)).toBeGreaterThanOrEqual(3);
+      expect(contrastRatio(palette.info.main, s)).toBeGreaterThanOrEqual(3);
     }
   });
 
