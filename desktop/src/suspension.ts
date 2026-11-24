@@ -1,36 +1,38 @@
 /**
- * Suspension Mode: while the switch is on and the Mac is on a Wi-Fi whose name is not in the allowed
- * list (or a Wi-Fi whose name cannot be read), the app sends nothing to Yungu. No Wi-Fi at all is fine.
+ * Suspension Mode: while the switch is on and the Mac is on a network whose router (MAC) is not in the
+ * allowed list (or a network whose router cannot be read), the app sends nothing to Yungu. No network at
+ * all (Wi-Fi off, not joined, no gateway on the Wi-Fi) is fine.
  */
+import { normaliseMac, type NetworkState } from './network';
 import type { SettingsData } from './settings';
-import type { WifiState } from './wifi';
 
 export type SuspensionReason = 'not-allowed' | 'unknown';
 export interface SuspensionState {
   suspended: boolean;
   reason?: SuspensionReason;
-  /** The Wi-Fi's name, whenever the Mac is on a Wi-Fi whose name could be read. */
-  ssid?: string;
+  /** The router's MAC, whenever the Mac is on a network whose router could be read. */
+  mac?: string;
 }
 
-export function isSuspended(settings: { get(): SettingsData }, wifi: WifiState): { suspended: boolean; reason?: SuspensionReason } {
-  const { suspension, allowedWifi } = settings.get();
-  if (!suspension || wifi.kind === 'none') return { suspended: false };
-  if (wifi.kind === 'unknown') return { suspended: true, reason: 'unknown' };
-  const ssid = wifi.ssid.trim();
-  return allowedWifi.some((n) => n.trim() === ssid) ? { suspended: false } : { suspended: true, reason: 'not-allowed' };
+export function isSuspended(settings: { get(): SettingsData }, network: NetworkState): { suspended: boolean; reason?: SuspensionReason } {
+  const { suspension, allowedNetworks } = settings.get();
+  if (!suspension || network.kind === 'none') return { suspended: false };
+  if (network.kind === 'unknown') return { suspended: true, reason: 'unknown' };
+  const mac = normaliseMac(network.mac);
+  const allowed = mac !== null && allowedNetworks.some((n) => normaliseMac(n.mac) === mac);
+  return allowed ? { suspended: false } : { suspended: true, reason: 'not-allowed' };
 }
 
-function stateFor(settings: { get(): SettingsData }, wifi: WifiState): SuspensionState {
-  const s: SuspensionState = isSuspended(settings, wifi);
-  return wifi.kind === 'wifi' ? { ...s, ssid: wifi.ssid } : s;
+function stateFor(settings: { get(): SettingsData }, network: NetworkState): SuspensionState {
+  const s: SuspensionState = isSuspended(settings, network);
+  return network.kind === 'network' ? { ...s, mac: network.mac } : s;
 }
 
 const same = (a: SuspensionState | null, b: SuspensionState) =>
-  a !== null && a.suspended === b.suspended && a.reason === b.reason && a.ssid === b.ssid;
+  a !== null && a.suspended === b.suspended && a.reason === b.reason && a.mac === b.mac;
 
 export interface MonitorOptions {
-  read: () => Promise<WifiState>;
+  read: () => Promise<NetworkState>;
   settings: { get(): SettingsData };
   onChange: (s: SuspensionState) => void;
   intervalMs?: number;
@@ -39,12 +41,11 @@ export interface MonitorOptions {
 const FAIL_CLOSED: SuspensionState = { suspended: true, reason: 'unknown' };
 
 /**
- * Reads the Wi-Fi only while the switch is on (macOS asks for Location access on the first reading, so
- * someone not using Suspension Mode is never asked): every `intervalMs` (3 s), on `check()` (boot) and
+ * Reads the network only while the switch is on (nothing is run for someone not using Suspension Mode): every `intervalMs` (3 s), on `check()` (boot) and
  * on `recheck()` (waking, unlocking: the last reading is dropped first, as on `drop()` at sleep/lock). `sync()` applies a settings change at once: switching on is suspended ("unknown")
  * until the first fresh reading lands (a reading from before is never reused); switching off stops the
- * polling. `readNow()` is the one reading made with the switch off, for the Allowed Wi-Fi dialog's
- * "Add current Wi-Fi". `onChange` hears the first state and then each change only; readings that come
+ * polling. `readNow()` is the one reading made with the switch off, for the Allowed networks dialog's
+ * "Add current network". `onChange` hears the first state and then each change only; readings that come
  * back out of order, or from before the switch last changed, are dropped.
  */
 export class SuspensionMonitor {
@@ -55,9 +56,9 @@ export class SuspensionMonitor {
   /** Bumped whenever the switch changes: readings started before are dropped. */
   private epoch = 0;
   /** The last reading made while the switch is on, since it was turned on. */
-  private last: WifiState | null = null;
-  /** The name from `readNow()` with the switch off. */
-  private offSsid: string | undefined;
+  private last: NetworkState | null = null;
+  /** The router from `readNow()` with the switch off. */
+  private offMac: string | undefined;
   private current: SuspensionState | null = null;
   private started = 0;
   private applied = 0;
@@ -105,8 +106,8 @@ export class SuspensionMonitor {
   /**
    * The Mac is going to sleep or locking (powerMonitor `suspend` / `lock-screen`): with the switch on,
    * the last reading is dropped, and so are readings already on their way, so the state is suspended
-   * ("unknown") until a fresh reading lands. Nothing can then go out on a Wi-Fi the Mac woke up on before
-   * that Wi-Fi has been read. A no-op with the switch off. The polling carries on.
+   * ("unknown") until a fresh reading lands. Nothing can then go out on a network the Mac woke up on before
+   * that network has been read. A no-op with the switch off. The polling carries on.
    */
   drop(): void {
     this.sync();
@@ -122,7 +123,7 @@ export class SuspensionMonitor {
     await this.check();
   }
 
-  /** One reading whatever the switch (the Allowed Wi-Fi dialog opening). */
+  /** One reading whatever the switch (the Allowed networks dialog opening). */
   async readNow(): Promise<void> {
     this.sync();
     await this.readInto();
@@ -131,21 +132,21 @@ export class SuspensionMonitor {
   private async readInto(): Promise<void> {
     const n = ++this.started;
     const epoch = this.epoch;
-    let wifi: WifiState;
+    let network: NetworkState;
     try {
-      wifi = await this.opts.read();
+      network = await this.opts.read();
     } catch {
-      wifi = { kind: 'unknown' };
+      network = { kind: 'unknown' };
     }
     if (epoch !== this.epoch || n < this.applied) return; // the switch changed meanwhile, or a newer reading is in
     this.applied = n;
-    if (this.enabled) this.last = wifi;
-    else this.offSsid = wifi.kind === 'wifi' ? wifi.ssid : undefined;
+    if (this.enabled) this.last = network;
+    else this.offMac = network.kind === 'network' ? network.mac : undefined;
     this.apply(this.evaluate());
   }
 
   private evaluate(): SuspensionState {
-    if (!this.enabled) return this.offSsid ? { suspended: false, ssid: this.offSsid } : { suspended: false };
+    if (!this.enabled) return this.offMac ? { suspended: false, mac: this.offMac } : { suspended: false };
     return this.last ? stateFor(this.opts.settings, this.last) : FAIL_CLOSED;
   }
 

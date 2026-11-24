@@ -5,8 +5,7 @@ to Yungu. Nothing goes to any other server, and nobody else sees your data.
 
 ## Build it at home (Apple Silicon Mac)
 
-You need Node.js and the Xcode Command Line Tools (the Wi-Fi helper for Suspension Mode is compiled with
-`swiftc`; install them with `xcode-select --install`).
+You need Node.js (and git; `xcode-select --install` gives you git if you don't have it).
 
 ```sh
 git clone <this repo>
@@ -36,7 +35,7 @@ Mac's keychain, and the app signs in by itself after that. **Sign out** (account
 - **Opened before the Wi-Fi connects** (or while Yungu is down): the sign-in page says "Can't reach Yungu
   right now — trying again." and the app keeps trying by itself (every 10 seconds, and when the Mac wakes
   or unlocks). It opens Assignments by itself once it gets through; you don't need to type anything. You
-  can still sign in by hand meanwhile. With Suspension Mode on, it waits until the Wi-Fi is allowed.
+  can still sign in by hand meanwhile. With Suspension Mode on, it waits until the network is allowed.
 - **After you rebuild the app** (`npm run dist:mac`): the build is unsigned, so macOS may ask again whether
   it may use the saved password in your keychain. Choose **Always Allow** (enter your Mac password if
   asked). If you choose Deny, the app asks for your Yungu password once more.
@@ -44,21 +43,23 @@ Mac's keychain, and the app signs in by itself after that. **Sign out** (account
 ## Permissions
 
 - **Camera and microphone**: only when an assignment asks to photograph or record something.
-- **Location**: only when you switch on Suspension Mode or open **Allowed Wi-Fi...** (that dialog reads the
-  current Wi-Fi once). macOS needs it before an app may read the Wi-Fi name. The location is never stored
-  or sent.
+
+That's all: Suspension Mode needs no permission (it never asks for Location).
 
 ## Suspension Mode
 
-For when you don't want the app talking to Yungu (for example, on a Wi-Fi you don't trust).
+For when you don't want the app talking to Yungu (for example, on a network you don't trust).
 
-1. Open the account (avatar) menu and choose **Allowed Wi-Fi...**. Add the Wi-Fi names that are fine
-   (**Add current Wi-Fi** adds the one you're on).
-2. Switch **Suspension Mode** on.
+1. Connect to a network that is fine (school, home). Open the **Settings** gear and choose
+   **Allowed networks...**, type a **Label** for it (say, "School") and press **Add current network**.
+   Do this once on each network you want to allow.
+2. Switch **Suspension Mode** on (also in the gear).
 
-While it is on, on any Wi-Fi not in the list (or one whose name can't be read), nothing is sent to Yungu
-and the window shows the Suspension Mode screen. It lifts by itself on an allowed Wi-Fi or with no Wi-Fi.
-The button on the screen turns the switch off. It is off by default.
+The app recognises a network by its router, not by the Wi-Fi's name, so a network can only be added
+while you're on it. While Suspension Mode is on, on any other network (or one whose router can't be
+read), nothing is sent to Yungu and the window shows the Suspension Mode screen. It lifts by itself on an
+allowed network or with Wi-Fi off. The button on the screen turns the switch off. It is off by default.
+To take a network off the list, press **Remove <label>** in **Allowed networks...**.
 
 ## Where your data lives
 

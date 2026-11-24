@@ -236,7 +236,7 @@ test('the splash stays up through a slow startup sign-in, also for a second laun
 
 test('the splash follows the chosen appearance (slow startup, Dark saved)', async () => {
   mkdirSync(userData, { recursive: true });
-  writeFileSync(path.join(userData, 'settings.json'), JSON.stringify({ suspension: false, allowedWifi: [], appearance: 'dark' }));
+  writeFileSync(path.join(userData, 'settings.json'), JSON.stringify({ suspension: false, allowedNetworks: [], appearance: 'dark' }));
   await launch({ YUNGU_LOCAL_SIGN_IN_DELAY_MS: '4000' });
   const page = await app.firstWindow();
   await expect(page.getByText('Starting…')).toBeVisible({ timeout: 5_000 });

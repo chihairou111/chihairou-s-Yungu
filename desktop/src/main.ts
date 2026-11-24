@@ -3,7 +3,7 @@
  * utilityProcess on a free 127.0.0.1 port, locks it with a per-launch secret cookie, signs in with the
  * saved credentials, then shows the app in one window.
  *
- * Suspension Mode: the main process owns the Wi-Fi monitor and the settings, tells the server to
+ * Suspension Mode: the main process owns the network monitor and the settings, tells the server to
  * suspend or resume its Yungu requests, cancels the window's own outside requests (`setUpSession`) and
  * tells the page through the main window's preload (`window.yunguLocal`).
  */
@@ -46,10 +46,10 @@ import {
   SESSION_MAX_AGE,
   SIGN_IN_NOTICE_COOKIE,
 } from './session-cookie';
-import { Settings } from './settings';
+import { commandPaths, readNetwork, runCommand } from './network';
+import { Settings, type AllowedNetwork } from './settings';
 import { RETRY_INTERVAL_MS, SignInRetry, type RetryOutcome } from './sign-in-retry';
 import { blockedWhileSuspended, SuspensionMonitor, type SuspensionState } from './suspension';
-import { helperPath, readWifi, runHelper } from './wifi';
 import { loadWindowState, MIN_HEIGHT, MIN_WIDTH, saveWindowState, type WindowState } from './window-state';
 
 export const APP_NAME = "chihairou's Yungu (local)";
@@ -625,12 +625,12 @@ async function mediaAccess(types: ReadonlyArray<'video' | 'audio'>): Promise<boo
 /** What the page sees through `window.yunguLocal` (see preload.ts). */
 interface LocalState extends SuspensionState {
   suspension: boolean;
-  allowedWifi: string[];
+  allowedNetworks: AllowedNetwork[];
 }
 
 function localState(): LocalState {
   const s = settings.get();
-  return { suspension: s.suspension, allowedWifi: s.allowedWifi, ...suspension };
+  return { suspension: s.suspension, allowedNetworks: s.allowedNetworks, ...suspension };
 }
 
 function pushState(): void {
@@ -659,14 +659,15 @@ function setUpAppearance(): void {
 }
 
 function setUpSuspension(): void {
-  const bin = helperPath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, env: process.env });
-  monitor = new SuspensionMonitor({ read: () => readWifi(runHelper, bin), settings, onChange: onSuspension });
+  // The system's networksetup / route / arp; stand-ins from YUNGU_NETWORK_COMMANDS only in development.
+  const paths = commandPaths({ packaged: app.isPackaged, env: process.env });
+  monitor = new SuspensionMonitor({ read: () => readNetwork(runCommand, paths), settings, onChange: onSuspension });
   monitor.start();
   // Readings happen only while the switch is on (`check()` reads nothing otherwise). Electron has no
   // network-change event: waking and unlocking read at once, the 3 s poll covers the rest. Going to
   // sleep or locking drops the last reading (suspended until a fresh one), so nothing goes out on the
-  // Wi-Fi the Mac wakes up on before it has been read. Waking also retries a startup sign-in that could
-  // not reach Yungu (the Wi-Fi may be back), once the reading says it may.
+  // network the Mac wakes up on before it has been read. Waking also retries a startup sign-in that could
+  // not reach Yungu (the network may be back), once the reading says it may.
   const awake = () => void monitor.recheck().then(() => retry.now());
   powerMonitor.on('suspend', () => monitor.drop());
   powerMonitor.on('lock-screen', () => monitor.drop());
@@ -693,10 +694,11 @@ function setUpSuspension(): void {
     settings.setSuspension(on);
     changed();
   });
-  // The Allowed Wi-Fi dialog opening: one reading, so "Add current Wi-Fi" knows the name with the switch off.
-  ipcMain.handle('yungu-local:read-wifi', async (e) => {
+  // The Allowed networks dialog opening: one reading, so "Add current network" knows the router with the switch off.
+  ipcMain.handle('yungu-local:read-network', async (e) => {
     fromApp(e);
     await monitor.readNow();
+    return { mac: monitor.state().mac ?? null };
   });
   // The gear's Appearance: the window (and every page's prefers-color-scheme) follows it at once.
   ipcMain.handle('yungu-local:set-appearance', (e, value: unknown) => {
@@ -705,12 +707,15 @@ function setUpSuspension(): void {
     settings.setAppearance(appearance);
     nativeTheme.themeSource = themeSourceFor(appearance);
   });
-  ipcMain.handle('yungu-local:set-allowed-wifi', (e, names: unknown) => {
+  ipcMain.handle('yungu-local:set-allowed-networks', (e, list: unknown) => {
     fromApp(e);
-    if (!Array.isArray(names) || names.length > 200 || !names.every((n) => typeof n === 'string' && n.length <= 200)) {
-      throw new Error('bad value');
-    }
-    settings.setAllowedWifi(names);
+    const ok = (n: unknown): n is AllowedNetwork => {
+      if (!n || typeof n !== 'object' || Array.isArray(n)) return false;
+      const { label, mac } = n as Record<string, unknown>;
+      return typeof label === 'string' && label.length <= 200 && typeof mac === 'string' && mac.length <= 64;
+    };
+    if (!Array.isArray(list) || list.length > 200 || !list.every(ok)) throw new Error('bad value');
+    settings.setAllowedNetworks(list.map(({ label, mac }) => ({ label, mac })));
     changed();
   });
 }

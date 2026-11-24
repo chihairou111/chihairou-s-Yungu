@@ -1,25 +1,38 @@
 /**
- * The app's own settings (Suspension Mode's switch, the allowed Wi-Fi names and the appearance), in
- * `<userData>/settings.json`. A missing, corrupt or odd file reads as the defaults.
+ * The app's own settings (Suspension Mode's switch, its allowed networks and the appearance), in
+ * `<userData>/settings.json`. A missing, corrupt or odd file reads as the defaults. v1's `allowedWifi`
+ * (Wi-Fi names) is dropped on load: networks are now recognised by their router.
  */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { isAppearance, type Appearance } from './appearance';
+import { normaliseMac } from './network';
+
+/** An allowed network: its router's MAC (normalised) and the label the owner gave it. */
+export interface AllowedNetwork {
+  label: string;
+  mac: string;
+}
+
+export const LABEL_MAX = 64;
 
 export interface SettingsData {
   suspension: boolean;
-  allowedWifi: string[];
+  allowedNetworks: AllowedNetwork[];
   /** The gear's Appearance choice; `auto` follows the system. */
   appearance: Appearance;
 }
 
-/** Trimmed, without empties or repeats (names compare exactly: case counts). */
-export function cleanNames(names: unknown[]): string[] {
-  const out: string[] = [];
-  for (const n of names) {
-    if (typeof n !== 'string') continue;
-    const t = n.trim();
-    if (t && !out.includes(t)) out.push(t);
+/** Labels trimmed (and capped); MACs normalised; entries without a label or a valid MAC, and repeated routers, dropped. */
+export function cleanNetworks(list: unknown[]): AllowedNetwork[] {
+  const out: AllowedNetwork[] = [];
+  for (const n of list) {
+    if (!n || typeof n !== 'object') continue;
+    const { label, mac } = n as Record<string, unknown>;
+    if (typeof label !== 'string' || typeof mac !== 'string') continue;
+    const l = label.trim().slice(0, LABEL_MAX);
+    const m = normaliseMac(mac);
+    if (l && m && !out.some((x) => x.mac === m)) out.push({ label: l, mac: m });
   }
   return out;
 }
@@ -38,16 +51,20 @@ export class Settings {
       const r = raw as Record<string, unknown>;
       return {
         suspension: r.suspension === true,
-        allowedWifi: Array.isArray(r.allowedWifi) ? cleanNames(r.allowedWifi) : [],
+        allowedNetworks: Array.isArray(r.allowedNetworks) ? cleanNetworks(r.allowedNetworks) : [],
         appearance: isAppearance(r.appearance) ? r.appearance : 'auto',
       };
     } catch {
-      return { suspension: false, allowedWifi: [], appearance: 'auto' };
+      return { suspension: false, allowedNetworks: [], appearance: 'auto' };
     }
   }
 
   get(): SettingsData {
-    return { suspension: this.data.suspension, allowedWifi: [...this.data.allowedWifi], appearance: this.data.appearance };
+    return {
+      suspension: this.data.suspension,
+      allowedNetworks: this.data.allowedNetworks.map((n) => ({ ...n })),
+      appearance: this.data.appearance,
+    };
   }
 
   setSuspension(on: boolean): void {
@@ -55,8 +72,8 @@ export class Settings {
     this.save();
   }
 
-  setAllowedWifi(names: string[]): void {
-    this.data = { ...this.data, allowedWifi: cleanNames(names) };
+  setAllowedNetworks(list: AllowedNetwork[]): void {
+    this.data = { ...this.data, allowedNetworks: cleanNetworks(list) };
     this.save();
   }
 

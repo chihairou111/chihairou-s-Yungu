@@ -75,6 +75,26 @@ describe('useAppearance', () => {
     expect(local).toHaveBeenCalledWith('dark');
   });
 
+  it("handles the local app's refusal (no unhandled rejection) and still applies the choice", () => {
+    stubSystemScheme('light');
+    const refused = Promise.reject(new Error('not allowed'));
+    const handled = vi.spyOn(refused, 'then'); // a .catch() goes through .then()
+    const asked: Appearance[] = [];
+    // A plain function: a vi.fn() would itself call .then() on the result to record it.
+    const local = (a: Appearance) => (asked.push(a), refused);
+    (window as unknown as { yunguLocal: unknown }).yunguLocal = { setAppearance: local };
+    render(
+      <ThemeRegistry appearance="auto">
+        <Probe />
+      </ThemeRegistry>,
+    );
+    act(() => choose('dark'));
+    expect(asked).toEqual(['dark']);
+    expect(attr()).toBe('dark');
+    expect(handled).toHaveBeenCalled();
+    refused.catch(() => undefined); // in case it was not
+  });
+
   it('works without the local app', () => {
     stubSystemScheme('light');
     render(

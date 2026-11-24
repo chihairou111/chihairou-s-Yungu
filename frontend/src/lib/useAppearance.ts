@@ -8,7 +8,7 @@ export const ServerAppearanceContext = createContext<Appearance>('auto');
 
 /** The local (Electron) app's bridge, when the page runs inside it; it follows the choice natively. */
 interface LocalBridge {
-  setAppearance?: (appearance: Appearance) => void;
+  setAppearance?: (appearance: Appearance) => Promise<void>;
 }
 
 /**
@@ -22,7 +22,9 @@ export function useAppearance(): { appearance: Appearance; setAppearance: (appea
     (appearance: Appearance) => {
       document.cookie = appearanceCookie(appearance);
       setMode(modeForAppearance(appearance));
-      (window as unknown as { yunguLocal?: LocalBridge }).yunguLocal?.setAppearance?.(appearance);
+      // The window following the choice is a nicety: a refusal from the shell changes nothing here.
+      const local = (window as unknown as { yunguLocal?: LocalBridge }).yunguLocal;
+      if (local?.setAppearance) void Promise.resolve(local.setAppearance(appearance)).catch(() => undefined);
     },
     [setMode],
   );

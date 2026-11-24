@@ -1,5 +1,5 @@
 'use client';
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import AppBar from '@mui/material/AppBar';
 import Avatar from '@mui/material/Avatar';
@@ -15,7 +15,7 @@ import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
 import Logout from '@mui/icons-material/Logout';
 import WifiRounded from '@mui/icons-material/WifiRounded';
-import AllowedWifiDialog from './local/AllowedWifiDialog';
+import AllowedNetworksDialog from './local/AllowedNetworksDialog';
 import { localApi, useLocalState } from './local/local-api';
 import { LocalSuspension } from './local/SuspensionScreen';
 import { sectionFor } from './nav-items';
@@ -91,7 +91,9 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
   const title = sectionFor(pathname)?.label ?? 'Yungu';
   // The desktop shell's Suspension Mode; null on the web, where none of it shows.
   const local = useLocalState();
-  const [wifiOpen, setWifiOpen] = useState(false);
+  const [networksOpen, setNetworksOpen] = useState(false);
+  // Focus comes back here when the Allowed networks dialog closes (the menu item that opened it is gone).
+  const gearButton = useRef<HTMLButtonElement>(null);
   const closeMenu = () => setMenuAnchor(null);
 
   async function signOut() {
@@ -127,7 +129,7 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
           </Typography>
           <NotificationsMenu />
           <RefreshButton />
-          <GearMenu>
+          <GearMenu buttonRef={gearButton}>
             {/* Separate elements, not a Fragment: MUI's Menu does not look inside Fragments. */}
             {local && <Divider />}
             {local && (
@@ -154,9 +156,9 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
             {local && (
               <AllowedNetworksItem
                 onOpen={() => {
-                  setWifiOpen(true);
-                  // The shell reads the Wi-Fi only while the switch is on; one reading for "Add current Wi-Fi".
-                  void localApi()?.readWifi().catch(() => undefined);
+                  setNetworksOpen(true);
+                  // The shell reads the network only while the switch is on; one reading for "Add current network".
+                  void localApi()?.readNetwork().catch(() => undefined);
                 }}
               />
             )}
@@ -241,12 +243,13 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
       </Box>
       {panel}
       {local && (
-        <AllowedWifiDialog
-          open={wifiOpen}
-          allowedWifi={local.allowedWifi}
-          ssid={local.ssid}
-          onChange={(names) => void localApi()?.setAllowedWifi(names).catch(() => undefined)}
-          onClose={() => setWifiOpen(false)}
+        <AllowedNetworksDialog
+          open={networksOpen}
+          allowedNetworks={local.allowedNetworks}
+          mac={local.mac}
+          onChange={(list) => void localApi()?.setAllowedNetworks(list).catch(() => undefined)}
+          onClose={() => setNetworksOpen(false)}
+          onExited={() => gearButton.current?.focus()}
         />
       )}
       <LocalSuspension />

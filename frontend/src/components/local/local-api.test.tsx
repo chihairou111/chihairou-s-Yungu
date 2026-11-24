@@ -17,11 +17,11 @@ describe('useLocalState', () => {
   });
 
   it("follows the shell's state", async () => {
-    const local = installFakeLocal({ suspension: true, allowedWifi: ['School'] });
+    const local = installFakeLocal({ suspension: true, allowedNetworks: [{ label: 'School', mac: '80:05:88:d0:83:e2' }] });
     render(<Probe />);
-    expect(await screen.findByText(/"allowedWifi":\["School"\]/)).toBeInTheDocument();
-    local.emit({ suspended: true, reason: 'not-allowed', ssid: 'Cafe' });
+    expect(await screen.findByText(/"allowedNetworks":\[\{"label":"School","mac":"80:05:88:d0:83:e2"\}\]/)).toBeInTheDocument();
+    local.emit({ suspended: true, reason: 'not-allowed', mac: 'cc:cc:cc:00:00:01' });
     expect(screen.getByTestId('state')).toHaveTextContent('"suspended":true');
-    expect(screen.getByTestId('state')).toHaveTextContent('"ssid":"Cafe"');
+    expect(screen.getByTestId('state')).toHaveTextContent('"mac":"cc:cc:cc:00:00:01"');
   });
 });

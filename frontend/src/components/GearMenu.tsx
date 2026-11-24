@@ -1,5 +1,5 @@
 'use client';
-import { createContext, useContext, useId, useState, type ReactNode } from 'react';
+import { createContext, useContext, useId, useState, type ReactNode, type Ref } from 'react';
 import IconButton from '@mui/material/IconButton';
 import Menu from '@mui/material/Menu';
 import SettingsOutlined from '@mui/icons-material/SettingsOutlined';
@@ -15,8 +15,9 @@ export function useCloseGearMenu(): () => void {
 /**
  * The app bar's Settings gear, left of the account avatar. Its menu holds `Appearance` (a submenu of
  * Automatic, Light, Dark) and then `children`: the local app adds its Suspension items there.
+ * `buttonRef` is the gear button, for focus to come back to after a dialog an item opened.
  */
-export default function GearMenu({ children }: { children?: ReactNode }) {
+export default function GearMenu({ children, buttonRef }: { children?: ReactNode; buttonRef?: Ref<HTMLButtonElement> }) {
   const id = useId();
   const buttonId = `${id}-button`;
   const menuId = `${id}-menu`;
@@ -26,6 +27,7 @@ export default function GearMenu({ children }: { children?: ReactNode }) {
   return (
     <CloseContext.Provider value={close}>
       <IconButton
+        ref={buttonRef}
         id={buttonId}
         aria-label="Settings"
         aria-haspopup="menu"

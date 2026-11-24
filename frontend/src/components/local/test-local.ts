@@ -4,13 +4,13 @@ import type { LocalState, YunguLocal } from './local-api';
 
 /** A stand-in for the desktop shell's `window.yunguLocal`; `emit` plays a state pushed by the main process. */
 export function installFakeLocal(initial: Partial<LocalState> = {}) {
-  let state: LocalState = { suspension: false, allowedWifi: [], suspended: false, ...initial };
+  let state: LocalState = { suspension: false, allowedNetworks: [], suspended: false, ...initial };
   const listeners = new Set<(s: LocalState) => void>();
   const api: YunguLocal = {
     getState: vi.fn(async () => state),
     setSuspension: vi.fn(async () => undefined),
-    setAllowedWifi: vi.fn(async () => undefined),
-    readWifi: vi.fn(async () => undefined),
+    setAllowedNetworks: vi.fn(async () => undefined),
+    readNetwork: vi.fn(async () => ({ mac: state.mac ?? null })),
     setAppearance: vi.fn(async () => undefined),
     onState: vi.fn((cb: (s: LocalState) => void) => {
       listeners.add(cb);

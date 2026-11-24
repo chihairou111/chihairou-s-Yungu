@@ -1,4 +1,4 @@
-import { render, screen, within } from './test-render';
+import { render, screen, waitFor, within } from './test-render';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useTheme } from '@mui/material/styles';
@@ -133,7 +133,8 @@ describe('AppShell in the desktop app (Suspension Mode)', () => {
   });
 
   it('puts Appearance, the Suspension Mode switch and "Allowed networks…" in the gear; the avatar keeps only Sign out', async () => {
-    const local = installFakeLocal({ suspension: false, allowedWifi: ['School'], ssid: 'Home' });
+    const school = { label: 'School', mac: '80:05:88:d0:83:e2' };
+    const local = installFakeLocal({ suspension: false, allowedNetworks: [school], mac: 'aa:bb:cc:dd:ee:01' });
     render(<AppShell userName="Bruce Zheng">content</AppShell>);
 
     await userEvent.click(screen.getByRole('button', { name: 'Account: Bruce Zheng' }));
@@ -153,14 +154,36 @@ describe('AppShell in the desktop app (Suspension Mode)', () => {
     local.emit({ suspension: true });
     expect(within(gear).getByRole('menuitemcheckbox', { name: 'Suspension Mode' })).toHaveAttribute('aria-checked', 'true');
 
-    expect(local.api.readWifi).not.toHaveBeenCalled();
+    expect(local.api.readNetwork).not.toHaveBeenCalled();
     await userEvent.click(within(gear).getByRole('menuitem', { name: 'Allowed networks…' }));
-    // Until the v2 dialog lands, "Allowed networks…" still opens the v1 Allowed Wi-Fi dialog.
-    const dialog = await screen.findByRole('dialog', { name: 'Allowed Wi-Fi' });
+    const dialog = await screen.findByRole('dialog', { name: 'Allowed networks' });
     expect(screen.queryByRole('menu')).not.toBeInTheDocument(); // the gear closed
-    expect(local.api.readWifi).toHaveBeenCalledTimes(1); // so "Add current Wi-Fi" knows the name
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Add current Wi-Fi' }));
-    expect(local.api.setAllowedWifi).toHaveBeenCalledWith(['School', 'Home']);
+    expect(local.api.readNetwork).toHaveBeenCalledTimes(1); // so "Add current network" knows the router
+    expect(within(dialog).getByText('School')).toBeInTheDocument();
+    await userEvent.type(within(dialog).getByLabelText('Label'), 'Home');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add current network' }));
+    expect(local.api.setAllowedNetworks).toHaveBeenCalledWith([school, { label: 'Home', mac: 'aa:bb:cc:dd:ee:01' }]);
+  });
+
+  it('gives focus back to the Settings gear when the Allowed networks dialog closes', async () => {
+    installFakeLocal({ suspension: false, allowedNetworks: [] });
+    render(<AppShell userName="Bruce Zheng">content</AppShell>);
+    const gearButton = screen.getByRole('button', { name: 'Settings' });
+    await userEvent.click(gearButton);
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Allowed networks…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Allowed networks' });
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(gearButton).toHaveFocus());
+
+    // With the keyboard too: Escape closes it and focus lands on the gear, not <body>.
+    gearButton.focus();
+    await userEvent.keyboard('{Enter}');
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Allowed networks…' }));
+    await screen.findByRole('dialog', { name: 'Allowed networks' });
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(gearButton).toHaveFocus());
   });
 
   it("tells the desktop shell the gear's Appearance choice", async () => {

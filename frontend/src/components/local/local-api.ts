@@ -2,25 +2,31 @@
 import { useEffect, useState } from 'react';
 import type { Appearance } from '@/lib/appearance';
 
+/** A network Suspension Mode allows: its router's MAC and the label the owner gave it. */
+export interface AllowedNetwork {
+  label: string;
+  mac: string;
+}
+
 /** Suspension Mode's state, as the desktop shell's main process reports it. */
 export interface LocalState {
   /** The switch. */
   suspension: boolean;
-  allowedWifi: string[];
+  allowedNetworks: AllowedNetwork[];
   /** Requests to Yungu are stopped right now. */
   suspended: boolean;
   reason?: 'not-allowed' | 'unknown' | string;
-  /** The current Wi-Fi's name, when the Mac is on one whose name could be read. */
-  ssid?: string;
+  /** The current network's router (MAC), when the Mac is on one whose router could be read. */
+  mac?: string;
 }
 
 /** `window.yunguLocal`: the desktop shell's preload API (`desktop/src/preload.ts`). Absent on the web. */
 export interface YunguLocal {
   getState(): Promise<LocalState>;
   setSuspension(on: boolean): Promise<void>;
-  setAllowedWifi(names: string[]): Promise<void>;
-  /** One Wi-Fi reading now (the state then carries `ssid`); the shell reads nothing else with the switch off. */
-  readWifi(): Promise<void>;
+  setAllowedNetworks(list: AllowedNetwork[]): Promise<void>;
+  /** One network reading now (the state then carries `mac`); the shell reads nothing else with the switch off. */
+  readNetwork(): Promise<{ mac: string | null }>;
   onState(cb: (s: LocalState) => void): () => void;
   /** The gear's Appearance choice, so the window (background, splash, `prefers-color-scheme`) follows it. */
   setAppearance(appearance: Appearance): Promise<void>;

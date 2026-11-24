@@ -12,21 +12,20 @@ import { localApi, useLocalState } from './local-api';
 
 interface SuspensionScreenProps {
   reason?: string;
-  ssid?: string;
   onTurnOff: () => void;
 }
 
 /** The one line under the title: why nothing is being sent. */
-export function suspensionLine(reason: string | undefined, ssid: string | undefined): string {
-  return reason === 'not-allowed' && ssid ? `Not sending anything to Yungu on "${ssid}".` : "Can't tell which Wi-Fi this is.";
+export function suspensionLine(reason: string | undefined): string {
+  return reason === 'not-allowed' ? 'Not sending anything to Yungu on this network.' : "Can't tell which network this is.";
 }
 
 /**
  * Suspension Mode's full-window screen: the page blurred behind a scrim, a title, why, and one button
  * that turns Suspension Mode off. It takes focus, keeps Tab inside, blocks clicks to the page and is not
- * dismissed by Escape or a click outside: only the button (or an allowed Wi-Fi) ends it.
+ * dismissed by Escape or a click outside: only the button (or an allowed network) ends it.
  */
-export default function SuspensionScreen({ reason, ssid, onTurnOff }: SuspensionScreenProps) {
+export default function SuspensionScreen({ reason, onTurnOff }: SuspensionScreenProps) {
   const titleId = useId();
   const lineId = useId();
   const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
@@ -99,7 +98,7 @@ export default function SuspensionScreen({ reason, ssid, onTurnOff }: Suspension
               Suspension Mode
             </Typography>
             <Typography id={lineId} color="text.secondary" sx={{ mt: 1, mb: 3, textWrap: 'pretty', overflowWrap: 'anywhere' }}>
-              {suspensionLine(reason, ssid)}
+              {suspensionLine(reason)}
             </Typography>
             <Button ref={button} variant="contained" size="large" onClick={onTurnOff}>
               Turn off Suspension Mode
@@ -113,7 +112,7 @@ export default function SuspensionScreen({ reason, ssid, onTurnOff }: Suspension
 
 /**
  * The screen wherever the desktop shell says requests are suspended; nothing on the web. When it goes
- * away (an allowed Wi-Fi, no Wi-Fi, or the switch turned off) the page reloads its data.
+ * away (an allowed network, no network, or the switch turned off) the page reloads its data.
  */
 export function LocalSuspension() {
   const state = useLocalState();
@@ -128,7 +127,6 @@ export function LocalSuspension() {
   return (
     <SuspensionScreen
       reason={state.reason}
-      ssid={state.ssid}
       onTurnOff={() => void localApi()?.setSuspension(false).catch(() => undefined)}
     />
   );

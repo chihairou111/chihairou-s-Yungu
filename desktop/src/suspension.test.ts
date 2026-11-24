@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Settings } from './settings';
 import { blockedWhileSuspended, isSuspended, SuspensionMonitor } from './suspension';
-import type { WifiState } from './wifi';
+import type { NetworkState } from './network';
 
 let dir: string;
 let settings: Settings;
@@ -17,49 +17,61 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const wifi = (ssid: string): WifiState => ({ kind: 'wifi', ssid });
+// Routers by MAC: the owner's school router, a café's, a home one.
+const SCHOOL = '80:05:88:d0:83:e2';
+const CAFE = 'cc:cc:cc:00:00:01';
+const HOME = 'aa:aa:aa:00:00:01';
+const net = (mac: string): NetworkState => ({ kind: 'network', mac });
+const allow = (...macs: string[]) => settings.setAllowedNetworks(macs.map((mac, i) => ({ label: `Net ${i}`, mac })));
 
 describe('isSuspended', () => {
   it('is never suspended with the switch off', () => {
-    for (const w of [wifi('Cafe'), { kind: 'unknown' } as const, { kind: 'none' } as const]) {
+    for (const w of [net(CAFE), { kind: 'unknown' } as const, { kind: 'none' } as const]) {
       expect(isSuspended(settings, w)).toEqual({ suspended: false });
     }
   });
 
-  it('with the switch on: no Wi-Fi and allowed Wi-Fi are fine, anything else is suspended', () => {
+  it('with the switch on: no network and an allowed router are fine, another router or an unknown one is suspended', () => {
     settings.setSuspension(true);
-    settings.setAllowedWifi(['School']);
+    allow(SCHOOL);
     expect(isSuspended(settings, { kind: 'none' })).toEqual({ suspended: false });
-    expect(isSuspended(settings, wifi('School'))).toEqual({ suspended: false });
-    expect(isSuspended(settings, wifi('Cafe'))).toEqual({ suspended: true, reason: 'not-allowed' });
+    expect(isSuspended(settings, net(SCHOOL))).toEqual({ suspended: false });
+    expect(isSuspended(settings, net(CAFE))).toEqual({ suspended: true, reason: 'not-allowed' });
     expect(isSuspended(settings, { kind: 'unknown' })).toEqual({ suspended: true, reason: 'unknown' });
-    expect(isSuspended(settings, wifi('school'))).toEqual({ suspended: true, reason: 'not-allowed' }); // case counts
   });
 
-  it('matches names typed with spaces around them', () => {
+  it('with nothing allowed, every router is suspended', () => {
     settings.setSuspension(true);
-    settings.setAllowedWifi(['  School  ']);
-    expect(isSuspended(settings, wifi('School'))).toEqual({ suspended: false });
-    // An object that slipped past Settings' trimming still matches after trimming.
-    expect(isSuspended({ get: () => ({ suspension: true, allowedWifi: [' School '] }) }, wifi('School'))).toEqual({ suspended: false });
+    expect(isSuspended(settings, net(SCHOOL))).toEqual({ suspended: true, reason: 'not-allowed' });
+    expect(isSuspended(settings, { kind: 'none' })).toEqual({ suspended: false });
+  });
+
+  it('compares MACs however they are written', () => {
+    settings.setSuspension(true);
+    allow('80:5:88:D0:83:E2');
+    expect(isSuspended(settings, net('80:05:88:d0:83:e2'))).toEqual({ suspended: false });
+    // An object that slipped past Settings' normalising still matches after normalising.
+    const raw = { get: () => ({ suspension: true, allowedNetworks: [{ label: 'S', mac: '80:5:88:D0:83:E2' }], appearance: 'auto' as const }) };
+    expect(isSuspended(raw, net('80:05:88:d0:83:e2'))).toEqual({ suspended: false });
+    expect(isSuspended(raw, net('80:5:88:d0:83:e2'))).toEqual({ suspended: false });
   });
 });
 
 describe('SuspensionMonitor', () => {
-  function setUp(reads: Array<WifiState | Promise<WifiState>>) {
+  function setUp(reads: Array<NetworkState | Promise<NetworkState>>) {
     const read = vi.fn(async () => reads.shift() ?? { kind: 'none' as const });
     const onChange = vi.fn();
     const monitor = new SuspensionMonitor({ read, settings, onChange });
     return { read, onChange, monitor, states: () => onChange.mock.calls.map((c) => c[0]) };
   }
 
-  it('never reads the Wi-Fi while the switch is off: not on start, timers, check() or settings edits', async () => {
+  it('never reads the network while the switch is off: not on start, timers, check() or settings edits', async () => {
     vi.useFakeTimers();
     const { read, monitor, states } = setUp([]);
     monitor.start();
     await vi.advanceTimersByTimeAsync(30_000);
     await monitor.check(); // boot, resume, unlock-screen
-    settings.setAllowedWifi(['School']);
+    allow(SCHOOL);
     monitor.sync();
     await vi.advanceTimersByTimeAsync(30_000);
     expect(read).not.toHaveBeenCalled();
@@ -69,25 +81,25 @@ describe('SuspensionMonitor', () => {
 
   it('switching on suspends at once (unknown) until the first reading, then polls every 3 s; off stops the polling', async () => {
     vi.useFakeTimers();
-    settings.setAllowedWifi(['School']);
-    let answer!: (w: WifiState) => void;
-    const { read, monitor, states } = setUp([new Promise((r) => (answer = r)), wifi('School'), wifi('Cafe')]);
+    allow(SCHOOL);
+    let answer!: (w: NetworkState) => void;
+    const { read, monitor, states } = setUp([new Promise((r) => (answer = r)), net(SCHOOL), net(CAFE)]);
     monitor.start();
     settings.setSuspension(true);
     monitor.sync();
     expect(monitor.state()).toEqual({ suspended: true, reason: 'unknown' }); // before any reading lands
     await vi.advanceTimersByTimeAsync(0);
     expect(read).toHaveBeenCalledTimes(1);
-    answer(wifi('School'));
+    answer(net(SCHOOL));
     await vi.advanceTimersByTimeAsync(0);
-    expect(monitor.state()).toEqual({ suspended: false, ssid: 'School' });
+    expect(monitor.state()).toEqual({ suspended: false, mac: SCHOOL });
     await vi.advanceTimersByTimeAsync(3_000);
     await vi.advanceTimersByTimeAsync(3_000);
     expect(states()).toEqual([
       { suspended: false },
       { suspended: true, reason: 'unknown' },
-      { suspended: false, ssid: 'School' },
-      { suspended: true, reason: 'not-allowed', ssid: 'Cafe' },
+      { suspended: false, mac: SCHOOL },
+      { suspended: true, reason: 'not-allowed', mac: CAFE },
     ]);
 
     settings.setSuspension(false);
@@ -100,12 +112,12 @@ describe('SuspensionMonitor', () => {
 
   it('never reuses a reading from before the switch was last turned on', async () => {
     vi.useFakeTimers();
-    settings.setAllowedWifi(['School']);
-    const { monitor } = setUp([wifi('School'), new Promise(() => undefined) as Promise<WifiState>]);
+    allow(SCHOOL);
+    const { monitor } = setUp([net(SCHOOL), new Promise(() => undefined) as Promise<NetworkState>]);
     settings.setSuspension(true);
     monitor.start();
     await vi.advanceTimersByTimeAsync(0);
-    expect(monitor.state()).toEqual({ suspended: false, ssid: 'School' });
+    expect(monitor.state()).toEqual({ suspended: false, mac: SCHOOL });
     settings.setSuspension(false);
     monitor.sync();
     settings.setSuspension(true);
@@ -117,52 +129,52 @@ describe('SuspensionMonitor', () => {
 
   it('a list edit while on re-applies the current reading without another read', async () => {
     settings.setSuspension(true);
-    const { read, monitor } = setUp([wifi('Cafe')]);
+    const { read, monitor } = setUp([net(CAFE)]);
     await monitor.check();
-    expect(monitor.state()).toEqual({ suspended: true, reason: 'not-allowed', ssid: 'Cafe' });
-    settings.setAllowedWifi(['Cafe']);
+    expect(monitor.state()).toEqual({ suspended: true, reason: 'not-allowed', mac: CAFE });
+    allow(CAFE);
     monitor.sync();
-    expect(monitor.state()).toEqual({ suspended: false, ssid: 'Cafe' });
+    expect(monitor.state()).toEqual({ suspended: false, mac: CAFE });
     expect(read).toHaveBeenCalledTimes(1);
   });
 
-  it('readNow() reads exactly once, also with the switch off, and keeps the name for "Add current Wi-Fi"', async () => {
-    const { read, monitor } = setUp([wifi('Home')]);
+  it('readNow() reads exactly once, also with the switch off, and keeps the name for "Add current network"', async () => {
+    const { read, monitor } = setUp([net(HOME)]);
     await monitor.readNow();
     expect(read).toHaveBeenCalledTimes(1);
-    expect(monitor.state()).toEqual({ suspended: false, ssid: 'Home' });
-    settings.setAllowedWifi(['School']);
+    expect(monitor.state()).toEqual({ suspended: false, mac: HOME });
+    allow(SCHOOL);
     monitor.sync();
     await monitor.check();
-    expect(monitor.state()).toEqual({ suspended: false, ssid: 'Home' });
+    expect(monitor.state()).toEqual({ suspended: false, mac: HOME });
     expect(read).toHaveBeenCalledTimes(1);
   });
 
   it('reports only changes', async () => {
     settings.setSuspension(true);
-    const { monitor, states } = setUp([wifi('Cafe'), wifi('Cafe'), wifi('Cafe')]);
+    const { monitor, states } = setUp([net(CAFE), net(CAFE), net(CAFE)]);
     for (let i = 0; i < 3; i++) await monitor.check();
-    expect(states()).toEqual([{ suspended: true, reason: 'unknown' }, { suspended: true, reason: 'not-allowed', ssid: 'Cafe' }]);
+    expect(states()).toEqual([{ suspended: true, reason: 'unknown' }, { suspended: true, reason: 'not-allowed', mac: CAFE }]);
   });
 
   it('ignores a reading that finished after a newer one, or after the switch went off', async () => {
     settings.setSuspension(true);
-    let slow!: (w: WifiState) => void;
-    const reads: Array<Promise<WifiState>> = [new Promise((r) => (slow = r)), Promise.resolve({ kind: 'none' })];
+    let slow!: (w: NetworkState) => void;
+    const reads: Array<Promise<NetworkState>> = [new Promise((r) => (slow = r)), Promise.resolve({ kind: 'none' })];
     const onChange = vi.fn();
     const monitor = new SuspensionMonitor({ read: () => reads.shift()!, settings, onChange });
     const first = monitor.check();
     await monitor.check();
-    slow(wifi('Cafe'));
+    slow(net(CAFE));
     await first;
     expect(monitor.state()).toEqual({ suspended: false });
 
-    let late!: (w: WifiState) => void;
+    let late!: (w: NetworkState) => void;
     reads.push(new Promise((r) => (late = r)));
     const third = monitor.check();
     settings.setSuspension(false);
     monitor.sync();
-    late(wifi('Cafe'));
+    late(net(CAFE));
     await third;
     expect(monitor.state()).toEqual({ suspended: false });
   });
@@ -170,38 +182,38 @@ describe('SuspensionMonitor', () => {
   it('sleep or lock drops the last reading (suspended, unknown) and drops readings already on their way', async () => {
     vi.useFakeTimers();
     settings.setSuspension(true);
-    settings.setAllowedWifi(['School']);
-    let stale!: (w: WifiState) => void;
-    const { monitor } = setUp([wifi('School'), new Promise((r) => (stale = r)), wifi('School')]);
+    allow(SCHOOL);
+    let stale!: (w: NetworkState) => void;
+    const { monitor } = setUp([net(SCHOOL), new Promise((r) => (stale = r)), net(SCHOOL)]);
     monitor.start();
     await vi.advanceTimersByTimeAsync(0);
-    expect(monitor.state()).toEqual({ suspended: false, ssid: 'School' });
+    expect(monitor.state()).toEqual({ suspended: false, mac: SCHOOL });
     await vi.advanceTimersByTimeAsync(3_000); // a poll reading starts and is still on its way
     monitor.drop(); // powerMonitor 'suspend' / 'lock-screen'
     expect(monitor.state()).toEqual({ suspended: true, reason: 'unknown' });
-    stale(wifi('School')); // taken before the sleep: not trusted
+    stale(net(SCHOOL)); // taken before the sleep: not trusted
     await vi.advanceTimersByTimeAsync(0);
     expect(monitor.state()).toEqual({ suspended: true, reason: 'unknown' });
     // The polling carries on and a fresh reading ends it.
     await vi.advanceTimersByTimeAsync(3_000);
-    expect(monitor.state()).toEqual({ suspended: false, ssid: 'School' });
+    expect(monitor.state()).toEqual({ suspended: false, mac: SCHOOL });
     monitor.stop();
   });
 
   it('a wake or unlock (recheck) is suspended (unknown) until its own fresh reading lands', async () => {
     settings.setSuspension(true);
-    settings.setAllowedWifi(['School']);
-    let fresh!: (w: WifiState) => void;
-    const { monitor, states } = setUp([wifi('School'), new Promise((r) => (fresh = r))]);
+    allow(SCHOOL);
+    let fresh!: (w: NetworkState) => void;
+    const { monitor, states } = setUp([net(SCHOOL), new Promise((r) => (fresh = r))]);
     await monitor.check();
-    expect(monitor.state()).toEqual({ suspended: false, ssid: 'School' });
+    expect(monitor.state()).toEqual({ suspended: false, mac: SCHOOL });
     const woke = monitor.recheck(); // powerMonitor 'resume' / 'unlock-screen'
     expect(monitor.state()).toEqual({ suspended: true, reason: 'unknown' }); // before the reading answers
-    fresh(wifi('Cafe'));
+    fresh(net(CAFE));
     await woke;
     expect(states().slice(-2)).toEqual([
       { suspended: true, reason: 'unknown' },
-      { suspended: true, reason: 'not-allowed', ssid: 'Cafe' },
+      { suspended: true, reason: 'not-allowed', mac: CAFE },
     ]);
   });
 

@@ -5,8 +5,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test';
 
-// Suspension Mode end to end, with a stand-in for the Swift Wi-Fi helper: a script that prints whatever
-// the spec last wrote to `wifi.txt` (`YUNGU_WIFI_HELPER`, honoured only while the app is not packaged).
+// Suspension Mode end to end, with stand-ins for macOS's networksetup, route and arp: scripts in a folder
+// (`YUNGU_NETWORK_COMMANDS`, honoured only while the app is not packaged) that print what a Mac would for
+// the network the spec last set with `setNetwork`.
 
 let app: ElectronApplication;
 let dir: string;
@@ -17,25 +18,65 @@ let otherUrl = '';
 
 const shellDir = path.join(__dirname, '..');
 const OSS_URL = 'https://yungu-common.oss-cn-hangzhou.aliyuncs.com/stu/1/blocked-check.pdf';
-const wifiFile = () => path.join(dir, 'wifi.txt');
 const callsFile = () => path.join(dir, 'calls.txt');
-/** How many times the app has run the helper. */
+const fakeDir = () => path.join(dir, 'bin');
+/** How many readings the app has made (each starts with networksetup). */
 const helperCalls = () => {
   try {
-    return readFileSync(callsFile(), 'utf8').split('\n').filter(Boolean).length;
+    return readFileSync(callsFile(), 'utf8').split('\n').filter((l) => l === 'networksetup').length;
   } catch {
     return 0;
   }
 };
-const setWifi = (line: string) => writeFileSync(wifiFile(), `${line}\n`);
+
+// The owner's school router, a café's and a home one.
+const SCHOOL = '80:5:88:d0:83:e2';
+const CAFE = 'cc:cc:cc:0:0:1';
+const HOME = 'aa:aa:aa:0:0:1';
+
+const PORTS = `Hardware Port: Ethernet Adapter (en4)
+Device: en4
+Ethernet Address: 11:22:33:44:55:66
+
+Hardware Port: Wi-Fi
+Device: en0
+Ethernet Address: aa:bb:cc:dd:ee:ff
+`;
+const ROUTE = `   route to: default
+destination: default
+    gateway: 10.0.160.1
+  interface: en0
+`;
+
+/**
+ * What the fake commands answer: a router's MAC (on Wi-Fi with that router), `none` (Wi-Fi not joined:
+ * route says "not in table"), `incomplete` (arp has no MAC) or `garbage` (networksetup fails).
+ */
+function setNetwork(net: string) {
+  const out = (name: string, text: string) => writeFileSync(path.join(fakeDir(), `${name}.out`), text);
+  writeFileSync(path.join(fakeDir(), 'mode'), net === 'garbage' ? 'fail' : net === 'none' ? 'no-route' : 'ok');
+  out('networksetup', PORTS);
+  out('route', ROUTE);
+  out('arp', `? (10.0.160.1) at ${net === 'incomplete' ? '(incomplete)' : net} on en0 ifscope [ethernet]\n`);
+}
+
+function writeFakes() {
+  mkdirSync(fakeDir(), { recursive: true });
+  const script = (name: string, body: string) => {
+    const file = path.join(fakeDir(), name);
+    writeFileSync(file, `#!/bin/sh\necho ${name} >> "${callsFile()}"\nmode=$(cat "${fakeDir()}/mode")\n${body}\ncat "${fakeDir()}/${name}.out"\n`);
+    chmodSync(file, 0o755);
+  };
+  script('networksetup', '[ "$mode" = fail ] && { echo "boom" >&2; exit 1; }');
+  script('route', '[ "$mode" = no-route ] && { echo "route: writing to routing socket: not in table" >&2; exit 1; }');
+  script('arp', ':');
+}
 
 test.beforeEach(async () => {
   dir = mkdtempSync(path.join(tmpdir(), 'yl-susp-e2e-'));
   userData = path.join(dir, 'user-data');
-  const helper = path.join(dir, 'wifi-ssid');
-  writeFileSync(helper, `#!/bin/sh\necho x >> "${callsFile()}"\ncat "${wifiFile()}"\n`);
-  chmodSync(helper, 0o755);
-  setWifi('SSID:Home');
+  writeFakes();
+  setNetwork(HOME);
   // Another server on this machine: a request to it leaves the app (counted when it arrives).
   otherHits = 0;
   other = createServer((_req, res) => {
@@ -53,7 +94,7 @@ async function launch() {
       ...process.env,
       YUNGU_LOCAL_DATA_SOURCE: 'mock',
       YUNGU_LOCAL_USER_DATA: userData,
-      YUNGU_WIFI_HELPER: path.join(dir, 'wifi-ssid'),
+      YUNGU_NETWORK_COMMANDS: fakeDir(),
     },
     timeout: 60_000,
   });
@@ -101,13 +142,15 @@ const pageFetch = (page: Page, url: string) =>
 
 const screenOf = (page: Page) => page.getByRole('alertdialog', { name: 'Suspension Mode' });
 
-test('suspends on a Wi-Fi not allowed, resumes by itself on an allowed one, and the button turns it off', async () => {
+const SCHOOL_SAVED = { label: 'School', mac: '80:05:88:d0:83:e2' };
+
+test('suspends on a router not allowed, resumes by itself on an allowed one, and the button turns it off', async () => {
   const page = await signIn();
   await watchErrors();
   // Before Suspension Mode is on, the page's requests leave as usual.
   expect(await pageFetch(page, otherUrl)).toBe('ok');
   expect(otherHits).toBe(1);
-  // With the switch off the Wi-Fi is never read (no Location prompt for someone not using it).
+  // With the switch off the network is never read.
   await page.waitForTimeout(3_500);
   expect(helperCalls()).toBe(0);
 
@@ -118,36 +161,52 @@ test('suspends on a Wi-Fi not allowed, resumes by itself on an allowed one, and 
   expect(await page.evaluate(() => Object.keys((window as unknown as { yunguLocal: object }).yunguLocal).sort())).toEqual([
     'getState',
     'onState',
-    'readWifi',
-    'setAllowedWifi',
+    'readNetwork',
+    'setAllowedNetworks',
     'setAppearance',
     'setSuspension',
   ]);
   await child.close();
 
-  // Allow "School" through the list editor.
+  // At school: readNetwork() reads once and answers with the router's MAC (normalised).
+  setNetwork(SCHOOL);
+  expect(await page.evaluate(() => (window as unknown as { yunguLocal: { readNetwork(): Promise<unknown> } }).yunguLocal.readNetwork())).toEqual({
+    mac: SCHOOL_SAVED.mac,
+  });
+  expect(helperCalls()).toBe(1);
+
+  // Allow it with "Add current network" and a label.
   let menu = await openMenu(page);
   await menu.getByRole('menuitem', { name: 'Allowed networks…' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Allowed Wi-Fi' });
-  // Opening it reads the Wi-Fi once, so it can offer "Home" (not listed).
-  await expect(dialog.getByRole('button', { name: 'Add current Wi-Fi' })).toBeVisible();
-  expect(helperCalls()).toBe(1);
-  await dialog.getByLabel('Wi-Fi name').fill('School');
-  await dialog.getByRole('button', { name: 'Add', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Allowed networks' });
+  await expect(dialog.getByText('No networks allowed yet.')).toBeVisible();
+  const add = dialog.getByRole('button', { name: 'Add current network' });
+  await expect(add).toBeDisabled(); // a label first
+  await expect.poll(helperCalls).toBe(2); // opening it reads the network once
+  await dialog.getByLabel('Label').fill('School');
+  await add.click();
   await expect(dialog.getByRole('listitem')).toHaveText(['School']);
+  await expect(dialog.getByText('This network is allowed as “School”.')).toBeVisible();
   await dialog.getByRole('button', { name: 'Done' }).click();
   await expect(dialog).toBeHidden();
+  // Focus is back on the gear, not lost on <body>.
+  await expect(page.getByRole('banner').getByRole('button', { name: 'Settings' })).toBeFocused();
 
-  // Switch on while on "Home": the screen at once, focus on its button, and nothing leaves the app.
+  // Switch on at home: the screen at once, focus on its button, and nothing leaves the app.
+  setNetwork(HOME);
   menu = await openMenu(page);
   await menu.getByRole('menuitemcheckbox', { name: 'Suspension Mode' }).click();
   const screen = screenOf(page);
   await expect(screen).toBeVisible({ timeout: 2_000 });
-  await expect(screen).toContainText('Not sending anything to Yungu on "Home".');
+  await expect(screen).toContainText('Not sending anything to Yungu on this network.');
   await expect(page.getByRole('button', { name: 'Turn off Suspension Mode' })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(screen).toBeVisible();
-  expect(JSON.parse(readFileSync(path.join(userData, 'settings.json'), 'utf8'))).toEqual({ suspension: true, allowedWifi: ['School'], appearance: 'auto' });
+  expect(JSON.parse(readFileSync(path.join(userData, 'settings.json'), 'utf8'))).toEqual({
+    suspension: true,
+    allowedNetworks: [SCHOOL_SAVED],
+    appearance: 'auto',
+  });
 
   expect(await pageFetch(page, OSS_URL)).toBe('failed');
   expect(await pageFetch(page, otherUrl)).toBe('failed');
@@ -156,17 +215,17 @@ test('suspends on a Wi-Fi not allowed, resumes by itself on an allowed one, and 
   // The app's own server still answers.
   expect(await page.evaluate(() => fetch('/login').then((r) => r.status))).toBe(200);
 
-  // On "School" the screen goes by itself (the 3 s poll), and requests leave again.
-  setWifi('SSID:School');
+  // Back on the school router the screen goes by itself (the 3 s poll), and requests leave again.
+  setNetwork(SCHOOL);
   await expect(screen).toBeHidden({ timeout: 4_000 });
   expect(await pageFetch(page, otherUrl)).toBe('ok');
   expect(otherHits).toBe(2);
   await expect(page).toHaveURL(/\/assignments$/);
 
-  // On "Cafe" it is back; its button turns Suspension Mode off.
-  setWifi('SSID:Cafe');
+  // On a café's router it is back; its button turns Suspension Mode off.
+  setNetwork(CAFE);
   await expect(screen).toBeVisible({ timeout: 4_000 });
-  await expect(screen).toContainText('Not sending anything to Yungu on "Cafe".');
+  await expect(screen).toContainText('Not sending anything to Yungu on this network.');
   await page.getByRole('button', { name: 'Turn off Suspension Mode' }).click();
   await expect(screen).toBeHidden();
   expect(JSON.parse(readFileSync(path.join(userData, 'settings.json'), 'utf8')).suspension).toBe(false);
@@ -178,8 +237,8 @@ test('suspends on a Wi-Fi not allowed, resumes by itself on an allowed one, and 
   await page.waitForTimeout(4_000);
   expect(helperCalls()).toBe(callsWhenOff);
 
-  // No Wi-Fi at all is never suspended, switch on or not.
-  setWifi('NONE');
+  // No network at all (Wi-Fi not joined) is never suspended, switch on or not.
+  setNetwork('none');
   await menu.getByRole('menuitemcheckbox', { name: 'Suspension Mode' }).click();
   await expect(menu.getByRole('menuitemcheckbox', { name: 'Suspension Mode' })).toHaveAttribute('aria-checked', 'true');
   // (Suspended for the moment until the first reading lands, then not.)
@@ -189,20 +248,29 @@ test('suspends on a Wi-Fi not allowed, resumes by itself on an allowed one, and 
   expect(await pageFetch(page, otherUrl)).toBe('ok');
 });
 
-test("a Wi-Fi whose name can't be read suspends, also over the sign-in page", async () => {
+test("a router that can't be read suspends, also over the sign-in page; v1's Wi-Fi names are dropped", async () => {
   mkdirSync(userData, { recursive: true });
-  writeFileSync(path.join(userData, 'settings.json'), JSON.stringify({ suspension: true, allowedWifi: ['School'] }));
-  setWifi('UNKNOWN');
+  writeFileSync(
+    path.join(userData, 'settings.json'),
+    JSON.stringify({ suspension: true, allowedWifi: ['School'], allowedNetworks: [SCHOOL_SAVED] }),
+  );
+  setNetwork('incomplete');
   await launch();
   const page = await app.firstWindow();
   await expect(page).toHaveURL(/\/login$/, { timeout: 45_000 });
   const screen = screenOf(page);
   await expect(screen).toBeVisible();
-  await expect(screen).toContainText("Can't tell which Wi-Fi this is.");
-  // A broken helper is the same as an unreadable name.
-  setWifi('garbage');
+  await expect(screen).toContainText("Can't tell which network this is.");
+  // A failing command is the same as an unreadable router.
+  setNetwork('garbage');
   await page.waitForTimeout(3_500);
-  await expect(screen).toContainText("Can't tell which Wi-Fi this is.");
-  setWifi('NONE');
+  await expect(screen).toContainText("Can't tell which network this is.");
+  setNetwork('none');
   await expect(screen).toBeHidden({ timeout: 4_000 });
+  // The allowed router still counts.
+  setNetwork(SCHOOL);
+  await page.waitForTimeout(3_500);
+  await expect(screen).toBeHidden();
+  const state = await page.evaluate(() => (window as unknown as { yunguLocal: { getState(): Promise<Record<string, unknown>> } }).yunguLocal.getState());
+  expect(state).toEqual({ suspension: true, allowedNetworks: [SCHOOL_SAVED], suspended: false, mac: SCHOOL_SAVED.mac });
 });

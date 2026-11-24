@@ -18,12 +18,6 @@ mac:
   hardenedRuntime: false
   entitlements: build/entitlements.mac.plist
   category: public.app-category.education
-  # The Wi-Fi helper for Suspension Mode (built by `npm run build:wifi-helper`): resources/bin/wifi-ssid.
-  extraResources:
-    - from: build/bin/wifi-ssid
-      to: bin/wifi-ssid
   extendInfo:
     NSCameraUsageDescription: To photograph your work for an assignment.
     NSMicrophoneUsageDescription: To record audio for an assignment.
-    NSLocationWhenInUseUsageDescription: To check which Wi-Fi you're on for Suspension Mode. Your location is never stored or sent.
-    NSLocationUsageDescription: To check which Wi-Fi you're on for Suspension Mode. Your location is never stored or sent.

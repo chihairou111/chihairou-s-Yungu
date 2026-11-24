@@ -65,21 +65,33 @@ Playwright otherwise emulates a light `prefers-color-scheme`.)
 
 ## Suspension Mode
 
-A switch in the Settings gear's menu (under Appearance), off by default, with a list of allowed Wi-Fi
-names ("Allowed networks…"; for now it opens the Allowed Wi-Fi dialog). While it is on and the Mac is on a Wi-Fi whose name is not in the list, or whose name
-cannot be read, nothing is sent to Yungu: the window shows the Suspension Mode screen (its one button
-turns the switch off), and it goes by itself on an allowed Wi-Fi or off Wi-Fi. No Wi-Fi is never
-suspended. Names compare exactly (trimmed; case counts). Settings: `settings.json` in the user-data folder.
+A switch in the Settings gear's menu (under Appearance), off by default, with a list of allowed networks
+("Allowed networks…"). A network is recognised by its **router**: the hardware (MAC) address of the Wi-Fi
+interface's default gateway, saved with a label the owner types (`allowedNetworks: [{ label, mac }]`). While
+the switch is on and the Mac is on a network whose router is not in the list, or whose router cannot be
+read, nothing is sent to Yungu: the window shows the Suspension Mode screen ("Not sending anything to Yungu
+on this network." / "Can't tell which network this is."; its one button turns the switch off), and it goes
+by itself on an allowed router or off Wi-Fi. No network (Wi-Fi off, not joined, no gateway on the Wi-Fi) is
+never suspended. Settings: `settings.json` in the user-data folder (v1's `allowedWifi` names are dropped on
+load).
 
-- `src/wifi.ts` runs the Wi-Fi helper (2 s limit); `src/suspension.ts` decides and polls; `src/settings.ts`
-  keeps the switch and the list. The Wi-Fi is read **only while the switch is on** (every 3 s, and at
-  start, `powerMonitor` resume / unlock-screen — Electron has no network-change event), plus one reading
-  when the Allowed Wi-Fi dialog opens (for "Add current Wi-Fi"). So nobody is asked for Location access
-  before using Suspension Mode. Switching on is suspended ("Can't tell which Wi-Fi this is.") until the
-  first fresh reading lands; a reading from before is never reused. Likewise going to sleep or locking
-  (`powerMonitor` suspend / lock-screen) and waking or unlocking drop the last reading first, so the app is
-  suspended ("unknown") until the Wi-Fi it woke up on has been read: a re-login cannot send the password
-  on a Wi-Fi that is not allowed.
+- `src/network.ts` reads the router (2 s limit in all), with three system commands run by `execFile` (no
+  shell, absolute paths): `/usr/sbin/networksetup -listallhardwareports` (the `Device:` after
+  `Hardware Port: Wi-Fi`, e.g. `en0`), `/sbin/route -n get -ifscope <device> default` (its `gateway:`;
+  scoped to the Wi-Fi so a proxy in TUN mode, which owns the unscoped default route, does not hide it;
+  "not in table" or no `gateway:` = no network) and `/usr/sbin/arp -n <gateway>`
+  (`? (10.0.160.1) at 80:5:88:d0:83:e2 on en0 ifscope [ethernet]`; the MAC is normalised to
+  `80:05:88:d0:83:e2`). An `(incomplete)` entry, an entry on another interface, an error or a timeout is
+  "unknown" (suspended). None of this needs a permission: there is no Location prompt (macOS hides the
+  Wi-Fi's *name* without Location, which an unsigned app's helper never got asked for).
+- `src/suspension.ts` decides and polls; `src/settings.ts` keeps the switch and the list. The network is
+  read **only while the switch is on** (every 3 s, and at start, `powerMonitor` resume / unlock-screen —
+  Electron has no network-change event), plus one reading when the Allowed networks dialog opens (for "Add
+  current network"; `window.yunguLocal.readNetwork()` answers `{ mac }`). Switching on is suspended
+  ("unknown") until the first fresh reading lands; a reading from before is never reused. Likewise going to
+  sleep or locking (`powerMonitor` suspend / lock-screen) and waking or unlocking drop the last reading
+  first, so the app is suspended ("unknown") until the network it woke up on has been read: a re-login
+  cannot send the password on a network that is not allowed.
 - The server process (`src/server.ts`) installs `globalThis.__yunguFetch`, through which every Yungu and
   OSS request of the server goes: while suspended it refuses new requests and aborts those on their way
   (`src/fetch-gate.ts`). The frontend reports the refusal as "Can't reach Yungu right now. Try again."
@@ -90,17 +102,14 @@ suspended. Names compare exactly (trimmed; case counts). Settings: `settings.jso
 - Started while suspended, the saved sign-in waits until the suspension ends (the sign-in page shows
   the screen meanwhile).
 
-**The Wi-Fi helper** (`native/wifi-ssid.swift`, CoreWLAN + CoreLocation) prints one line: `SSID:<name>`,
-`NONE` or `UNKNOWN`. macOS 14.4+ hides the name without Location access, which the helper asks for on its
-first run. A bare command-line tool may never get that prompt, so `native/wifi-ssid-Info.plist` (bundle id
-`dev.chihairou.yungu.local.wifi-ssid`, name, the same usage strings) is linked into the binary's
-`__TEXT,__info_plist` section. It can only be built on a Mac: `npm run build:wifi-helper`
-(→ `build/bin/wifi-ssid`); `dist:mac`
-runs it first and electron-builder ships it as `resources/bin/wifi-ssid` (`build.extraResources`), with
-`NSLocationWhenInUseUsageDescription` / `NSLocationUsageDescription` in the app's Info.plist
-(`build.mac.extendInfo`). In development, `YUNGU_WIFI_HELPER=<script>` replaces it (ignored once packaged);
-the smoke spec `e2e/suspension.spec.ts` uses a shell script whose output it changes. Without a helper the
-reading is "unknown", which only matters with the switch on.
+**Adding a network:** connect to it, open the gear's **Allowed networks…**, type a label (School, Home…)
+and press **Add current network**. A network cannot be typed in by hand: only the router the Mac is on
+can be added. **Remove <label>** takes one off.
 
-To check on the Mac: the helper builds; turning the switch on (or opening Allowed Wi-Fi) shows a Location
-prompt, and which name it shows (the app's or the helper's); after allowing, readings are `SSID:<name>`.
+**In development**, `YUNGU_NETWORK_COMMANDS=<folder>` replaces the three commands with `<folder>/networksetup`,
+`<folder>/route` and `<folder>/arp` (ignored once packaged); `e2e/suspension.spec.ts` uses shell scripts
+whose output it changes.
+
+To check on the Mac: with the switch on at an allowed network the screen stays away (also with the proxy's
+TUN mode on); on another Wi-Fi it shows "Not sending anything to Yungu on this network."; with Wi-Fi off it
+goes. The three commands by hand: `route -n get -ifscope en0 default`, then `arp -n <gateway>`.

@@ -8,18 +8,21 @@ const { contextBridge, ipcRenderer } = require('electron') as typeof import('ele
 /** What the page sees; the same shape as `LocalState` in main.ts. */
 interface PageLocalState {
   suspension: boolean;
-  allowedWifi: string[];
+  allowedNetworks: { label: string; mac: string }[];
   suspended: boolean;
   reason?: string;
-  ssid?: string;
+  mac?: string;
 }
 
 contextBridge.exposeInMainWorld('yunguLocal', {
   getState: (): Promise<PageLocalState> => ipcRenderer.invoke('yungu-local:get-state'),
   setSuspension: (on: boolean): Promise<void> => ipcRenderer.invoke('yungu-local:set-suspension', on === true),
-  readWifi: (): Promise<void> => ipcRenderer.invoke('yungu-local:read-wifi'),
-  setAllowedWifi: (names: string[]): Promise<void> =>
-    ipcRenderer.invoke('yungu-local:set-allowed-wifi', Array.isArray(names) ? names.map(String) : []),
+  readNetwork: (): Promise<{ mac: string | null }> => ipcRenderer.invoke('yungu-local:read-network'),
+  setAllowedNetworks: (list: { label: string; mac: string }[]): Promise<void> =>
+    ipcRenderer.invoke(
+      'yungu-local:set-allowed-networks',
+      Array.isArray(list) ? list.map((n) => ({ label: String(n?.label ?? ''), mac: String(n?.mac ?? '') })) : [],
+    ),
   setAppearance: (appearance: string): Promise<void> => ipcRenderer.invoke('yungu-local:set-appearance', String(appearance)),
   onState: (cb: (s: PageLocalState) => void): (() => void) => {
     const listener = (_e: unknown, s: PageLocalState) => cb(s);
