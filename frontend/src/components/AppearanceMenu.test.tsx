@@ -108,7 +108,8 @@ describe('AppearanceMenu', () => {
     const { user } = await openGear();
     await user.keyboard('{Enter}');
     const sub = await screen.findByRole('menu', { name: 'Appearance' });
-    expect(popperOf(sub)).toHaveAttribute('data-popper-placement', expect.stringMatching(/^bottom/));
+    // Flush with the parent menu's left edge (and as wide), not a ragged panel over it.
+    expect(popperOf(sub)).toHaveAttribute('data-popper-placement', 'bottom-start');
   });
 
   it('choosing Dark sets it and closes both menus', async () => {

@@ -4,6 +4,7 @@ import type { ColorRoles, ShapeScale, YunguTokens } from './tokens';
 import { darkRoles, lightRoles } from './roles';
 import { MuiAlert } from './alert';
 import { APPEARANCE_ATTRIBUTE } from '@/lib/appearance';
+import { EASE_OUT } from '@/components/detail/motion';
 
 // The app's one style, Rounded: Material 3 (Material You). Tonal roles are the M3 light and dark
 // schemes for the existing blue primary (#1565c0): a faintly blue-tinted surface, cards and containers
@@ -76,13 +77,17 @@ export const lightPalette: SchemePalette = {
 export const darkPalette: SchemePalette = {
   primary: { main: '#aac7ff', light: darkRoles.primaryContainer, dark: darkRoles.onPrimaryContainer, contrastText: '#0a305f' },
   secondary: { main: '#bec6dc', light: darkRoles.secondaryContainer, dark: darkRoles.onSecondaryContainer, contrastText: '#283141' },
-  error: { main: '#ffb4ab', light: '#93000a', dark: '#ffdad6', contrastText: '#690005' },
+  // The error container is a dark wine rather than a saturated slab, so it stays as quiet as light's tint.
+  error: { main: '#ffb4ab', light: '#5c1a1a', dark: '#ffdad6', contrastText: '#690005' },
   warning: { main: '#ffb870', light: '#693c00', dark: '#ffdcbe', contrastText: '#4a2800' },
   success: { main: '#8fd6a0', light: darkRoles.successContainer, dark: darkRoles.onSuccessContainer, contrastText: '#003919' },
   info: { main: '#8acdff', light: '#004c6e', dark: '#c9e6ff', contrastText: '#00344d' },
 };
 
 type Overlays = NonNullable<ColorSystemOptions['overlays']>;
+
+/** Menus and pop-overs: in quickly, out quicker. */
+const MENU_DURATION = { enter: 180, exit: 120 };
 
 const kebab = (key: string) => key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
 const cssVar = (key: string) => `--yungu-${kebab(key)}`;
@@ -199,14 +204,15 @@ const theme = createTheme({
     },
     // Common buttons are full pills.
     MuiButton: {
-      // M3 filled buttons are flat (level 0).
-      defaultProps: { disableElevation: true },
+      // M3 filled buttons are flat (level 0). The 2px outline is the only focus indicator: MUI's focus
+      // ripple pulses forever and doubles it (the press ripple stays).
+      defaultProps: { disableElevation: true, disableFocusRipple: true },
       styleOverrides: {
         root: { borderRadius: shape.full, ...touchTarget },
         outlined: { borderColor: color.outline },
       },
     },
-    MuiIconButton: { styleOverrides: { root: { borderRadius: shape.full, ...touchTarget } } },
+    MuiIconButton: { defaultProps: { disableFocusRipple: true }, styleOverrides: { root: { borderRadius: shape.full, ...touchTarget } } },
     // Assist / filter chip shape.
     MuiChip: { styleOverrides: { root: { borderRadius: shape.small } } },
     // Cards: tonal surface, no shadow.
@@ -218,10 +224,14 @@ const theme = createTheme({
     },
     // Menus: extra-small corner, surface container (one step higher in dark), level 2.
     MuiPopover: {
+      // Quicker than MUI's Grow default, entering on the app's ease-out rather than an ease-in-out.
+      defaultProps: { transitionDuration: MENU_DURATION, slotProps: { transition: { easing: { enter: EASE_OUT } } } },
       styleOverrides: {
         paper: { borderRadius: shape.extraSmall, backgroundColor: tokens.menu.bg, boxShadow: level2 },
       },
     },
+    // Menu passes its own `transitionDuration` ('auto') to its Popover, so it needs the same default.
+    MuiMenu: { defaultProps: { transitionDuration: MENU_DURATION } },
     MuiMenuItem: {
       styleOverrides: {
         root: ({ theme }) => ({
@@ -263,6 +273,7 @@ const theme = createTheme({
     },
     // Small FAB: 12px rounded square in primary container (M3 FAB corner = medium at 40px, large at 56px).
     MuiFab: {
+      defaultProps: { disableFocusRipple: true },
       styleOverrides: {
         root: {
           borderRadius: shape.medium,
@@ -299,6 +310,8 @@ const theme = createTheme({
         '@media (prefers-reduced-motion: reduce)': {
           '.MuiPopover-paper': { transform: 'none !important', transition: 'opacity 120ms ease-out !important' },
           '.MuiTabs-indicator': { transition: 'none' },
+          // No ripple animation at all (a focus pulse would otherwise run forever).
+          '.MuiTouchRipple-root *': { animation: 'none !important' },
         },
       }),
     },
