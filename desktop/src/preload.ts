@@ -1,6 +1,6 @@
 /**
  * The app window's preload (the main window only, never windows its pages open): `window.yunguLocal`,
- * Suspension Mode's small API for the page, and nothing else. Sandboxed: only `electron` is required.
+ * Suspension Mode's small API for the page and the gear's Appearance choice, and nothing else. Sandboxed: only `electron` is required.
  */
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { contextBridge, ipcRenderer } = require('electron') as typeof import('electron');
@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('yunguLocal', {
   readWifi: (): Promise<void> => ipcRenderer.invoke('yungu-local:read-wifi'),
   setAllowedWifi: (names: string[]): Promise<void> =>
     ipcRenderer.invoke('yungu-local:set-allowed-wifi', Array.isArray(names) ? names.map(String) : []),
+  setAppearance: (appearance: string): Promise<void> => ipcRenderer.invoke('yungu-local:set-appearance', String(appearance)),
   onState: (cb: (s: PageLocalState) => void): (() => void) => {
     const listener = (_e: unknown, s: PageLocalState) => cb(s);
     ipcRenderer.on('yungu-local:state', listener);

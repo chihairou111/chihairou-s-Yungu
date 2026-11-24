@@ -16,6 +16,7 @@ import {
   dialog,
   ipcMain,
   Menu,
+  nativeTheme,
   powerMonitor,
   safeStorage,
   screen,
@@ -30,6 +31,7 @@ import {
   type UtilityProcess,
   type WebContents,
 } from 'electron';
+import { parseAppearance, themeSourceFor, windowBackground } from './appearance';
 import { CredentialStore, type Credentials, type StringCrypto } from './credentials';
 import { externalTarget, isAppUrl, redirectTarget } from './navigation';
 import { permissionDecision } from './permissions';
@@ -52,6 +54,9 @@ import { loadWindowState, MIN_HEIGHT, MIN_WIDTH, saveWindowState, type WindowSta
 
 export const APP_NAME = "chihairou's Yungu (local)";
 const SPLASH_DELAY_MS = 1_000;
+/** The frontend's appearance cookie (`frontend/src/lib/appearance.ts`): auto | light | dark, a year. */
+const APPEARANCE_COOKIE = 'yl_appearance';
+const APPEARANCE_MAX_AGE = 60 * 60 * 24 * 365;
 const STARTUP_TIMEOUT_MS = 30_000;
 /** The startup sign-in's own timeouts are the server's; this only stops a silent server hanging the launch. */
 const SIGN_IN_TIMEOUT_MS = 60_000;
@@ -296,6 +301,7 @@ async function boot(): Promise<void> {
 
     const ses = session.defaultSession;
     await ses.cookies.set({ url: origin, name: LOCAL_COOKIE, value: secret, httpOnly: true, sameSite: 'strict', path: '/' });
+    await setAppearanceCookie(ses);
     // With the switch on, a fresh Wi-Fi reading, so the server is suspended (or not) before it first
     // calls Yungu; with it off, nothing is read.
     await monitor.check();
@@ -355,6 +361,21 @@ async function retrySignIn(current: () => boolean): Promise<RetryOutcome> {
   }
   await openApp(w, session.defaultSession, result);
   return 'done';
+}
+
+/**
+ * The frontend's `yl_appearance` cookie, from the saved choice, so the first page is rendered in the
+ * scheme the window already has (the settings are the source of truth; the page writes the same cookie).
+ */
+async function setAppearanceCookie(ses: Session): Promise<void> {
+  await ses.cookies.set({
+    url: origin,
+    name: APPEARANCE_COOKIE,
+    value: settings.get().appearance,
+    sameSite: 'lax',
+    path: '/',
+    expirationDate: Date.now() / 1000 + APPEARANCE_MAX_AGE,
+  });
 }
 
 async function setNotice(ses: Session, value: string): Promise<void> {
@@ -468,6 +489,8 @@ function createWindow({ state, preload }: WindowOptions): BrowserWindow {
     minHeight: MIN_HEIGHT,
     title: APP_NAME,
     show: false,
+    // The app's surface for the scheme in use: no white flash before a page paints.
+    backgroundColor: windowBackground(nativeTheme.shouldUseDarkColors),
     webPreferences: secureWebPreferences(preload),
   });
   if (state.maximized) w.maximize();
@@ -626,8 +649,16 @@ function onSuspension(s: SuspensionState): void {
   pushState();
 }
 
+/** The saved Appearance before the first window opens; the window's background then follows the scheme. */
+function setUpAppearance(): void {
+  nativeTheme.themeSource = themeSourceFor(settings.get().appearance);
+  // Also when the system switches while the choice is Automatic.
+  nativeTheme.on('updated', () => {
+    for (const w of BrowserWindow.getAllWindows()) w.setBackgroundColor(windowBackground(nativeTheme.shouldUseDarkColors));
+  });
+}
+
 function setUpSuspension(): void {
-  settings = new Settings(userDataFile('settings.json'));
   const bin = helperPath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, env: process.env });
   monitor = new SuspensionMonitor({ read: () => readWifi(runHelper, bin), settings, onChange: onSuspension });
   monitor.start();
@@ -666,6 +697,13 @@ function setUpSuspension(): void {
   ipcMain.handle('yungu-local:read-wifi', async (e) => {
     fromApp(e);
     await monitor.readNow();
+  });
+  // The gear's Appearance: the window (and every page's prefers-color-scheme) follows it at once.
+  ipcMain.handle('yungu-local:set-appearance', (e, value: unknown) => {
+    fromApp(e);
+    const appearance = parseAppearance(value);
+    settings.setAppearance(appearance);
+    nativeTheme.themeSource = themeSourceFor(appearance);
   });
   ipcMain.handle('yungu-local:set-allowed-wifi', (e, names: unknown) => {
     fromApp(e);
@@ -722,7 +760,9 @@ if (!app.requestSingleInstanceLock()) {
   });
   void app.whenReady().then(() => {
     store = new CredentialStore(userDataFile('credentials.bin'), keychain);
+    settings = new Settings(userDataFile('settings.json'));
     setUpMenu();
+    setUpAppearance();
     setUpSuspension();
     setUpSession(session.defaultSession);
     void boot();

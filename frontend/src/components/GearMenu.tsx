@@ -1,9 +1,16 @@
 'use client';
-import { useId, useState, type ReactNode } from 'react';
+import { createContext, useContext, useId, useState, type ReactNode } from 'react';
 import IconButton from '@mui/material/IconButton';
 import Menu from '@mui/material/Menu';
 import SettingsOutlined from '@mui/icons-material/SettingsOutlined';
 import AppearanceMenu from './AppearanceMenu';
+
+const CloseContext = createContext<() => void>(() => undefined);
+
+/** Closes the gear menu: for an item in `children` that opens something of its own (a dialog). */
+export function useCloseGearMenu(): () => void {
+  return useContext(CloseContext);
+}
 
 /**
  * The app bar's Settings gear, left of the account avatar. Its menu holds `Appearance` (a submenu of
@@ -17,7 +24,7 @@ export default function GearMenu({ children }: { children?: ReactNode }) {
   const close = () => setAnchor(null);
 
   return (
-    <>
+    <CloseContext.Provider value={close}>
       <IconButton
         id={buttonId}
         aria-label="Settings"
@@ -44,6 +51,6 @@ export default function GearMenu({ children }: { children?: ReactNode }) {
         <AppearanceMenu onClose={close} />
         {children}
       </Menu>
-    </>
+    </CloseContext.Provider>
   );
 }

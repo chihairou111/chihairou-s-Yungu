@@ -79,9 +79,10 @@ async function signIn(): Promise<Page> {
   return page;
 }
 
+/** The gear (Settings) menu: Appearance, then Suspension Mode's switch and Allowed networks…. */
 async function openMenu(page: Page) {
-  await page.getByRole('button', { name: /^Account:/ }).click();
-  return page.getByRole('menu');
+  await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click();
+  return page.getByRole('menu', { name: 'Settings' });
 }
 
 /** What the window's session saw happen to requests that left the app (cancelled ones show as blocked). */
@@ -119,13 +120,14 @@ test('suspends on a Wi-Fi not allowed, resumes by itself on an allowed one, and 
     'onState',
     'readWifi',
     'setAllowedWifi',
+    'setAppearance',
     'setSuspension',
   ]);
   await child.close();
 
   // Allow "School" through the list editor.
   let menu = await openMenu(page);
-  await menu.getByRole('menuitem', { name: 'Allowed Wi-Fi…' }).click();
+  await menu.getByRole('menuitem', { name: 'Allowed networks…' }).click();
   const dialog = page.getByRole('dialog', { name: 'Allowed Wi-Fi' });
   // Opening it reads the Wi-Fi once, so it can offer "Home" (not listed).
   await expect(dialog.getByRole('button', { name: 'Add current Wi-Fi' })).toBeVisible();
@@ -145,7 +147,7 @@ test('suspends on a Wi-Fi not allowed, resumes by itself on an allowed one, and 
   await expect(page.getByRole('button', { name: 'Turn off Suspension Mode' })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(screen).toBeVisible();
-  expect(JSON.parse(readFileSync(path.join(userData, 'settings.json'), 'utf8'))).toEqual({ suspension: true, allowedWifi: ['School'] });
+  expect(JSON.parse(readFileSync(path.join(userData, 'settings.json'), 'utf8'))).toEqual({ suspension: true, allowedWifi: ['School'], appearance: 'auto' });
 
   expect(await pageFetch(page, OSS_URL)).toBe('failed');
   expect(await pageFetch(page, otherUrl)).toBe('failed');
@@ -168,8 +170,8 @@ test('suspends on a Wi-Fi not allowed, resumes by itself on an allowed one, and 
   await page.getByRole('button', { name: 'Turn off Suspension Mode' }).click();
   await expect(screen).toBeHidden();
   expect(JSON.parse(readFileSync(path.join(userData, 'settings.json'), 'utf8')).suspension).toBe(false);
-  // The account menu stayed open under the screen since the switch was clicked; it shows the switch off.
-  menu = page.getByRole('menu');
+  // The gear menu stayed open under the screen since the switch was clicked; it shows the switch off.
+  menu = page.getByRole('menu', { name: 'Settings' });
   await expect(menu.getByRole('menuitemcheckbox', { name: 'Suspension Mode' })).toHaveAttribute('aria-checked', 'false');
   // Off again: the polling stops.
   const callsWhenOff = helperCalls();

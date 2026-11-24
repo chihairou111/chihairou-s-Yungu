@@ -51,10 +51,22 @@ A check on Electron 45.4.1, in a utility process, found:
 So `__yunguFetch` is left unset and the server uses Node's own `fetch`. Proxies and custom
 certificates on the user's network are therefore not picked up from the system.
 
+## Appearance
+
+The gear's Appearance (Automatic, Light, Dark) is saved in `settings.json` (`appearance`: `auto` | `light` |
+`dark`) through `window.yunguLocal.setAppearance` (`yungu-local:set-appearance`, main window's app page
+only, the value checked). The main process sets `nativeTheme.themeSource` (`system` for Automatic), which
+also drives every page's `prefers-color-scheme`: the splash and start-error page (`src/splash.html`) and
+Automatic in the app follow it. The window's `backgroundColor` is the app's surface for the scheme in use
+(`#f9f9ff` / `#111318`, `src/appearance.ts`), set at creation and on every `nativeTheme` update, so no
+white shows before a page paints. Each boot writes the frontend's `yl_appearance` cookie from the setting,
+so the first page is rendered in the same scheme. (The smoke spec launches with `colorScheme: null`:
+Playwright otherwise emulates a light `prefers-color-scheme`.)
+
 ## Suspension Mode
 
-A switch in the account (avatar) menu, off by default, with a list of allowed Wi-Fi names
-("Allowed Wi-Fi…"). While it is on and the Mac is on a Wi-Fi whose name is not in the list, or whose name
+A switch in the Settings gear's menu (under Appearance), off by default, with a list of allowed Wi-Fi
+names ("Allowed networks…"; for now it opens the Allowed Wi-Fi dialog). While it is on and the Mac is on a Wi-Fi whose name is not in the list, or whose name
 cannot be read, nothing is sent to Yungu: the window shows the Suspension Mode screen (its one button
 turns the switch off), and it goes by itself on an allowed Wi-Fi or off Wi-Fi. No Wi-Fi is never
 suspended. Names compare exactly (trimmed; case counts). Settings: `settings.json` in the user-data folder.

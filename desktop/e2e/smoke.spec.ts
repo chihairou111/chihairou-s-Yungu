@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -20,7 +20,8 @@ const envFor = (extra: Record<string, string> = {}) => ({
 });
 
 async function launch(extra?: Record<string, string>) {
-  app = await electron.launch({ args: [shellDir, '--no-sandbox'], env: envFor(extra), timeout: 60_000 });
+  // colorScheme null: Playwright would otherwise emulate a light prefers-color-scheme, hiding nativeTheme's.
+  app = await electron.launch({ args: [shellDir, '--no-sandbox'], env: envFor(extra), timeout: 60_000, colorScheme: null });
 }
 
 test.beforeEach(async ({}, testInfo) => {
@@ -125,6 +126,62 @@ test('opens on the sign-in page, signs in, keeps links outside and the server lo
   expect(app.windows()).toHaveLength(1);
 });
 
+/** The window's theme as the main process has it: nativeTheme's source and the window's background. */
+const windowTheme = () =>
+  app.evaluate(({ BrowserWindow, nativeTheme }) => ({
+    themeSource: nativeTheme.themeSource,
+    background: BrowserWindow.getAllWindows()[0].getBackgroundColor().toLowerCase(),
+  }));
+
+test("choosing Dark in the gear darkens the window, and a relaunch keeps it", async () => {
+  let page = await app.firstWindow();
+  await expect(page).toHaveURL(/\/login$/, { timeout: 45_000 });
+  // Automatic by default: the system's scheme (light here), the light surface behind the page.
+  expect(await windowTheme()).toEqual({ themeSource: 'system', background: '#f9f9ff' });
+  // Tried again until it takes: a click before the page has hydrated does nothing.
+  await expect(async () => {
+    await page.getByLabel('Student ID').fill('100000001');
+    await page.getByLabel('Password').fill('x');
+    await page.getByRole('button', { name: 'Sign in' }).click();
+    await expect(page).toHaveURL(/\/assignments$/, { timeout: 5_000 });
+  }).toPass({ timeout: 30_000 });
+
+  await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click();
+  const gear = page.getByRole('menu', { name: 'Settings' });
+  // The gear holds Appearance and Suspension Mode; the avatar menu only Sign out.
+  await expect(gear.getByRole('menuitem')).toHaveText(['Appearance', 'Allowed networks…']);
+  await expect(gear.getByRole('menuitemcheckbox', { name: 'Suspension Mode' })).toBeVisible();
+  await gear.getByRole('menuitem', { name: 'Appearance' }).click();
+  await page.getByRole('menuitemradio', { name: 'Dark' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-appearance', 'dark');
+  await expect.poll(windowTheme).toEqual({ themeSource: 'dark', background: '#111318' });
+  expect(await page.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches)).toBe(true);
+  expect(JSON.parse(readFileSync(path.join(userData, 'settings.json'), 'utf8')).appearance).toBe('dark');
+
+  await page.getByRole('button', { name: /^Account: / }).click();
+  await expect(page.getByRole('menu').getByRole('menuitem')).toHaveText(['Sign out']);
+  await page.keyboard.press('Escape');
+
+  // Automatic follows the system again (nativeTheme back on 'system').
+  await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('menu', { name: 'Settings' }).getByRole('menuitem', { name: 'Appearance' }).click();
+  await page.getByRole('menuitemradio', { name: 'Automatic' }).click();
+  await expect.poll(windowTheme).toEqual({ themeSource: 'system', background: '#f9f9ff' });
+  await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('menu', { name: 'Settings' }).getByRole('menuitem', { name: 'Appearance' }).click();
+  await page.getByRole('menuitemradio', { name: 'Dark' }).click();
+  await expect.poll(windowTheme).toEqual({ themeSource: 'dark', background: '#111318' });
+
+  // Relaunched: dark from the start, the window and the first page alike.
+  await app.close();
+  await launch();
+  page = await app.firstWindow();
+  expect(await windowTheme()).toEqual({ themeSource: 'dark', background: '#111318' });
+  await expect(page).toHaveURL(/\/login$/, { timeout: 45_000 });
+  await expect(page.locator('html')).toHaveAttribute('data-appearance', 'dark');
+  expect(await page.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches)).toBe(true);
+});
+
 test('a server that stops is reported, and Restart brings the app back', async () => {
   const page = await app.firstWindow();
   await expect(page).toHaveURL(/\/login$/, { timeout: 45_000 });
@@ -175,6 +232,22 @@ test('the splash stays up through a slow startup sign-in, also for a second laun
   expect(await view()).toEqual({ visible: true, url: expect.stringMatching(/splash\.html$/) });
 
   await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:\d+\/login$/, { timeout: 15_000 });
+});
+
+test('the splash follows the chosen appearance (slow startup, Dark saved)', async () => {
+  mkdirSync(userData, { recursive: true });
+  writeFileSync(path.join(userData, 'settings.json'), JSON.stringify({ suspension: false, allowedWifi: [], appearance: 'dark' }));
+  await launch({ YUNGU_LOCAL_SIGN_IN_DELAY_MS: '4000' });
+  const page = await app.firstWindow();
+  await expect(page.getByText('Starting…')).toBeVisible({ timeout: 5_000 });
+  expect(page.url()).toMatch(/splash\.html$/);
+  expect(await windowTheme()).toEqual({ themeSource: 'dark', background: '#111318' });
+  const colours = await page.evaluate(() => {
+    const body = getComputedStyle(document.body);
+    return { bg: body.backgroundColor, fg: body.color, scheme: getComputedStyle(document.documentElement).colorScheme };
+  });
+  expect(colours).toEqual({ bg: 'rgb(17, 19, 24)', fg: 'rgb(226, 226, 233)', scheme: 'dark' });
+  await expect(page).toHaveURL(/\/login$/, { timeout: 15_000 });
 });
 
 test('an unreachable startup sign-in shows the notice and opens Assignments by itself once it gets through', async () => {

@@ -123,33 +123,53 @@ describe('AppShell', () => {
 });
 
 describe('AppShell in the desktop app (Suspension Mode)', () => {
-  it('has no Suspension Mode controls in the web app', async () => {
+  it('has no Suspension Mode controls in the web app: the gear holds only Appearance', async () => {
     render(<AppShell userName="Bruce Zheng">content</AppShell>);
-    await userEvent.click(screen.getByRole('button', { name: 'Account: Bruce Zheng' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    const gear = screen.getByRole('menu');
+    expect(within(gear).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Appearance']);
     expect(screen.queryByText('Suspension Mode')).not.toBeInTheDocument();
-    expect(screen.queryByText('Allowed Wi-Fi…')).not.toBeInTheDocument();
+    expect(screen.queryByText('Allowed networks…')).not.toBeInTheDocument();
   });
 
-  it('adds the Suspension Mode switch and "Allowed Wi-Fi…" to the account menu', async () => {
+  it('puts Appearance, the Suspension Mode switch and "Allowed networks…" in the gear; the avatar keeps only Sign out', async () => {
     const local = installFakeLocal({ suspension: false, allowedWifi: ['School'], ssid: 'Home' });
     render(<AppShell userName="Bruce Zheng">content</AppShell>);
+
     await userEvent.click(screen.getByRole('button', { name: 'Account: Bruce Zheng' }));
-    const menu = screen.getByRole('menu');
-    const toggle = await within(menu).findByRole('menuitemcheckbox', { name: 'Suspension Mode' });
+    const account = screen.getByRole('menu');
+    expect(within(account).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Sign out']);
+    expect(within(account).queryByRole('menuitemcheckbox')).not.toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    const gear = await screen.findByRole('menu');
+    const toggle = await within(gear).findByRole('menuitemcheckbox', { name: 'Suspension Mode' });
     expect(toggle).toHaveAttribute('aria-checked', 'false');
-    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Allowed Wi-Fi…', 'Sign out']);
+    expect(within(gear).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Appearance', 'Allowed networks…']);
 
     await userEvent.click(toggle);
     expect(local.api.setSuspension).toHaveBeenCalledWith(true);
     local.emit({ suspension: true });
-    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Suspension Mode' })).toHaveAttribute('aria-checked', 'true');
+    expect(within(gear).getByRole('menuitemcheckbox', { name: 'Suspension Mode' })).toHaveAttribute('aria-checked', 'true');
 
     expect(local.api.readWifi).not.toHaveBeenCalled();
-    await userEvent.click(within(menu).getByRole('menuitem', { name: 'Allowed Wi-Fi…' }));
+    await userEvent.click(within(gear).getByRole('menuitem', { name: 'Allowed networks…' }));
+    // Until the v2 dialog lands, "Allowed networks…" still opens the v1 Allowed Wi-Fi dialog.
     const dialog = await screen.findByRole('dialog', { name: 'Allowed Wi-Fi' });
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument(); // the gear closed
     expect(local.api.readWifi).toHaveBeenCalledTimes(1); // so "Add current Wi-Fi" knows the name
     await userEvent.click(within(dialog).getByRole('button', { name: 'Add current Wi-Fi' }));
     expect(local.api.setAllowedWifi).toHaveBeenCalledWith(['School', 'Home']);
+  });
+
+  it("tells the desktop shell the gear's Appearance choice", async () => {
+    const local = installFakeLocal();
+    render(<AppShell userName="Bruce Zheng">content</AppShell>);
+    await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Appearance' }));
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Dark' }));
+    expect(local.api.setAppearance).toHaveBeenCalledWith('dark');
   });
 
   it('covers the page with the Suspension Mode screen while suspended', async () => {

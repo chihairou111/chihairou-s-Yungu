@@ -2,9 +2,26 @@ import { render, screen, waitFor, within } from './test-render';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import MenuItem from '@mui/material/MenuItem';
-import GearMenu from './GearMenu';
+import GearMenu, { useCloseGearMenu } from './GearMenu';
+
+function ClosingItem() {
+  const close = useCloseGearMenu();
+  return <MenuItem onClick={close}>Opens a dialog</MenuItem>;
+}
 
 describe('GearMenu', () => {
+  it('lets an item close the whole menu (useCloseGearMenu)', async () => {
+    const user = userEvent.setup();
+    render(
+      <GearMenu>
+        <ClosingItem />
+      </GearMenu>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Opens a dialog' }));
+    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+  });
+
   it('is a Settings button that opens a menu with Appearance first, then what it is given', async () => {
     const user = userEvent.setup();
     render(

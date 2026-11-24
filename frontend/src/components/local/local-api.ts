@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import type { Appearance } from '@/lib/appearance';
 
 /** Suspension Mode's state, as the desktop shell's main process reports it. */
 export interface LocalState {
@@ -21,6 +22,8 @@ export interface YunguLocal {
   /** One Wi-Fi reading now (the state then carries `ssid`); the shell reads nothing else with the switch off. */
   readWifi(): Promise<void>;
   onState(cb: (s: LocalState) => void): () => void;
+  /** The gear's Appearance choice, so the window (background, splash, `prefers-color-scheme`) follows it. */
+  setAppearance(appearance: Appearance): Promise<void>;
 }
 
 export function localApi(): YunguLocal | null {

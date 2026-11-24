@@ -11,6 +11,7 @@ export function installFakeLocal(initial: Partial<LocalState> = {}) {
     setSuspension: vi.fn(async () => undefined),
     setAllowedWifi: vi.fn(async () => undefined),
     readWifi: vi.fn(async () => undefined),
+    setAppearance: vi.fn(async () => undefined),
     onState: vi.fn((cb: (s: LocalState) => void) => {
       listeners.add(cb);
       return () => listeners.delete(cb);

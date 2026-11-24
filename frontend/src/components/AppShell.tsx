@@ -7,7 +7,7 @@ import Box from '@mui/material/Box';
 import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import ListItemIcon from '@mui/material/ListItemIcon';
-import MenuItem from '@mui/material/MenuItem';
+import MenuItem, { type MenuItemProps } from '@mui/material/MenuItem';
 import MenuList from '@mui/material/MenuList';
 import Popover from '@mui/material/Popover';
 import Switch from '@mui/material/Switch';
@@ -33,7 +33,7 @@ import { PHONE_NAV_CLEARANCE } from './NavRail';
 import { BOTTOM_FAB_MEDIA, showsTodayPanel } from './TodayDrawer';
 import NotificationsMenu from './NotificationsMenu';
 import RefreshButton from './RefreshButton';
-import GearMenu from './GearMenu';
+import GearMenu, { useCloseGearMenu } from './GearMenu';
 import { RefreshProvider } from './RefreshContext';
 import { MAIN_ID } from './SkipLink';
 
@@ -44,6 +44,25 @@ export function initials(name: string): string {
   const first = Array.from(parts[0])[0];
   const last = parts.length > 1 ? Array.from(parts[parts.length - 1])[0] : '';
   return (first + last).toUpperCase();
+}
+
+/** The gear's "Allowed networks…": closes the gear, then opens the dialog. */
+function AllowedNetworksItem({ onOpen, ...props }: MenuItemProps & { onOpen: () => void }) {
+  const closeGear = useCloseGearMenu();
+  return (
+    <MenuItem
+      {...props}
+      onClick={() => {
+        closeGear();
+        onOpen();
+      }}
+    >
+      <ListItemIcon>
+        <WifiRounded fontSize="small" />
+      </ListItemIcon>
+      Allowed networks…
+    </MenuItem>
+  );
 }
 
 interface AppShellProps {
@@ -57,8 +76,9 @@ interface AppShellProps {
 }
 
 /**
- * Material app bar (section title, notifications, Refresh, the Settings gear (Appearance) and the account
- * menu: Sign out, and in the desktop app Suspension Mode's switch and its allowed Wi-Fi) over the page content. A page
+ * Material app bar (section title, notifications, Refresh, the Settings gear and the account menu: Sign out)
+ * over the page content. The gear holds Appearance and, in the desktop app, Suspension Mode's switch and
+ * its allowed networks. A page
  * may extend the bar with a `PageHeader` (tabs, page controls); the bar then gives up its bottom edge
  * so the two read as one header. The Today's classes panel sits beside the content on every page.
  */
@@ -107,7 +127,40 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
           </Typography>
           <NotificationsMenu />
           <RefreshButton />
-          <GearMenu />
+          <GearMenu>
+            {/* Separate elements, not a Fragment: MUI's Menu does not look inside Fragments. */}
+            {local && <Divider />}
+            {local && (
+              <MenuItem
+                role="menuitemcheckbox"
+                aria-checked={local.suspension}
+                onClick={() => void localApi()?.setSuspension(!local.suspension).catch(() => undefined)}
+                sx={{ gap: 1 }}
+              >
+                <Box component="span" sx={{ flex: 1 }}>
+                  Suspension Mode
+                </Box>
+                {/* The menu item is the control; the switch only shows its state. */}
+                <Switch
+                  size="small"
+                  checked={local.suspension}
+                  tabIndex={-1}
+                  aria-hidden
+                  slotProps={{ input: { 'aria-hidden': true, tabIndex: -1 } }}
+                  sx={{ mr: -1, pointerEvents: 'none' }}
+                />
+              </MenuItem>
+            )}
+            {local && (
+              <AllowedNetworksItem
+                onOpen={() => {
+                  setWifiOpen(true);
+                  // The shell reads the Wi-Fi only while the switch is on; one reading for "Add current Wi-Fi".
+                  void localApi()?.readWifi().catch(() => undefined);
+                }}
+              />
+            )}
+          </GearMenu>
           <IconButton
             id="account-button"
             aria-label={`Account: ${userName}`}
@@ -149,43 +202,6 @@ export default function AppShell({ userName, children, panel }: AppShellProps) {
                 if (e.key === 'Tab') closeMenu();
               }}
             >
-              {local && (
-                <MenuItem
-                  role="menuitemcheckbox"
-                  aria-checked={local.suspension}
-                  onClick={() => void localApi()?.setSuspension(!local.suspension).catch(() => undefined)}
-                  sx={{ gap: 1 }}
-                >
-                  <Box component="span" sx={{ flex: 1 }}>
-                    Suspension Mode
-                  </Box>
-                  {/* The menu item is the control; the switch only shows its state. */}
-                  <Switch
-                    size="small"
-                    checked={local.suspension}
-                    tabIndex={-1}
-                    aria-hidden
-                    slotProps={{ input: { 'aria-hidden': true, tabIndex: -1 } }}
-                    sx={{ mr: -1, pointerEvents: 'none' }}
-                  />
-                </MenuItem>
-              )}
-              {local && (
-                <MenuItem
-                  onClick={() => {
-                    closeMenu();
-                    setWifiOpen(true);
-                    // The shell reads the Wi-Fi only while the switch is on; one reading for "Add current Wi-Fi".
-                    void localApi()?.readWifi().catch(() => undefined);
-                  }}
-                >
-                  <ListItemIcon>
-                    <WifiRounded fontSize="small" />
-                  </ListItemIcon>
-                  Allowed Wi-Fi…
-                </MenuItem>
-              )}
-              {local && <Divider />}
               <MenuItem onClick={signOut} disabled={signingOut}>
                 <ListItemIcon>
                   <Logout fontSize="small" />

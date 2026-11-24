@@ -5,8 +5,12 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
 <title>chihairou's Yungu (local)</title>
 <style>
-  :root { color-scheme: light dark; --bg: #f7f7f5; --fg: #1d1d1b; --muted: #6b6b66; --accent: #1d1d1b; --accent-fg: #fff; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #1b1b1a; --fg: #ececea; --muted: #a3a39d; --accent: #ececea; --accent-fg: #1b1b1a; } }
+  /* The app's surface and roles (frontend/src/theme/roles.ts) in both schemes. prefers-color-scheme
+     follows nativeTheme.themeSource, so this page follows the gear's Appearance choice. */
+  :root { color-scheme: light; --bg: #f9f9ff; --fg: #191c20; --muted: #44474e; --accent: #1565c0; --accent-fg: #ffffff; }
+  @media (prefers-color-scheme: dark) {
+    :root { color-scheme: dark; --bg: #111318; --fg: #e2e2e9; --muted: #c4c6d0; --accent: #aac7ff; --accent-fg: #0a305f; }
+  }
   html, body { height: 100%; margin: 0; }
   body { display: grid; place-items: center; background: var(--bg); color: var(--fg);
     font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-user-select: none; user-select: none; }
@@ -19,7 +23,7 @@
   #error:target { display: block; }
   a.button { display: inline-block; margin-top: 20px; padding: 8px 18px; border-radius: 8px;
     background: var(--accent); color: var(--accent-fg); text-decoration: none; font-weight: 500; }
-  a.button:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
+  a.button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 </style>
 </head>
 <body>
