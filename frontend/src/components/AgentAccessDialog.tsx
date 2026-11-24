@@ -529,7 +529,9 @@ function Secret({ text, copyLabel, copiedNote, onNote, buttonRef, tone = 'surfac
           fontSize: { xs: '0.8125rem', sm: '0.875rem' },
           overflowWrap: 'anywhere',
           userSelect: 'all',
-          bgcolor: tone === 'surface' ? theme.yungu.color.surfaceContainer : theme.yungu.color.surfaceContainerLowest,
+          // On the token's container: the dialog's own surface (white in light; in dark a near-black
+          // slab would sit too heavy in the blue container).
+          bgcolor: tone === 'surface' ? theme.yungu.color.surfaceContainer : theme.yungu.dialog.bg,
           color: theme.yungu.color.onSurface,
         })}
       >

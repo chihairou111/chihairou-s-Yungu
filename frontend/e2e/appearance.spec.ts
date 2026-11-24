@@ -130,6 +130,32 @@ async function contrastViolations(page: Page, include?: string) {
 
 type Surface = { name: string; open: (page: Page) => Promise<void>; scope?: string; signedOut?: boolean };
 
+// Agent access with every panel filled, answered in the browser so the shared mock is never changed
+// (agents.spec.ts relies on it being empty): a connected agent, a personal token, a new token's reveal.
+const HOUR = 3_600_000;
+const AGENT_ACCESS = {
+  personal: [{ id: 'tok_e2e', name: 'Laptop', createdAt: Date.now() - 48 * HOUR, lastUsedAt: Date.now() - HOUR }],
+  clients: [{ id: 'cli_e2e', name: 'Claude', connectedAt: Date.now() - 24 * HOUR, lastUsedAt: null }],
+};
+async function fakeAgentAccess(page: Page) {
+  await page.route('**/api/agent/tokens', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({ status: 201, json: { id: 'tok_new', name: 'Phone', token: `ylp_${'x'.repeat(43)}` } })
+      : route.fulfill({ json: AGENT_ACCESS }),
+  );
+}
+
+const AUTHORIZE = `/oauth/authorize?${new URLSearchParams({
+  response_type: 'code',
+  client_id: 'ylc_mock_claude',
+  redirect_uri: 'https://claude.ai/api/mcp/auth_callback',
+  state: 'e2e-state',
+  code_challenge: 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',
+  code_challenge_method: 'S256',
+  scope: 'read',
+  resource: 'https://yungu.chihairou.dev/mcp',
+})}`;
+
 const SURFACES: Surface[] = [
   { name: 'assignments', open: async (p) => { await p.goto('/assignments'); await expect(p.getByRole('article').first()).toBeVisible(); } },
   { name: 'submitted', open: async (p) => { await p.goto('/assignments?tab=submitted'); await expect(p.getByRole('article').first()).toBeVisible(); } },
@@ -191,26 +217,83 @@ const SURFACES: Surface[] = [
       await expect(p.getByRole('menu', { name: 'Appearance' })).toBeVisible();
     },
   },
+  {
+    name: 'todoist',
+    scope: '[role="dialog"]',
+    open: async (p) => {
+      await p.goto('/assignments');
+      await p.getByRole('banner').getByRole('button', { name: /^Todoist/ }).click();
+      await expect(p.getByRole('dialog', { name: 'Todoist' })).toBeVisible();
+    },
+  },
+  {
+    name: 'agent-access',
+    scope: '[role="dialog"]',
+    open: async (p) => {
+      await fakeAgentAccess(p);
+      await p.goto('/assignments');
+      await p.getByRole('button', { name: /^Account: / }).click();
+      await p.getByRole('menuitem', { name: 'Agent access' }).click();
+      const dialog = p.getByRole('dialog', { name: 'Agent access' });
+      await expect(dialog.getByRole('list', { name: 'Connected agents' })).toContainText('Claude');
+      // The nested panels: a new token's reveal and a row's inline confirmation.
+      await dialog.getByLabel('Token name').fill('Phone');
+      await dialog.getByRole('button', { name: 'Create token' }).click();
+      await expect(dialog.getByRole('region', { name: 'New token: Phone' })).toBeVisible();
+      await dialog.getByRole('list', { name: 'Personal tokens' }).getByRole('button', { name: 'Revoke Laptop' }).click();
+      await expect(dialog.getByText('Agents using it stop working at once.')).toBeVisible();
+    },
+  },
+  {
+    name: 'consent',
+    open: async (p) => { await p.goto(AUTHORIZE); await expect(p.getByRole('heading', { name: 'Connect Claude' })).toBeVisible(); },
+  },
+  {
+    name: 'consent-refused',
+    open: async (p) => {
+      await p.goto(AUTHORIZE.replace('ylc_mock_claude', 'ylc_unknown'));
+      await expect(p.getByRole('heading', { name: 'Can’t connect this agent' })).toBeVisible();
+    },
+  },
   { name: 'login', signedOut: true, open: async (p) => { await p.goto('/login'); await expect(p.getByLabel('Student ID')).toBeVisible(); } },
 ];
 
+// Signed in once per worker; every signed-in surface starts from that session.
+const signedIn = test.extend<object, { session: string }>({
+  session: [
+    async ({ browser }, provide, workerInfo) => {
+      const file = path.join(workerInfo.project.outputDir, `.session-${workerInfo.workerIndex}.json`);
+      const page = await browser.newPage({ baseURL: workerInfo.project.use.baseURL });
+      await signIn(page);
+      await page.context().storageState({ path: file });
+      await page.context().close();
+      await provide(file);
+    },
+    { scope: 'worker' },
+  ],
+  storageState: ({ session }, provide) => provide(session),
+});
+
 for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
   test.describe(`every surface at ${viewport.width}×${viewport.height}`, () => {
-    test.use({ viewport });
-
     for (const surface of SURFACES) {
-      test(`${surface.name}: no contrast failure in Dark; photographed in both schemes`, async ({ page, context }) => {
-        if (!surface.signedOut) await signIn(page);
-        for (const scheme of ['light', 'dark'] as const) {
-          await context.addCookies([{ name: 'yl_appearance', value: scheme, url: 'http://127.0.0.1:3100' }]);
-          await surface.open(page);
-          await expect(html(page)).toHaveAttribute('data-appearance', scheme);
-          const violations = await contrastViolations(page, surface.scope);
-          await page.screenshot({ path: `${SHOTS}/${surface.name}-${scheme}-${viewport.width}.png` });
-          if (scheme === 'dark') expect(violations).toEqual([]);
-          await page.keyboard.press('Escape');
-        }
-      });
+      (surface.signedOut ? test : signedIn)(
+        `${surface.name}: no contrast failure in Dark; photographed in both schemes`,
+        async ({ browser, baseURL, storageState }) => {
+          // A fresh context per scheme: nothing (a route, an open dialog) carries over.
+          for (const scheme of ['light', 'dark'] as const) {
+            const context = await browser.newContext({ baseURL, viewport, storageState: surface.signedOut ? undefined : storageState });
+            await context.addCookies([{ name: 'yl_appearance', value: scheme, url: baseURL! }]);
+            const page = await context.newPage();
+            await surface.open(page);
+            await expect(html(page)).toHaveAttribute('data-appearance', scheme);
+            const violations = await contrastViolations(page, surface.scope);
+            await page.screenshot({ path: `${SHOTS}/${surface.name}-${scheme}-${viewport.width}.png` });
+            await context.close();
+            if (scheme === 'dark') expect(violations).toEqual([]);
+          }
+        },
+      );
     }
   });
 }
